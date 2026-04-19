@@ -1,0 +1,17 @@
+# AI сервисы (11 записей)
+# Способ обхода: VLESS прокси
+# geosite: openai
+
+geosite:openai
+openai.com
+chatgpt.com
+oaiusercontent.com
+oaistatic.com
+anthropic.com
+claude.ai
+perplexity.ai
+midjourney.com
+huggingface.co
+stability.ai
+deepmind.com
+replicate.com

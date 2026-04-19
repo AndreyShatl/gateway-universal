@@ -1,0 +1,55 @@
+# Игровые сервисы (31 запись)
+# Способ обхода: VLESS прокси
+# geosites: steam, epicgames
+
+# Steam / Valve
+geosite:steam
+steampowered.com
+steamcommunity.com
+steamstatic.com
+steamcontent.com
+steam-chat.com
+valvesoftware.com
+
+# Epic Games
+geosite:epicgames
+epicgames.com
+epicgames.dev
+unrealengine.com
+fortnite.com
+easyanticheat.net
+
+# EA
+ea.com
+origin.com
+
+# Riot Games
+riot.games
+riotgames.com
+leagueoflegends.com
+valorant.com
+playvalorant.com
+
+# Blizzard / Activision
+blizzard.com
+blizzard.net
+battle.net
+activision.com
+callofduty.com
+
+# Other
+ubisoft.com
+ubi.com
+rockstargames.com
+take2games.com
+minecraft.net
+mojang.com
+
+# Консоли
+xbox.com
+xboxlive.com
+playstation.com
+playstation.net
+sonyentertainmentnetwork.com
+nintendo.com
+nintendo.net

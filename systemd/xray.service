@@ -1,0 +1,24 @@
+[Unit]
+Description=Xray Service (VLESS + Reality, native)
+Documentation=https://github.com/XTLS/Xray-core
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Нужны NET_ADMIN + NET_BIND_SERVICE для tproxy/sockopt
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RESOURCE
+NoNewPrivileges=false
+ExecStart=__XRAY_DIR__/xray run -config __XRAY_DIR__/config.json
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+# Неагрессивный sandbox — tproxy требует root+NET_ADMIN
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

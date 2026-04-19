@@ -1,0 +1,18 @@
+# Telegram (14 записей)
+# Способ обхода: VLESS прокси (блокировка по IP)
+# geosite: telegram
+
+geosite:telegram
+telegram.org
+t.me
+telegram.me
+web.telegram.org
+desktop.telegram.org
+core.telegram.org
+updates.telegram.org
+instantview.telegram.org
+telegra.ph
+telesco.pe
+cdn-telegram.org
+stel.com
+contest.com

@@ -1,0 +1,36 @@
+# Стриминговые сервисы (20 записей)
+# Способ обхода: VLESS прокси
+# geosites: netflix, spotify, twitch
+
+# Netflix
+geosite:netflix
+netflix.com
+nflxvideo.net
+nflximg.net
+nflximg.com
+nflxext.com
+
+# Spotify
+geosite:spotify
+spotify.com
+spotifycdn.com
+scdn.co
+
+# Другие музыкальные
+soundcloud.com
+sndcdn.com
+deezer.com
+
+# Disney / HBO / Hulu
+disney.com
+disneyplus.com
+hbo.com
+hbomax.com
+hulu.com
+
+# Twitch
+geosite:twitch
+twitch.tv
+twitchcdn.net
+ttvnw.net
+jtvnw.net

@@ -1,0 +1,11 @@
+# Новости и медиа (8 записей)
+# Способ обхода: VLESS прокси
+
+wikipedia.org
+wikimedia.org
+wiktionary.org
+archive.org
+bbc.com
+cnn.com
+nytimes.com
+reuters.com

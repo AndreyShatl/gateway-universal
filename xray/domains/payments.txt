@@ -1,0 +1,7 @@
+# Платёжные системы (4 записи)
+# Способ обхода: VLESS прокси
+
+paypal.com
+paypalobjects.com
+stripe.com
+patreon.com

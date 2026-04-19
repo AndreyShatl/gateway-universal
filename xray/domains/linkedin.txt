@@ -1,0 +1,7 @@
+# LinkedIn (3 записи)
+# Способ обхода: VLESS прокси (заблокирован в РФ с 2016)
+# geosite: linkedin
+
+geosite:linkedin
+linkedin.com
+licdn.com

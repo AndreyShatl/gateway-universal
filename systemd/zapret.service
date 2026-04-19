@@ -1,0 +1,21 @@
+[Unit]
+Description=Zapret DPI bypass (nfqws)
+Documentation=https://github.com/bol-van/zapret
+After=network-online.target netfilter-persistent.service
+Wants=network-online.target
+# Старт ПОСЛЕ iptables, чтобы NFQUEUE правила не попали в сохранённый rules.v4
+PartOf=netfilter-persistent.service
+
+[Service]
+Type=forking
+# Гарантируем чистый старт (на случай если после ребута nfqws как-то остался)
+ExecStartPre=-/usr/bin/killall -q nfqws
+ExecStart=__ZAPRET_CFG__/zapret.sh start
+ExecStop=__ZAPRET_CFG__/zapret.sh stop
+ExecReload=__ZAPRET_CFG__/zapret.sh restart
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

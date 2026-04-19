@@ -1,0 +1,13 @@
+# CDN провайдеры (8 записей)
+# Способ обхода: VLESS прокси
+# geosite: cloudflare
+
+geosite:cloudflare
+cloudflare.com
+cloudflare-dns.com
+workers.dev
+pages.dev
+akamai.net
+akamaized.net
+fastly.net
+one.one.one.one

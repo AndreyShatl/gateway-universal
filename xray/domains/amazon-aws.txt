@@ -1,0 +1,9 @@
+# Amazon / AWS (5 записей)
+# Способ обхода: VLESS прокси
+# geosite: amazon
+
+geosite:amazon
+amazon.com
+amazonaws.com
+cloudfront.net
+primevideo.com

@@ -1,0 +1,14 @@
+# Discord (9 записей)
+# Способ обхода: VLESS прокси для TCP (блокировка по IP)
+#                Zapret для UDP voice (DPI, filter-l7=discord,stun)
+# geosite: discord
+
+geosite:discord
+discord.com
+discordapp.com
+discord.gg
+discordapp.net
+discord.media
+discordcdn.com
+dis.gd
+discord.co

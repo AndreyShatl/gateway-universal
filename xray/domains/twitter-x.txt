@@ -1,0 +1,11 @@
+# Twitter / X (6 записей)
+# Способ обхода: VLESS прокси
+# geosite: twitter
+
+geosite:twitter
+twitter.com
+x.com
+twimg.com
+abs.twimg.com
+pbs.twimg.com
+t.co

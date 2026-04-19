@@ -1,0 +1,7 @@
+# Apple (4 записи)
+# Способ обхода: VLESS прокси
+
+apple.com
+cdn-apple.com
+icloud.com
+mzstatic.com

@@ -1,0 +1,22 @@
+# Локальная конфигурация с секретами — НЕ коммитим
+config.env
+*.env.local
+
+# Бэкапы
+*.bak
+*.bak.*
+*~
+*.swp
+
+# Временное
+/tmp/
+/.DS_Store
+.DS_Store
+
+# Результаты сборки zapret
+/zapret/nfq/nfqws
+/zapret/binaries/
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,203 @@
+{
+  "log": {
+    "loglevel": "info"
+  },
+  "dns": {
+    "servers": [
+      {
+        "address": "8.8.8.8",
+        "domains": [
+          "geosite:google",
+          "geosite:twitter",
+          "geosite:tiktok",
+          "geosite:openai",
+          "geosite:linkedin",
+          "geosite:netflix",
+          "geosite:spotify",
+          "geosite:telegram",
+          "geosite:epicgames",
+          "geosite:reddit",
+          "geosite:cloudflare",
+          "geosite:github",
+          "geosite:discord",
+          "domain:whatsapp.com",
+          "domain:whatsapp.net",
+          "geosite:whatsapp",
+          "geosite:facebook",
+          "geosite:instagram"
+        ]
+      },
+      "localhost"
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "tproxy-in",
+      "port": 12345,
+      "listen": "0.0.0.0",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"],
+        "routeOnly": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "redirect"
+        }
+      }
+    },
+    {
+      "tag": "socks-in",
+      "port": 1080,
+      "listen": "0.0.0.0",
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
+    },
+    {
+      "tag": "http-in",
+      "port": 8080,
+      "listen": "0.0.0.0",
+      "protocol": "http",
+      "settings": {},
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${VPS_ADDR}",
+            "port": ${VPS_PORT_VISION},
+            "users": [
+              {
+                "id": "${VPS_UUID_VISION}",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "${VPS_SERVER_NAME}",
+          "fingerprint": "${VPS_FINGERPRINT}",
+          "publicKey": "${VPS_PUBKEY}",
+          "shortId": "${VPS_SHORT_ID}",
+          "spiderX": "/"
+        }
+      }
+    },
+    {
+      "tag": "proxy-mux",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${VPS_ADDR}",
+            "port": ${VPS_PORT_GRPC},
+            "users": [
+              {
+                "id": "${VPS_UUID_GRPC}",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "${VPS_SERVER_NAME}",
+          "fingerprint": "${VPS_FINGERPRINT}",
+          "publicKey": "${VPS_PUBKEY}",
+          "shortId": "${VPS_SHORT_ID}",
+          "spiderX": "/"
+        },
+        "grpcSettings": {
+          "serviceName": "grpc-meta",
+          "multiMode": true
+        },
+        "sockopt": {
+          "tcpKeepAliveInterval": 15,
+          "tcpNoDelay": true
+        }
+      },
+      "mux": {
+        "enabled": false
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "127.0.0.0/8"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": ["${VPS_ADDR_IP}"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "domain": ["domain:steampowered.com", "domain:steamcommunity.com", "domain:steamstatic.com", "domain:steamcdn-a.akamaihd.net", "domain:steamcontent.com", "domain:steamgames.com", "domain:steamusercontent.com", "domain:valvesoftware.com", "domain:dota2.com", "domain:api.steampowered.com"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:facebook", "geosite:instagram", "domain:instagram.com", "domain:cdninstagram.com", "domain:fbcdn.net", "domain:facebook.com", "domain:facebook.net", "domain:fb.com", "domain:fbsbx.com", "domain:meta.com", "domain:meta.ai", "domain:threads.net", "domain:ig.me", "domain:igcdn.com", "domain:igsonar.com", "domain:messenger.com", "domain:whatsapp.com", "domain:whatsapp.net", "domain:wa.me", "domain:waba.me", "geosite:whatsapp", "domain:whatsapp.biz", "domain:web.whatsapp.com", "domain:pps.whatsapp.net", "domain:mmg.whatsapp.net", "domain:static.whatsapp.net", "domain:media.whatsapp.com", "domain:dit.whatsapp.net", "domain:graph.whatsapp.com", "domain:crashlogs.whatsapp.net", "domain:faq.whatsapp.com"],
+        "outboundTag": "proxy-mux"
+      },
+      {
+        "type": "field",
+        "ip": ["31.13.24.0/21", "31.13.64.0/18", "66.220.144.0/20", "69.63.176.0/20", "69.171.224.0/19", "74.119.76.0/22", "102.132.96.0/20", "129.134.0.0/16", "157.240.0.0/16", "163.70.128.0/17", "179.60.192.0/22", "185.60.216.0/22", "185.89.218.0/23", "204.15.20.0/22"],
+        "outboundTag": "proxy-mux"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:google", "geosite:twitter", "geosite:tiktok", "geosite:openai", "geosite:linkedin", "geosite:netflix", "geosite:spotify", "geosite:telegram", "geosite:epicgames", "geosite:reddit", "geosite:cloudflare", "geosite:github", "geosite:discord", "domain:googleapis.com", "domain:gstatic.com", "domain:google.com", "domain:googleusercontent.com", "domain:twitter.com", "domain:x.com", "domain:twimg.com", "domain:tiktok.com", "domain:tiktokcdn.com", "domain:linkedin.com", "domain:licdn.com", "domain:openai.com", "domain:chatgpt.com", "domain:anthropic.com", "domain:claude.ai", "domain:spotify.com", "domain:scdn.co", "domain:soundcloud.com", "domain:netflix.com", "domain:primevideo.com", "domain:epicgames.com", "domain:unrealengine.com", "domain:ea.com", "domain:origin.com", "domain:riot.games", "domain:riotgames.com", "domain:blizzard.com", "domain:battle.net", "domain:activision.com", "domain:ubisoft.com", "domain:rockstargames.com", "domain:minecraft.net", "domain:mojang.com", "domain:xbox.com", "domain:xboxlive.com", "domain:playstation.com", "domain:playstation.net", "domain:nintendo.com", "domain:reddit.com", "domain:redditmedia.com", "domain:github.com", "domain:githubusercontent.com", "domain:docker.com", "domain:docker.io", "domain:npmjs.com", "domain:pypi.org", "domain:stackoverflow.com", "domain:notion.so", "domain:figma.com", "domain:canva.com", "domain:medium.com", "domain:zoom.us", "domain:grammarly.com", "domain:deepl.com", "domain:proton.me", "domain:signal.org", "domain:viber.com", "domain:pinterest.com", "domain:snapchat.com", "domain:wikipedia.org", "domain:archive.org", "domain:cloudflare.com", "domain:workers.dev", "domain:pages.dev", "domain:perplexity.ai", "domain:midjourney.com", "domain:huggingface.co", "domain:telegram.org", "domain:t.me", "domain:telegram.me", "domain:core.telegram.org", "domain:desktop.telegram.org", "domain:web.telegram.org", "domain:telegra.ph", "domain:discord.com", "domain:discordapp.com", "domain:discord.gg", "domain:discordapp.net", "domain:discord.media", "domain:discordcdn.com", "domain:dis.gd", "domain:discord.co", "domain:cdn-telegram.org", "domain:signal.art", "domain:signal.group", "domain:whispersystems.org", "domain:bytedance.com", "domain:tiktokv.com", "domain:muscdn.com", "domain:youtube.com", "domain:youtu.be", "domain:ytimg.com", "domain:googlevideo.com", "domain:ggpht.com", "domain:youtube-nocookie.com", "domain:gemini.google.com", "domain:oaiusercontent.com", "domain:oaistatic.com", "domain:cloudflare-dns.com", "domain:one.one.one.one", "domain:github.io", "domain:githubassets.com", "domain:protonmail.com", "domain:protonvpn.com", "domain:wikimedia.org", "domain:imgur.com", "domain:giphy.com", "domain:tenor.com", "domain:redd.it"],
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "ip": ["149.154.160.0/20", "91.108.4.0/22", "91.108.8.0/22", "91.108.12.0/22", "91.108.16.0/22", "91.108.20.0/22", "91.108.56.0/22", "95.161.64.0/20"],
+        "outboundTag": "proxy"
+      },
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

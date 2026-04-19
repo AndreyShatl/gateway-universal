@@ -1,0 +1,15 @@
+# Microsoft (10 записей)
+# Способ обхода: VLESS прокси
+
+microsoft.com
+microsoftonline.com
+live.com
+bing.com
+msn.com
+office.com
+office365.com
+windows.net
+azure.com
+azureedge.net
+skype.com
+teams.microsoft.com

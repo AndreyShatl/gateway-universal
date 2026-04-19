@@ -1,0 +1,35 @@
+# =====================================================================
+# gateway-universal — базовые iptables правила (сохраняются на диск
+# через netfilter-persistent). Рендерится install.sh'ом: ${LAN}, ${IFACE}.
+# NFQUEUE правила добавляются zapret.service'ом на старте — их здесь НЕТ,
+# иначе при старте zapret получит дубликаты + "operation not permitted".
+# =====================================================================
+*mangle
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+COMMIT
+
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+# Transparent proxy: редиректим LAN TCP 80/443 на dokodemo-door :12345
+-A PREROUTING -s ${LAN} -p tcp -m multiport --dports 80,443 -j REDIRECT --to-ports 12345
+# NAT наружу
+-A POSTROUTING -s ${LAN} -o ${IFACE} -j MASQUERADE
+COMMIT
+
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A FORWARD -s ${LAN} -j ACCEPT
+-A FORWARD -d ${LAN} -m state --state ESTABLISHED,RELATED -j ACCEPT
+# Блокируем QUIC forward, чтобы клиенты падали на TCP (который идёт через xray/zapret).
+# Исключения для Meta IP добавляются zapret.sh'ом ПЕРЕД этим правилом.
+-A FORWARD -p udp --dport 443 -j DROP
+COMMIT

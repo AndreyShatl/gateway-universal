@@ -1,0 +1,18 @@
+# YouTube / Google (13 записей)
+# Способ обхода: Zapret DPI bypass (полная скорость без прокси)
+#                + VLESS как fallback через geosite:google
+# geosite: google
+
+geosite:google
+google.com
+googleapis.com
+gstatic.com
+googleusercontent.com
+youtube.com
+youtu.be
+ytimg.com
+googlevideo.com
+ggpht.com
+youtube-nocookie.com
+withyoutube.com
+gemini.google.com

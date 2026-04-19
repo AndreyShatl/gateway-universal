@@ -1,0 +1,59 @@
+# Социальные сети и мессенджеры (35+ записей)
+# Способ обхода: VLESS прокси
+# geosite: reddit
+
+# Reddit
+geosite:reddit
+reddit.com
+redditmedia.com
+redditstatic.com
+redd.it
+
+# Pinterest
+pinterest.com
+pinimg.com
+
+# Snapchat
+snapchat.com
+snap.com
+sc-cdn.net
+snapkit.co
+bitmoji.com
+
+# Tumblr
+tumblr.com
+
+# Signal
+signal.org
+signal.art
+signal.group
+whispersystems.org
+
+# Viber
+viber.com
+vb.me
+vbr.im
+
+# Imgur / Giphy / Tenor
+imgur.com
+giphy.com
+tenor.com
+
+# Инструменты
+figma.com
+canva.com
+medium.com
+grammarly.com
+deepl.com
+ko-fi.com
+
+# Zoom
+zoom.us
+zoom.com
+zoomgov.com
+zoominfo.com
+
+# ProtonMail
+proton.me
+protonmail.com
+protonvpn.com

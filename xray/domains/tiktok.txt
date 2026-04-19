@@ -1,0 +1,15 @@
+# TikTok (11 записей)
+# Способ обхода: VLESS прокси
+# geosite: tiktok
+
+geosite:tiktok
+tiktok.com
+tiktokcdn.com
+tiktokv.com
+ttwstatic.com
+musical.ly
+bytedance.com
+byteoversea.com
+ibytedtos.com
+ipstatp.com
+muscdn.com

@@ -1,0 +1,19 @@
+# WhatsApp (15 записей)
+# Способ обхода: VLESS прокси (блокировка по IP)
+# geosite: whatsapp
+
+geosite:whatsapp
+whatsapp.com
+whatsapp.net
+whatsapp.biz
+wa.me
+waba.me
+web.whatsapp.com
+static.whatsapp.net
+pps.whatsapp.net
+mmg.whatsapp.net
+dit.whatsapp.net
+media.whatsapp.com
+graph.whatsapp.com
+crashlogs.whatsapp.net
+faq.whatsapp.com
