@@ -69,15 +69,15 @@ start() {
         --dpi-desync-repeats=6 \
         --dpi-desync-fake-quic=$ZAPRET_DIR/files/fake/quic_initial_www_google_com.bin \
       --new \
-        --filter-udp=19294-19344,50000-50100 --filter-l7=discord,stun \
+        --filter-udp=19000-65535 --filter-l7=discord,stun \
         --dpi-desync=fake \
-        --dpi-desync-repeats=6
+        --dpi-desync-repeats=11
 
     # UDP iptables
     iptables -t mangle -A POSTROUTING -p udp --dport 443 \
         -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:6 \
         -j NFQUEUE --queue-num 201 --queue-bypass
-    iptables -t mangle -A POSTROUTING -p udp -m multiport --dports 19294:19344,50000:50100 \
+    iptables -t mangle -A POSTROUTING -p udp -m multiport --dports 19000:65535 \
         -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:6 \
         -j NFQUEUE --queue-num 201 --queue-bypass
 
