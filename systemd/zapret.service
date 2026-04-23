@@ -8,8 +8,12 @@ PartOf=netfilter-persistent.service
 
 [Service]
 Type=forking
-# Гарантируем чистый старт (на случай если после ребута nfqws как-то остался)
-ExecStartPre=-/usr/bin/killall -q nfqws
+# Гарантируем чистый старт (на случай если после ребута nfqws как-то остался
+# или предыдущий ExecStop не завершил процессы). pkill надёжнее killall —
+# killall входит в пакет psmisc, которого может не быть (минимальный Debian).
+ExecStartPre=-/usr/bin/pkill -x nfqws
+# Чистим NFQUEUE-правила от предыдущего запуска, чтобы они не дублировались
+ExecStartPre=-/usr/sbin/iptables -t mangle -F POSTROUTING
 ExecStart=__ZAPRET_CFG__/zapret.sh start
 ExecStop=__ZAPRET_CFG__/zapret.sh stop
 ExecReload=__ZAPRET_CFG__/zapret.sh restart
