@@ -6,13 +6,25 @@ ZAPRET_DIR=/opt/zapret
 CONFIG_DIR=/opt/zapret-config
 NFQWS=$ZAPRET_DIR/nfq/nfqws
 LAN="__LAN__"
+META_IPS="31.13.24.0/21 31.13.64.0/18 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 179.60.192.0/22 185.60.216.0/22"
+
+# Удаляет все (включая дубликаты) Meta QUIC ACCEPT правила
+# -D удаляет ОДНО правило за вызов, поэтому крутим while.
+cleanup_meta_rules() {
+    for cidr in $META_IPS; do
+        while iptables -t mangle -D PREROUTING -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D FORWARD -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT 2>/dev/null; do :; done
+    done
+}
 
 start() {
     echo "Starting Zapret..."
 
     # === Instagram QUIC bypass: allow UDP/443 to Meta IPs before global DROP ===
-    # Без этого QUIC к Instagram блокируется и падает на TCP, который режет ТСПУ
-    META_IPS="31.13.24.0/21 31.13.64.0/18 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 179.60.192.0/22 185.60.216.0/22"
+    # Без этого QUIC к Instagram блокируется и падает на TCP, который режет ТСПУ.
+    # Сначала вычищаем возможные остатки от предыдущего запуска (если ExecStop упал
+    # или systemctl restart обошёл stop), потом вставляем свежий комплект.
+    cleanup_meta_rules
     for cidr in $META_IPS; do
         iptables -t mangle -I PREROUTING 1 -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT
         iptables -I FORWARD 1 -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT
@@ -89,15 +101,12 @@ start() {
 
 stop() {
     echo "Stopping Zapret..."
-    killall nfqws 2>/dev/null
+    # pkill -x вместо killall (killall в psmisc, не всегда установлен)
+    pkill -x nfqws 2>/dev/null
     iptables -t mangle -F POSTROUTING 2>/dev/null
 
-    # Удалить Meta QUIC ACCEPT правила
-    META_IPS="31.13.24.0/21 31.13.64.0/18 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 179.60.192.0/22 185.60.216.0/22"
-    for cidr in $META_IPS; do
-        iptables -t mangle -D PREROUTING -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT 2>/dev/null
-        iptables -D FORWARD -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT 2>/dev/null
-    done
+    # Удалить все Meta QUIC ACCEPT правила (включая дубли)
+    cleanup_meta_rules
     echo "Zapret stopped."
 }
 
