@@ -43,7 +43,14 @@
       "sniffing": {
         "enabled": true,
         "destOverride": ["http", "tls"],
-        "routeOnly": true
+        "routeOnly": true,
+        "domainsExcluded": [
+          "domain:apple.com",
+          "domain:icloud.com",
+          "domain:mzstatic.com",
+          "domain:cdn-apple.com",
+          "domain:itunes.com"
+        ]
       },
       "streamSettings": {
         "sockopt": {
@@ -62,7 +69,14 @@
       },
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"]
+        "destOverride": ["http", "tls"],
+        "domainsExcluded": [
+          "domain:apple.com",
+          "domain:icloud.com",
+          "domain:mzstatic.com",
+          "domain:cdn-apple.com",
+          "domain:itunes.com"
+        ]
       }
     },
     {
@@ -73,7 +87,14 @@
       "settings": {},
       "sniffing": {
         "enabled": true,
-        "destOverride": ["http", "tls"]
+        "destOverride": ["http", "tls"],
+        "domainsExcluded": [
+          "domain:apple.com",
+          "domain:icloud.com",
+          "domain:mzstatic.com",
+          "domain:cdn-apple.com",
+          "domain:itunes.com"
+        ]
       }
     }
   ],
