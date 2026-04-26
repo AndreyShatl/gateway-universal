@@ -211,7 +211,7 @@ APT_PKGS=(
     gawk sed grep
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
-    APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libcap-dev zlib1g-dev pkg-config)
+    APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)
 fi
 # iptables-persistent без вопросов
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean false" | debconf-set-selections
@@ -322,7 +322,7 @@ if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
             say "Cloning and building bol-van/zapret…"
             rm -rf "$ZAPRET_DIR"
             git clone --depth 1 https://github.com/bol-van/zapret.git "$ZAPRET_DIR"
-            ( cd "$ZAPRET_DIR" && make -s -j"$(nproc)" nfqws )
+            ( cd "$ZAPRET_DIR" && make -C nfq -j"$(nproc)" )
             [[ -x "$ZAPRET_DIR/nfq/nfqws" ]] || die "nfqws build failed"
         else
             die "Prebuilt binaries not supported yet — use BUILD_ZAPRET_FROM_SOURCE=yes"
