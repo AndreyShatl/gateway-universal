@@ -81,11 +81,21 @@ start() {
         --dpi-desync-repeats=6 \
         --dpi-desync-fake-quic=$ZAPRET_DIR/files/fake/quic_initial_www_google_com.bin \
       --new \
-        --filter-udp=10000-65535 --filter-l7=discord,stun \
-        --dpi-desync=fake,udplen \
-        --dpi-desync-udplen-increment=5 \
-        --dpi-desync-repeats=15 \
-        --dpi-desync-fake-quic=$ZAPRET_DIR/files/fake/quic_initial_www_google_com.bin
+        # Discord voice (UDP). Brute mode: NO --filter-l7, plain fake, no udplen.
+        # Прежняя стратегия (fake,udplen + repeats=15 + filter-l7=discord,stun)
+        # на 2026-04-26 перестала работать — ТСПУ научился её детектить, голос
+        # держится 5-10 сек и переподключается. Рабочая комбинация:
+        #   • без --filter-l7 — захватываем весь UDP в диапазоне (после обновления
+        #     Discord протокола l7-detection часто промахивается)
+        #   • простой --dpi-desync=fake (без udplen — udplen-pattern сам палится)
+        #   • --dpi-desync-cutoff=n3 — десинк только первых 3 пакетов сессии
+        #     (STUN+handshake), дальше «чистый» RTP не трогаем (иначе Opus ломается)
+        #   • fake-quic из vk_com.bin — нестандартный fingerprint, ТСПУ не классифицирует
+        --filter-udp=10000-65535 \
+        --dpi-desync=fake \
+        --dpi-desync-repeats=8 \
+        --dpi-desync-cutoff=n3 \
+        --dpi-desync-fake-quic=$ZAPRET_DIR/files/fake/quic_initial_vk_com.bin
 
     # UDP iptables
     iptables -t mangle -A POSTROUTING -p udp --dport 443 \
