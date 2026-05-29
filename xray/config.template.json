@@ -241,6 +241,15 @@
       {
         "type": "field",
         "domain": [
+          "domain:steampowered.com",
+          "domain:steamcommunity.com",
+          "domain:steamstatic.com",
+          "domain:steamcdn-a.akamaihd.net",
+          "domain:steamcontent.com",
+          "domain:steamgames.com",
+          "domain:steamusercontent.com",
+          "domain:steamnetwork.com",
+          "domain:steam-chat.com",
           "domain:valvesoftware.com",
           "domain:dota2.com"
         ],
@@ -584,15 +593,6 @@
           "domain:darktide.com",
           "domain:warhammer.com",
           "domain:gamesworkshop.com",
-          "domain:steampowered.com",
-          "domain:steamcommunity.com",
-          "domain:steamstatic.com",
-          "domain:steamcdn-a.akamaihd.net",
-          "domain:steamcontent.com",
-          "domain:steamgames.com",
-          "domain:steamusercontent.com",
-          "domain:steamnetwork.com",
-          "domain:steam-chat.com",
           "domain:rutracker.org",
           "domain:rutracker.cc",
           "domain:rutracker-org.appspot.com"
