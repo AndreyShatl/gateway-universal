@@ -1,0 +1,15 @@
+[Unit]
+Description=Fix default gateway to router (prevents DHCP routing loop)
+# Когда шлюз по умолчанию в DHCP выставлен на эту машину,
+# она сама получает себя как шлюз и теряет интернет.
+# Этот сервис заменяет маршрут по умолчанию на реальный роутер.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "ip route del default 2>/dev/null || true; ip route add default via __ROUTER_IP__"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

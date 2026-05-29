@@ -1,0 +1,25 @@
+[Unit]
+Description=Reverse SSH tunnel to VPS (emergency access)
+# Шлюз держит постоянное SSH-соединение к VPS.
+# Если локальная сеть сломается — можно зайти через VPS:
+#   ssh -p __TUNNEL_PORT__ root@localhost  (с самого VPS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ssh \
+    -N \
+    -o StrictHostKeyChecking=no \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -o ConnectTimeout=15 \
+    -R __TUNNEL_PORT__:localhost:22 \
+    root@__VPS_ADDR__
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

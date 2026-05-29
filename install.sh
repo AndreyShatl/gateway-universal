@@ -64,6 +64,10 @@ CONFIG_ENV="${SCRIPT_DIR}/config.env"
 : "${BUILD_ZAPRET_FROM_SOURCE:=yes}"
 : "${INSTAGRAM_QUIC_BYPASS:=yes}"
 : "${BLOCK_QUIC:=yes}"
+: "${INSTALL_REVERSE_TUNNEL:=no}"
+: "${VPS_TUNNEL_PORT:=2222}"
+: "${INSTALL_FIX_GATEWAY:=yes}"
+: "${ROUTER_IP:=}"
 : "${NON_INTERACTIVE:=no}"
 : "${SKIP_HEALTHCHECK:=no}"
 
@@ -398,6 +402,71 @@ if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
         journalctl -u zapret.service -n 20 --no-pager || true
         warn "zapret failed — check logs"
     fi
+fi
+
+# ==========================================================================
+#                        FIX-GATEWAY SERVICE
+# ==========================================================================
+if [[ "$INSTALL_FIX_GATEWAY" == "yes" ]]; then
+    say "Installing fix-gateway.service…"
+
+    # Определяем IP роутера если не задан
+    if [[ -z "$ROUTER_IP" ]]; then
+        ROUTER_IP="$(ip -o -4 route show to default 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+    fi
+    [[ -n "$ROUTER_IP" ]] || { warn "Cannot detect router IP — skipping fix-gateway"; }
+
+    if [[ -n "$ROUTER_IP" ]]; then
+        sed "s|__ROUTER_IP__|$ROUTER_IP|g" "$SCRIPT_DIR/systemd/fix-gateway.service" \
+            > /etc/systemd/system/fix-gateway.service
+        systemctl daemon-reload
+        systemctl enable fix-gateway.service >/dev/null
+        systemctl restart fix-gateway.service
+        ok "fix-gateway.service enabled (router=$ROUTER_IP)"
+    fi
+fi
+
+# ==========================================================================
+#                        REVERSE SSH TUNNEL
+# ==========================================================================
+if [[ "$INSTALL_REVERSE_TUNNEL" == "yes" ]]; then
+    say "Setting up reverse SSH tunnel → VPS:$VPS_TUNNEL_PORT…"
+    [[ -n "$VPS_ADDR" ]] || die "VPS_ADDR required for reverse tunnel"
+
+    # Генерируем SSH-ключ если нет
+    if [[ ! -f /root/.ssh/id_ed25519 ]]; then
+        ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N "" -q
+        ok "SSH key generated"
+    else
+        ok "SSH key already exists"
+    fi
+
+    # Добавляем VPS в known_hosts чтобы не спрашивало подтверждение
+    ssh-keyscan -H "$VPS_ADDR" >> /root/.ssh/known_hosts 2>/dev/null || true
+
+    # Устанавливаем systemd unit
+    sed -e "s|__VPS_ADDR__|$VPS_ADDR|g" \
+        -e "s|__TUNNEL_PORT__|$VPS_TUNNEL_PORT|g" \
+        "$SCRIPT_DIR/systemd/ssh-tunnel.service" \
+        > /etc/systemd/system/ssh-tunnel.service
+    systemctl daemon-reload
+    systemctl enable ssh-tunnel.service >/dev/null
+    systemctl restart ssh-tunnel.service
+    sleep 2
+    if systemctl is-active --quiet ssh-tunnel.service; then
+        ok "ssh-tunnel.service running"
+    else
+        warn "ssh-tunnel failed to start — возможно ключ ещё не добавлен на VPS"
+    fi
+
+    PUBKEY="$(cat /root/.ssh/id_ed25519.pub)"
+    echo
+    warn "ACTION REQUIRED: добавь публичный ключ этой машины на VPS:"
+    echo
+    echo "  ${C_BLD}ssh root@${VPS_ADDR} \"echo '${PUBKEY}' >> ~/.ssh/authorized_keys\"${C_OFF}"
+    echo
+    say "После добавления ключа туннель поднимется автоматически (RestartSec=15)"
+    say "Доступ через VPS: ssh -p ${VPS_TUNNEL_PORT} root@localhost"
 fi
 
 # ==========================================================================
