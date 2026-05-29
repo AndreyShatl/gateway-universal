@@ -4,6 +4,8 @@
 
 Нативный xray (VLESS+Reality) + zapret (nfqws) + iptables + Instagram QUIC bypass. Без Docker.
 
+**Дополнительно:** защита от петли шлюза (fix-gateway) + опциональный реверс-туннель к VPS для экстренного доступа.
+
 ## Как это работает
 
 ```
@@ -88,6 +90,8 @@ sudo bash install.sh
 | systemd units | `/etc/systemd/system/{xray,zapret}.service` |
 | iptables rules | `/etc/iptables/rules.v4` (через netfilter-persistent) |
 | sysctl | `/etc/sysctl.d/99-gateway.conf` (ip_forward=1) |
+| fix-gateway.service | `/etc/systemd/system/fix-gateway.service` |
+| ssh-tunnel.service (опц.) | `/etc/systemd/system/ssh-tunnel.service` |
 
 ## Проверка после установки
 
@@ -110,6 +114,28 @@ curl https://www.google.com -I                  # 200 OK
 2. **DHCP → DNS** = `8.8.8.8`, `1.1.1.1`
 3. Перезагрузить клиентов (или отключить/включить Wi-Fi)
 
+> **Важно:** когда шлюз в DHCP указывает на эту машину, она сама получает себя как шлюз и теряет интернет. `fix-gateway.service` решает это автоматически — он устанавливает маршрут через реальный роутер (`ROUTER_IP`) после каждого старта сети.
+
+## Реверс-туннель (экстренный доступ)
+
+Если хочешь иметь доступ к шлюзу через VPS даже когда локальная сеть недоступна — включи в `config.env`:
+
+```env
+INSTALL_REVERSE_TUNNEL="yes"
+VPS_TUNNEL_PORT="2222"   # порт на VPS для обратного подключения
+```
+
+После установки скрипт покажет публичный ключ — его нужно добавить на VPS:
+```bash
+ssh root@VPS_IP "echo 'ключ' >> ~/.ssh/authorized_keys"
+```
+
+Экстренный вход через VPS:
+```bash
+ssh root@VPS_IP
+ssh -p 2222 root@localhost   # ← попадёшь на шлюз
+```
+
 ## Управление
 
 ```bash
@@ -118,6 +144,10 @@ systemctl stop xray zapret                      # остановка
 journalctl -u xray -f                           # логи xray
 journalctl -u zapret -f                         # логи zapret
 /opt/zapret-config/zapret.sh status             # статус zapret
+
+# Реверс-туннель (если установлен)
+systemctl status ssh-tunnel                     # статус туннеля
+journalctl -u ssh-tunnel -f                     # логи туннеля
 ```
 
 ## Обновление стратегий Zapret
