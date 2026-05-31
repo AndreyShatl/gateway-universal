@@ -110,6 +110,11 @@
   ],
   "outbounds": [
     {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
+    },
+    {
       "tag": "proxy",
       "protocol": "vless",
       "settings": {
@@ -180,11 +185,6 @@
         "enabled": false
       }
     },
-    {
-      "tag": "direct",
-      "protocol": "freedom",
-      "settings": {}
-    }
   ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
