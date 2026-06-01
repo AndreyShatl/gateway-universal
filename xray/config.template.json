@@ -141,6 +141,11 @@
           "publicKey": "${VPS_PUBKEY}",
           "shortId": "${VPS_SHORT_ID}",
           "spiderX": "/"
+        },
+        "sockopt": {
+          "tcpKeepAliveIdle": 60,
+          "tcpKeepAliveInterval": 30,
+          "tcpKeepAliveCount": 3
         }
       }
     },
@@ -177,7 +182,9 @@
           "multiMode": true
         },
         "sockopt": {
-          "tcpKeepAliveInterval": 15,
+          "tcpKeepAliveIdle": 60,
+          "tcpKeepAliveInterval": 30,
+          "tcpKeepAliveCount": 3,
           "tcpNoDelay": true
         }
       },
