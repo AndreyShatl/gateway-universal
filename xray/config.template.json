@@ -606,7 +606,8 @@
           "domain:rutracker.cc",
           "domain:rutracker-org.appspot.com"
         ],
-        "outboundTag": "proxy"
+        "comment": "Весь proxy-трафик через gRPC :2083 — РФ-провайдеры (TSPU) режут TLS на :443 к зарубежному VPS",
+        "outboundTag": "proxy-mux"
       },
       {
         "type": "field",
