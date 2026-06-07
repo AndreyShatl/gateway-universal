@@ -12,9 +12,8 @@
 Клиенты LAN ──► Этот шлюз ──► WAN
                   │
                   ├─ iptables REDIRECT 80/443 ──► xray :12345 (dokodemo-door)
-                  │    └─ VLESS Reality Vision ──► VPS (основной канал)
-                  │    └─ VLESS Reality gRPC   ──► VPS (для Meta/Instagram)
-                  │    └─ direct                 (всё остальное напрямую)
+                  │    └─ VLESS Reality gRPC :2083 ──► VPS (ОСНОВНОЙ канал — весь proxy-трафик)
+                  │    └─ direct                      (всё остальное напрямую)
                   │
                   └─ iptables NFQUEUE ──► zapret nfqws (DPI bypass)
                        ├─ YouTube  (TCP+UDP: fake,fakedsplit + ts)
@@ -22,6 +21,14 @@
                        ├─ Instagram (TCP: multidisorder / UDP: fake-quic)
                        └─ General  (Twitch, ModDB и прочее)
 ```
+
+> ⚠️ **Почему gRPC, а не Vision на :443.** Российские провайдеры (ТСПУ/DPI) режут
+> длинные TLS-сессии к зарубежному VPS на стандартном порту **443** — Reality Vision
+> там нестабилен (SYN не доходит, туннель висит). Поэтому весь proxy-трафик идёт через
+> **VLESS Reality gRPC на нестандартном порту 2083**, который проходит мимо фильтра.
+> Vision-outbound (`proxy`, :443) в шаблоне оставлен, но не используется в роутинге.
+> Если у тебя другой регион/провайдер без блокировки :443 — можно вернуть домены на
+> `proxy` (Vision) ради чуть большей производительности.
 
 Детали архитектуры — см. [AGENT.md](AGENT.md).
 

@@ -26,7 +26,7 @@ bash deploy.sh --host root@IP
 
 - `VPS_ADDR` — IP или домен VPS
 - `VPS_PORT_VISION` — порт Vision inbound'а (часто `443` или `8443`)
-- `VPS_PORT_GRPC` — порт gRPC inbound'а (часто `2083`). Нужен **второй inbound** для Meta/Instagram. Если у пользователя нет — скажи: «нужен второй inbound в 3x-ui, transport=gRPC, flow=(пусто), service name=`grpc-meta`».
+- `VPS_PORT_GRPC` — порт gRPC inbound'а (часто `2083`). Это **основной рабочий канал** (весь proxy-трафик идёт сюда, см. ниже про блокировку :443). Если у пользователя нет — скажи: «нужен inbound в 3x-ui, transport=gRPC, flow=(пусто), service name=`grpc-meta`».
 - `VPS_UUID_VISION`, `VPS_UUID_GRPC` — UUID клиентов (разные для двух inbound'ов)
 - `VPS_PUBKEY` — Reality Public Key (из деталей inbound'а)
 - `VPS_SHORT_ID` — Reality Short ID
@@ -55,10 +55,12 @@ QUIC (UDP/443) глобально DROP'ается в FORWARD чтобы клие
 
 ### Две VLESS inbound'а
 Нужны **два** inbound'а на VPS:
-- Vision (`xtls-rprx-vision`, TCP transport) — основной канал
-- gRPC (flow=пусто, transport=grpc, serviceName=`grpc-meta`) — для Instagram (Vision падает при многих параллельных соединениях на видео)
+- gRPC (flow=пусто, transport=grpc, serviceName=`grpc-meta`, порт `2083`) — **ОСНОВНОЙ канал**, через него идёт весь proxy-трафик
+- Vision (`xtls-rprx-vision`, TCP, порт `443`) — оставлен в шаблоне как `proxy`-outbound, но **в роутинге не используется**
 
-Если у пользователя пока один — деплой можно сделать на одном (оба UUID одинаковые, оба порта одинаковые), но Instagram будет подтуплять на видео.
+**Важно (РФ):** провайдеры с ТСПУ режут длинные TLS к зарубежному VPS на **:443** — Reality Vision там нестабилен (SYN не доходит, туннель висит). Поэтому основной канал — **gRPC на нестандартном порту 2083**. Все routing-правила указывают на `proxy-mux` (gRPC). Это решение в коммите `b549195`. Если регион без блокировки :443 — можно вернуть домены на `proxy` (Vision).
+
+Если у пользователя пока один inbound — можно временно завести оба параметра на gRPC (одинаковые UUID/порт), главное чтобы основной канал был gRPC :2083, а не Vision :443.
 
 ### Zapret стратегии (работающие на текущих ТСПУ)
 Их менять не надо без нужды — калиброваны под актуальный DPI. См. [docs/STRATEGIES.md](docs/STRATEGIES.md).
