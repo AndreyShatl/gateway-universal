@@ -106,6 +106,24 @@
           "domain:itunes.com"
         ]
       }
+    },
+    {
+      "tag": "tproxy-udp",
+      "port": 12346,
+      "listen": "0.0.0.0",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "udp",
+        "followRedirect": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      },
+      "sniffing": {
+        "enabled": false
+      }
     }
   ],
   "outbounds": [
@@ -196,6 +214,13 @@
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "tproxy-udp"
+        ],
+        "outboundTag": "proxy-mux"
+      },
       {
         "type": "field",
         "protocol": [

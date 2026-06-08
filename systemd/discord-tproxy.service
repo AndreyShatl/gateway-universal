@@ -1,0 +1,12 @@
+[Unit]
+Description=Discord voice UDP TPROXY -> xray tunnel
+After=network-online.target xray.service zapret.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway/discord-tproxy.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

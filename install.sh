@@ -427,6 +427,24 @@ if [[ "$INSTALL_FIX_GATEWAY" == "yes" ]]; then
 fi
 
 # ==========================================================================
+#                  DISCORD VOICE UDP TPROXY -> TUNNEL
+# ==========================================================================
+# РФ DPI глушит UDP голосовых серверов Discord на прямом пути. Заворачиваем
+# Discord-голос (UDP 50000-65535) через xray-туннель (gRPC). Обычный TCP-роутинг
+# это не покрывает — там REDIRECT только 80/443, UDP идёт мимо xray.
+if [[ "${INSTALL_DISCORD_TPROXY:-yes}" == "yes" && -n "$VPS_ADDR" ]]; then
+    say "Installing discord-tproxy (UDP voice via tunnel)…"
+    mkdir -p /opt/gateway
+    sed "s|__VPS_ADDR__|$VPS_ADDR|g" "$SCRIPT_DIR/iptables/discord-tproxy.sh" > /opt/gateway/discord-tproxy.sh
+    chmod +x /opt/gateway/discord-tproxy.sh
+    cp "$SCRIPT_DIR/systemd/discord-tproxy.service" /etc/systemd/system/discord-tproxy.service
+    systemctl daemon-reload
+    systemctl enable discord-tproxy.service >/dev/null
+    systemctl restart discord-tproxy.service
+    ok "discord-tproxy enabled"
+fi
+
+# ==========================================================================
 #                        REVERSE SSH TUNNEL
 # ==========================================================================
 if [[ "$INSTALL_REVERSE_TUNNEL" == "yes" ]]; then
