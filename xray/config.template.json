@@ -604,7 +604,8 @@
           "domain:gamesworkshop.com",
           "domain:rutracker.org",
           "domain:rutracker.cc",
-          "domain:rutracker-org.appspot.com"
+          "domain:rutracker-org.appspot.com",
+          "domain:unigine.com"
         ],
         "comment": "Весь proxy-трафик через gRPC :2083 — РФ-провайдеры (TSPU) режут TLS на :443 к зарубежному VPS",
         "outboundTag": "proxy-mux"
