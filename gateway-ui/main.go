@@ -40,8 +40,11 @@ type server struct {
 	salt, hash string // пароль: salt + sha256hex(salt+password)
 	tmpl       *template.Template
 
-	repoDir   string // каталог репозитория (скрипты)
-	configEnv string // путь к config.env
+	repoDir        string // каталог репозитория (скрипты, шаблон)
+	configEnv      string // путь к config.env
+	userDomainsDir string // /etc/gateway/domains (домены из UI)
+	xrayConfig     string // /opt/xray/config.json (рабочий конфиг)
+	xrayBin        string // /opt/xray/xray
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -52,12 +55,18 @@ func main() {
 	conf := flag.String("conf", "/etc/gateway/ui.conf", "файл с паролем (salt:hash)")
 	repo := flag.String("repo", "/root/gateway-universal", "каталог репозитория на устройстве")
 	configEnv := flag.String("config-env", "", "путь к config.env (default <repo>/config.env)")
+	userDomains := flag.String("user-domains-dir", "/etc/gateway/domains", "каталог пользовательских доменов")
+	xrayConfig := flag.String("xray-config", "/opt/xray/config.json", "рабочий config.json")
+	xrayBin := flag.String("xray-bin", "/opt/xray/xray", "бинарник xray")
 	flag.Parse()
 
 	if *configEnv == "" {
 		*configEnv = filepath.Join(*repo, "config.env")
 	}
-	s := &server{sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv}
+	s := &server{
+		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
+		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
+	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
 	}
@@ -71,6 +80,7 @@ func main() {
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/api/ping", s.requireAuth(s.handlePing))
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
+	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/", s.requireAuth(s.handleDashboard))
 
 	srv := &http.Server{

@@ -27,6 +27,12 @@
   .row button:hover { background:#2f6fd6; }
   .msg { font-size:13px; margin-top:8px; min-height:16px; }
   .msg.good { color:#6ee7b7; } .msg.bad { color:#f87171; }
+  .list { list-style:none; padding:0; margin:12px 0 0; max-height:240px; overflow:auto; }
+  .list li { display:flex; justify-content:space-between; align-items:center;
+             padding:6px 10px; border:1px solid #262a33; border-radius:8px; margin-bottom:6px;
+             font-family:ui-monospace,monospace; font-size:13px; }
+  .list .del { background:none; border:0; color:#f87171; cursor:pointer; font-size:16px; }
+  .empty { color:#6b7280; font-size:13px; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -50,7 +56,13 @@
     </div>
     <div class="card">
       <h2>Домены в обход</h2>
-      <div class="muted">Скоро (T12): добавлять/убирать сайты через UI.</div>
+      <div class="muted">Сайты, которые ходят через VPS. Домен (example.com) или geosite:тег.</div>
+      <div class="row">
+        <input id="domInput" type="text" placeholder="example.com или geosite:netflix">
+        <button id="domAdd">Добавить</button>
+      </div>
+      <div id="domMsg" class="msg"></div>
+      <ul id="domList" class="list"></ul>
     </div>
     <div class="card">
       <h2>Статус и управление</h2>
@@ -76,6 +88,34 @@
         else { rMsg.className = 'msg bad'; rMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
       }).catch(() => { rMsg.className = 'msg bad'; rMsg.textContent = '✗ сеть'; });
     };
+
+    // Домены
+    const dInput = document.getElementById('domInput');
+    const dMsg = document.getElementById('domMsg');
+    const dList = document.getElementById('domList');
+    function renderDomains(list) {
+      dList.innerHTML = '';
+      if (!list || !list.length) { dList.innerHTML = '<div class="empty">Пока пусто — добавь сайт выше.</div>'; return; }
+      for (const d of list) {
+        const li = document.createElement('li');
+        const span = document.createElement('span'); span.textContent = d;
+        const btn = document.createElement('button'); btn.className = 'del'; btn.textContent = '×';
+        btn.title = 'Удалить'; btn.onclick = () => domAction('remove', d);
+        li.append(span, btn); dList.append(li);
+      }
+    }
+    function domAction(action, domain) {
+      dMsg.className = 'msg'; dMsg.textContent = action === 'add' ? 'Применяю…' : 'Удаляю…';
+      fetch('/api/domains', { method:'POST', body:new URLSearchParams({ action, domain }) })
+        .then(async r => {
+          const d = await r.json();
+          if (r.ok) { dMsg.className = 'msg good'; dMsg.textContent = d.note || '✓ готово'; renderDomains(d.domains); if (action==='add') dInput.value=''; }
+          else { dMsg.className = 'msg bad'; dMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { dMsg.className = 'msg bad'; dMsg.textContent = '✗ сеть'; });
+    }
+    document.getElementById('domAdd').onclick = () => { if (dInput.value.trim()) domAction('add', dInput.value.trim()); };
+    dInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('domAdd').click(); });
+    fetch('/api/domains').then(r => r.json()).then(d => renderDomains(d.domains));
   </script>
 </body>
 </html>
