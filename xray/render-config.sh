@@ -25,14 +25,16 @@ OUT=""
 CONFIG=""
 XRAY_BIN=""
 DOMAINS_DIR="$SCRIPT_DIR/domains"
+USER_DOMAINS_DIR="/etc/gateway/domains"   # домены из UI, вне репо (T9)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --template)    TEMPLATE="$2"; shift 2;;
-        --out)         OUT="$2"; shift 2;;
-        --config)      CONFIG="$2"; shift 2;;
-        --xray)        XRAY_BIN="$2"; shift 2;;
-        --domains-dir) DOMAINS_DIR="$2"; shift 2;;
+        --template)         TEMPLATE="$2"; shift 2;;
+        --out)              OUT="$2"; shift 2;;
+        --config)           CONFIG="$2"; shift 2;;
+        --xray)             XRAY_BIN="$2"; shift 2;;
+        --domains-dir)      DOMAINS_DIR="$2"; shift 2;;
+        --user-domains-dir) USER_DOMAINS_DIR="$2"; shift 2;;
         *) echo "render-config: unknown option: $1" >&2; exit 2;;
     esac
 done
@@ -61,8 +63,9 @@ if [[ "${VPS_ADDR_IP:-}" == "" ]]; then
     fi
 fi
 
-# 2) Список доменов роутинга
-ROUTING_DOMAINS="$(bash "$SCRIPT_DIR/build-domains.sh" "$DOMAINS_DIR")" \
+# 2) Список доменов роутинга (репо + пользовательские из UI; второй каталог
+#    может отсутствовать — build-domains.sh его пропустит)
+ROUTING_DOMAINS="$(bash "$SCRIPT_DIR/build-domains.sh" "$DOMAINS_DIR" "$USER_DOMAINS_DIR")" \
     || { echo "render-config: build-domains.sh failed" >&2; exit 1; }
 echo "  routing domains: $(printf '%s\n' "$ROUTING_DOMAINS" | grep -c .) entries"
 
