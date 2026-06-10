@@ -24,6 +24,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,9 @@ type server struct {
 	salt, hash string // пароль: salt + sha256hex(salt+password)
 	tmpl       *template.Template
 
+	repoDir   string // каталог репозитория (скрипты)
+	configEnv string // путь к config.env
+
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
 }
@@ -46,9 +50,14 @@ type server struct {
 func main() {
 	listen := flag.String("listen", ":8088", "адрес прослушивания (host:port)")
 	conf := flag.String("conf", "/etc/gateway/ui.conf", "файл с паролем (salt:hash)")
+	repo := flag.String("repo", "/root/gateway-universal", "каталог репозитория на устройстве")
+	configEnv := flag.String("config-env", "", "путь к config.env (default <repo>/config.env)")
 	flag.Parse()
 
-	s := &server{sessions: map[string]time.Time{}}
+	if *configEnv == "" {
+		*configEnv = filepath.Join(*repo, "config.env")
+	}
+	s := &server{sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
 	}
@@ -61,6 +70,7 @@ func main() {
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/api/ping", s.requireAuth(s.handlePing))
+	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/", s.requireAuth(s.handleDashboard))
 
 	srv := &http.Server{

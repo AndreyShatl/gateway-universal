@@ -405,12 +405,12 @@ if [[ "$INSTALL_FIX_GATEWAY" == "yes" ]]; then
     [[ -n "$ROUTER_IP" ]] || { warn "Cannot detect router IP — skipping fix-gateway"; }
 
     if [[ -n "$ROUTER_IP" ]]; then
-        sed "s|__ROUTER_IP__|$ROUTER_IP|g" "$SCRIPT_DIR/systemd/fix-gateway.service" \
-            > /etc/systemd/system/fix-gateway.service
-        systemctl daemon-reload
-        systemctl enable fix-gateway.service >/dev/null
-        systemctl restart fix-gateway.service
-        ok "fix-gateway.service enabled (router=$ROUTER_IP)"
+        # общий код с веб-UI — systemd/apply-fix-gateway.sh
+        if bash "$SCRIPT_DIR/systemd/apply-fix-gateway.sh" "$ROUTER_IP" >/dev/null; then
+            ok "fix-gateway.service enabled (router=$ROUTER_IP)"
+        else
+            warn "fix-gateway apply failed"
+        fi
     fi
 fi
 
