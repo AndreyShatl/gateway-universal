@@ -50,9 +50,12 @@ ROUTER_IP в config.env (атомарно, права сохраняются) + 
 **Приёмка (стенд):** GET=192.168.1.1; POST невалидный→400 без смены маршрута; POST валидный→200,
 fix-gateway applied, маршрут цел, интернет жив, config.env обновлён.
 
-### T12 · UI: списки доменов · M · todo
-Показ/добавление/удаление доменов в /etc/gateway/domains/local.txt → build-domains → render-config → restart xray.
-**Приёмка:** добавленный в UI домен появляется в /opt/xray/config.json → proxy-mux; переживает передеплой.
+### T12 · UI: списки доменов · M · done
+[gateway-ui/domains.go](gateway-ui/domains.go): GET/POST `/api/domains` (action=add|remove) →
+правит /etc/gateway/domains/local.txt → render-config.sh → restart xray. Валидация домена/geosite,
+дедуп, откат файла при неудачном применении. Список с удалением в дашборде.
+**Приёмка (стенд, живой xray):** add невалидный→400; add домен→200, proxy 386→387, в конфиге,
+xray active; повтор→«без изменений»; remove→proxy 387→386. Домены вне репо → переживают передеплой (T9).
 
 ### T13 · UI: статус и управление · M · todo
 Статус xray/zapret, кнопка рестарта, прогон tests/smoke.sh, текущий exit IP, хвост логов.
