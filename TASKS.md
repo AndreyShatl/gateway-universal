@@ -29,9 +29,11 @@ install.sh зовёт его ([install.sh:286](install.sh:286)).
 temp прибран, SMOKE PASS. Локально JSON proxy=386/direct=11/rules=10.
 **Баг по ходу:** mktemp без .json → `xray -test` «failed to get format»; пофикшено суффиксом .json.
 
-### T9 · build-domains.sh читает доп. каталог /etc/gateway/domains/ · M · todo
-Кроме xray/domains/*.txt читать ещё /etc/gateway/domains/*.txt (пользовательские домены из UI вне репо).
-**Приёмка:** домен из /etc/gateway/domains/local.txt попадает в сгенерированный список; отсутствие папки не ломает.
+### T9 · build-domains.sh читает доп. каталог /etc/gateway/domains/ · M · done
+build-domains.sh принимает несколько каталогов и дедуплицирует между ними; по умолчанию
+xray/domains + /etc/gateway/domains. render-config.sh передаёт оба (--user-domains-dir).
+**Приёмка (стенд):** с /etc/gateway/domains/local.txt → 387 (тестовый домен в proxy-mux, xray -test ок),
+без него → 386; несуществующий каталог не ломает (локально проверено).
 
 ### T10 · Каркас gateway-ui (Go): сервер, auth, systemd, embed · H · todo
 Go-бинарник: HTTP на LAN-IP:8088, вход по паролю (хеш в /etc/gateway/ui.conf), сессия, статика через embed.FS,

@@ -31,7 +31,7 @@ LAN ──┬─ TCP 80/443 ─► iptables REDIRECT :12345 ─► xray dokodemo
 - Inbounds: `tproxy-in` :12345 (dokodemo-door TCP/UDP, [config.template.json:36](../xray/config.template.json:36)), `socks-in` :1080, `http-in` :8080, `tproxy-udp` :12346.
 - Outbounds: `direct` (freedom), `proxy` (Vision/TCP, **объявлен но не используется в роутинге** — [config.template.json:136](../xray/config.template.json:136)), `proxy-mux` (gRPC, serviceName=`grpc-meta` — [config.template.json:171](../xray/config.template.json:171)).
 - **Роутинг**: всё заблокированное → `proxy-mux`; приватные сети, VPS, Steam, BitTorrent → `direct` ([config.template.json:214](../xray/config.template.json:214)).
-- **Список доменов роутинга — генерируемый**: единственный источник истины — `xray/domains/*.txt`; [build-domains.sh](../xray/build-domains.sh) превращает их в JSON-массив. Пополнять = дописать строку в .txt (T6). IP-правила Meta/Telegram и Steam-direct остаются захардкоженными в шаблоне.
+- **Список доменов роутинга — генерируемый**: источники — `xray/domains/*.txt` (курируемые, в репо) + `/etc/gateway/domains/*.txt` (пользовательские из UI, вне репо, T9); [build-domains.sh](../xray/build-domains.sh) читает оба и превращает в JSON-массив с дедупом. Пополнять = дописать строку в .txt (T6). IP-правила Meta/Telegram и Steam-direct остаются захардкоженными в шаблоне.
 - **Рендер config.json — единственное место**: [render-config.sh](../xray/render-config.sh) (T8) делает резолв VPS_ADDR→IP, зовёт build-domains.sh, envsubst, `xray -test` по временному `.json` до атомарной подмены. install.sh ([install.sh:286](../install.sh:286)) и будущий UI зовут именно его — логика не дублируется.
 - systemd: [../systemd/xray.service](../systemd/xray.service), ставится в [install.sh:301](../install.sh:301).
 
