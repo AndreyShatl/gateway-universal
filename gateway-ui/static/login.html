@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gateway-ui — вход</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
+  .card { background:#191c23; padding:32px; border-radius:12px; width:300px;
+          box-shadow:0 8px 30px rgba(0,0,0,.4); }
+  h1 { font-size:18px; margin:0 0 20px; }
+  input { width:100%; box-sizing:border-box; padding:10px; margin-bottom:14px;
+          border:1px solid #333; border-radius:8px; background:#0f1115; color:#e6e6e6; }
+  button { width:100%; padding:10px; border:0; border-radius:8px; background:#3b82f6;
+           color:#fff; font-weight:600; cursor:pointer; }
+  button:hover { background:#2f6fd6; }
+  .err { color:#f87171; font-size:13px; margin-bottom:12px; }
+</style>
+</head>
+<body>
+  <form class="card" method="POST" action="/login">
+    <h1>🛡️ gateway-ui</h1>
+    {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+    <input type="password" name="password" placeholder="Пароль" autofocus required>
+    <button type="submit">Войти</button>
+  </form>
+</body>
+</html>

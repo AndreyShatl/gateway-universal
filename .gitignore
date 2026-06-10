@@ -17,6 +17,10 @@ config.env
 /zapret/nfq/nfqws
 /zapret/binaries/
 
+# Сборка gateway-ui (бинарник — артефакт, в релиз кладём отдельно)
+/gateway-ui/gateway-ui
+/gateway-ui/dist/
+
 # IDE
 .idea/
 .vscode/

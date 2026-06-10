@@ -35,10 +35,13 @@ xray/domains + /etc/gateway/domains. render-config.sh передаёт оба (-
 **Приёмка (стенд):** с /etc/gateway/domains/local.txt → 387 (тестовый домен в proxy-mux, xray -test ок),
 без него → 386; несуществующий каталог не ломает (локально проверено).
 
-### T10 · Каркас gateway-ui (Go): сервер, auth, systemd, embed · H · todo
-Go-бинарник: HTTP на LAN-IP:8088, вход по паролю (хеш в /etc/gateway/ui.conf), сессия, статика через embed.FS,
-systemd gateway-ui.service. Без бизнес-логики — только каркас + health-эндпоинт.
-**Приёмка:** бинарник стартует, отдаёт страницу логина, после пароля — пустой дашборд; слушает только LAN.
+### T10 · Каркас gateway-ui (Go): сервер, auth, embed · H · done
+Создан [gateway-ui/](gateway-ui/) (Go, stdlib-only): HTTP `--listen`, вход по паролю
+(salt:sha256 в /etc/gateway/ui.conf, первый пароль из env GATEWAY_UI_PASSWORD), сессии-cookie,
+embed.FS-шаблоны, /healthz, /api/ping, дашборд с заглушками T11–T13.
+**Приёмка (стенд, Go 1.24):** build OK; /healthz=ok; без сессии→303 /login; неверный пароль→401;
+верный→303+cookie; /api/ping под auth→{"status":"ok"}; дашборд отдаётся.
+**Осталось на потом:** systemd-юнит и bind-на-LAN+iptables — в T14; sha256→bcrypt/argon2 — позже.
 
 ### T11 · UI: поле IP роутера · M · todo
 Чтение/запись ROUTER_IP в config.env, перерендер+рестарт fix-gateway.service.
