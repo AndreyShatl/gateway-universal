@@ -52,8 +52,9 @@ LAN ──┬─ TCP 80/443 ─► iptables REDIRECT :12345 ─► xray dokodemo
 - `discord-tproxy` — Discord voice UDP через туннель ([install.sh:435](../install.sh:435), [../iptables/discord-tproxy.sh](../iptables/discord-tproxy.sh)).
 - `ssh-tunnel` — reverse SSH для экстренного доступа ([install.sh:450](../install.sh:450)).
 
-### gateway-ui (веб-интерфейс) — ПЛАН (кода ещё нет)
-- Go, один статичный бинарник, фронтенд через embed.FS; systemd `gateway-ui.service`; bind на LAN-IP, доступ по паролю.
+### gateway-ui (веб-интерфейс) — каркас готов (T10), функции в работе
+- Go, один статичный бинарник (stdlib-only), фронтенд через embed.FS — исходники в [../gateway-ui/](../gateway-ui/) ([main.go](../gateway-ui/main.go)).
+- Каркас (T10): HTTP-сервер `--listen`, вход по паролю (salt:sha256 в `/etc/gateway/ui.conf`, первый пароль из env `GATEWAY_UI_PASSWORD`), сессии-cookie, `/healthz`, `/api/ping`. bind на LAN-IP + iptables-ограничение — T14.
 - Тонкий оркестратор над примитивами: правит config.env / xray/domains, зовёт `render-config.sh` (готов, T8) + `build-domains.sh`, рестартит сервисы, гоняет `tests/smoke.sh`.
 - Пользовательские домены из UI — вне репо: `/etc/gateway/domains/local.txt` (переживают rsync --delete при передеплое).
 - Скоуп v1: IP роутера (ROUTER_IP в config.env), списки доменов, статус/управление. Детали — DECISIONS 2026-06-10, задачи T8–T15.

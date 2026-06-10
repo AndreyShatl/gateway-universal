@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gateway-ui</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
+  header { display:flex; align-items:center; justify-content:space-between;
+           padding:16px 24px; background:#191c23; border-bottom:1px solid #262a33; }
+  header h1 { font-size:17px; margin:0; }
+  .logout { color:#9ca3af; text-decoration:none; font-size:14px; }
+  .logout:hover { color:#e6e6e6; }
+  main { max-width:760px; margin:24px auto; padding:0 16px; display:grid; gap:16px; }
+  .card { background:#191c23; border:1px solid #262a33; border-radius:12px; padding:18px 20px; }
+  .card h2 { font-size:15px; margin:0 0 8px; }
+  .muted { color:#9ca3af; font-size:13px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px;
+          background:#1f2937; color:#9ca3af; }
+  .ok { background:#064e3b; color:#6ee7b7; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🛡️ gateway-ui <span class="muted">— панель шлюза</span></h1>
+    <a class="logout" href="/logout">Выйти</a>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Состояние сервера UI</h2>
+      <div>API: <span id="ping" class="pill">проверяю…</span></div>
+    </div>
+    <div class="card">
+      <h2>IP роутера</h2>
+      <div class="muted">Скоро (T11): задать IP роутера для fix-gateway.</div>
+    </div>
+    <div class="card">
+      <h2>Домены в обход</h2>
+      <div class="muted">Скоро (T12): добавлять/убирать сайты через UI.</div>
+    </div>
+    <div class="card">
+      <h2>Статус и управление</h2>
+      <div class="muted">Скоро (T13): статус xray/zapret, рестарт, exit IP, smoke.</div>
+    </div>
+  </main>
+  <script>
+    fetch('/api/ping').then(r => r.json()).then(d => {
+      const el = document.getElementById('ping');
+      el.textContent = d.status; el.classList.add('ok');
+    }).catch(() => { document.getElementById('ping').textContent = 'ошибка'; });
+  </script>
+</body>
+</html>
