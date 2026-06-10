@@ -9,3 +9,8 @@ bbc.com
 cnn.com
 nytimes.com
 reuters.com
+
+# --- доположено при переходе на txt-источник (T6, 2026-06-10) ---
+rutracker.org
+rutracker.cc
+rutracker-org.appspot.com
