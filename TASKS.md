@@ -17,7 +17,46 @@
 
 ---
 
-## todo
+## todo — веха: веб-интерфейс gateway-ui (архитектура в DECISIONS 2026-06-10)
+
+Порядок: T8→T9 (предусловия) → T10 (каркас) → T11–T13 (функции) → T14 (install) → T15 (доки).
+
+### T8 · Вынести рендер config.json в xray/render-config.sh · M · todo
+Сейчас рендер зашит в install.sh ([install.sh:286-300](install.sh:286)). Вынести в общий скрипт,
+чтобы install.sh и будущий UI звали один код (иначе логика разъедется).
+**Приёмка:** install.sh использует render-config.sh; smoke на стенде PASS; поведение не изменилось.
+
+### T9 · build-domains.sh читает доп. каталог /etc/gateway/domains/ · M · todo
+Кроме xray/domains/*.txt читать ещё /etc/gateway/domains/*.txt (пользовательские домены из UI вне репо).
+**Приёмка:** домен из /etc/gateway/domains/local.txt попадает в сгенерированный список; отсутствие папки не ломает.
+
+### T10 · Каркас gateway-ui (Go): сервер, auth, systemd, embed · H · todo
+Go-бинарник: HTTP на LAN-IP:8088, вход по паролю (хеш в /etc/gateway/ui.conf), сессия, статика через embed.FS,
+systemd gateway-ui.service. Без бизнес-логики — только каркас + health-эндпоинт.
+**Приёмка:** бинарник стартует, отдаёт страницу логина, после пароля — пустой дашборд; слушает только LAN.
+
+### T11 · UI: поле IP роутера · M · todo
+Чтение/запись ROUTER_IP в config.env, перерендер+рестарт fix-gateway.service.
+**Приёмка:** смена IP в UI меняет config.env и маршрут fix-gateway; видно на стенде.
+
+### T12 · UI: списки доменов · M · todo
+Показ/добавление/удаление доменов в /etc/gateway/domains/local.txt → build-domains → render-config → restart xray.
+**Приёмка:** добавленный в UI домен появляется в /opt/xray/config.json → proxy-mux; переживает передеплой.
+
+### T13 · UI: статус и управление · M · todo
+Статус xray/zapret, кнопка рестарта, прогон tests/smoke.sh, текущий exit IP, хвост логов.
+**Приёмка:** дашборд показывает реальный статус и exit IP; рестарт работает; smoke виден в UI.
+
+### T14 · install.sh: интеграция gateway-ui · M · todo
+INSTALL_WEB_UI=yes: положить бинарник (готовый из релиза, под arch), service, начальный пароль,
+iptables-правило «UI-порт только из LAN».
+**Приёмка:** после install UI доступен из LAN по паролю, недоступен снаружи.
+
+### T15 · Доки и smoke под gateway-ui · L · todo
+README/AGENT/CANON: как пользоваться UI; smoke.sh — проверка gateway-ui.service.
+**Приёмка:** доки описывают UI, smoke проверяет сервис.
+
+---
 
 ### T7 · Протестировать ветку process-scaffold на тестовом стенде · M · done
 **Контекст:** выделенный тестовый стенд — Debian 13 trixie x86_64, IP=192.168.1.132.
