@@ -31,7 +31,8 @@ LAN ──┬─ TCP 80/443 ─► iptables REDIRECT :12345 ─► xray dokodemo
 - Inbounds: `tproxy-in` :12345 (dokodemo-door TCP/UDP, [config.template.json:36](../xray/config.template.json:36)), `socks-in` :1080, `http-in` :8080, `tproxy-udp` :12346.
 - Outbounds: `direct` (freedom), `proxy` (Vision/TCP, **объявлен но не используется в роутинге** — [config.template.json:136](../xray/config.template.json:136)), `proxy-mux` (gRPC, serviceName=`grpc-meta` — [config.template.json:171](../xray/config.template.json:171)).
 - **Роутинг**: всё заблокированное → `proxy-mux`; приватные сети, VPS, Steam, BitTorrent → `direct` ([config.template.json:214](../xray/config.template.json:214)).
-- **Список доменов роутинга — генерируемый**: единственный источник истины — `xray/domains/*.txt`; [build-domains.sh](../xray/build-domains.sh) превращает их в JSON-массив, install.sh подставляет в `${ROUTING_DOMAINS}` при рендере. Пополнять = дописать строку в .txt (T6). IP-правила Meta/Telegram и Steam-direct остаются захардкоженными в шаблоне.
+- **Список доменов роутинга — генерируемый**: единственный источник истины — `xray/domains/*.txt`; [build-domains.sh](../xray/build-domains.sh) превращает их в JSON-массив. Пополнять = дописать строку в .txt (T6). IP-правила Meta/Telegram и Steam-direct остаются захардкоженными в шаблоне.
+- **Рендер config.json — единственное место**: [render-config.sh](../xray/render-config.sh) (T8) делает резолв VPS_ADDR→IP, зовёт build-domains.sh, envsubst, `xray -test` по временному `.json` до атомарной подмены. install.sh ([install.sh:286](../install.sh:286)) и будущий UI зовут именно его — логика не дублируется.
 - systemd: [../systemd/xray.service](../systemd/xray.service), ставится в [install.sh:301](../install.sh:301).
 
 ### zapret (DPI bypass)
@@ -53,7 +54,7 @@ LAN ──┬─ TCP 80/443 ─► iptables REDIRECT :12345 ─► xray dokodemo
 
 ### gateway-ui (веб-интерфейс) — ПЛАН (кода ещё нет)
 - Go, один статичный бинарник, фронтенд через embed.FS; systemd `gateway-ui.service`; bind на LAN-IP, доступ по паролю.
-- Тонкий оркестратор над примитивами: правит config.env / xray/domains, зовёт `render-config.sh` (ПЛАН — вынести из install.sh) + `build-domains.sh`, рестартит сервисы, гоняет `tests/smoke.sh`.
+- Тонкий оркестратор над примитивами: правит config.env / xray/domains, зовёт `render-config.sh` (готов, T8) + `build-domains.sh`, рестартит сервисы, гоняет `tests/smoke.sh`.
 - Пользовательские домены из UI — вне репо: `/etc/gateway/domains/local.txt` (переживают rsync --delete при передеплое).
 - Скоуп v1: IP роутера (ROUTER_IP в config.env), списки доменов, статус/управление. Детали — DECISIONS 2026-06-10, задачи T8–T15.
 

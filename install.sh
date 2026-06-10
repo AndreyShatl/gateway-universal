@@ -273,36 +273,17 @@ if [[ "$INSTALL_XRAY" == "yes" ]]; then
     [[ -s "$XRAY_DIR/geoip.dat"   ]] || warn "geoip.dat is missing"
     ok "Geodata ready"
 
-    # Резолвим VPS_ADDR → IP для правила "ip" (xray ожидает IP/CIDR, не домен).
-    # Для "address" в outbound'е оставляем как есть (там и домен подходит).
-    if [[ "$VPS_ADDR" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        VPS_ADDR_IP="$VPS_ADDR"
-    else
-        VPS_ADDR_IP="$(getent ahostsv4 "$VPS_ADDR" 2>/dev/null | awk 'NR==1{print $1}')"
-        [[ -n "$VPS_ADDR_IP" ]] || die "Cannot resolve VPS_ADDR=$VPS_ADDR to IP"
-        say "Resolved $VPS_ADDR → $VPS_ADDR_IP"
-    fi
-
-    # Список доменов для роутинга генерируется из xray/domains/*.txt
-    # (единственный источник истины — пополняется правкой .txt, не JSON).
-    say "Building routing domain list from xray/domains/…"
-    ROUTING_DOMAINS="$(bash "$SCRIPT_DIR/xray/build-domains.sh")" \
-        || die "build-domains.sh failed"
-    ok "Routing domains: $(printf '%s\n' "$ROUTING_DOMAINS" | grep -c .) entries"
-
-    # Конфиг из шаблона
+    # Рендер config.json — общий код для install и веб-UI (xray/render-config.sh):
+    # резолв VPS_ADDR→IP, список доменов из xray/domains, envsubst, xray -test.
     say "Rendering xray config…"
-    export VPS_ADDR VPS_ADDR_IP VPS_PORT_VISION VPS_PORT_GRPC VPS_UUID_VISION VPS_UUID_GRPC
-    export VPS_PUBKEY VPS_SHORT_ID VPS_SERVER_NAME VPS_FINGERPRINT ROUTING_DOMAINS
-    envsubst < "$SCRIPT_DIR/xray/config.template.json" > "$XRAY_DIR/config.json"
-
-    # Проверка конфига
-    if "$XRAY_DIR/xray" -test -config "$XRAY_DIR/config.json" >/dev/null 2>&1; then
-        ok "xray config valid"
-    else
-        "$XRAY_DIR/xray" -test -config "$XRAY_DIR/config.json" || true
-        die "xray config invalid — check placeholders"
-    fi
+    export VPS_ADDR VPS_PORT_VISION VPS_PORT_GRPC VPS_UUID_VISION VPS_UUID_GRPC
+    export VPS_PUBKEY VPS_SHORT_ID VPS_SERVER_NAME VPS_FINGERPRINT
+    bash "$SCRIPT_DIR/xray/render-config.sh" \
+        --template "$SCRIPT_DIR/xray/config.template.json" \
+        --out "$XRAY_DIR/config.json" \
+        --xray "$XRAY_DIR/xray" \
+        || die "render-config failed (проверь VPS-параметры / шаблон)"
+    ok "xray config valid"
 
     # systemd unit
     say "Installing xray.service…"

@@ -21,10 +21,13 @@
 
 Порядок: T8→T9 (предусловия) → T10 (каркас) → T11–T13 (функции) → T14 (install) → T15 (доки).
 
-### T8 · Вынести рендер config.json в xray/render-config.sh · M · todo
-Сейчас рендер зашит в install.sh ([install.sh:286-300](install.sh:286)). Вынести в общий скрипт,
-чтобы install.sh и будущий UI звали один код (иначе логика разъедется).
-**Приёмка:** install.sh использует render-config.sh; smoke на стенде PASS; поведение не изменилось.
+### T8 · Вынести рендер config.json в xray/render-config.sh · M · done
+Создан [xray/render-config.sh](xray/render-config.sh): резолв VPS_ADDR→IP, build-domains, envsubst,
+`xray -test` по временному .json до атомарной подмены (невалидный конфиг больше не затирает рабочий).
+install.sh зовёт его ([install.sh:286](install.sh:286)).
+**Приёмка (стенд 192.168.1.132):** install → `xray config valid`, proxy=386 (идентично прежнему),
+temp прибран, SMOKE PASS. Локально JSON proxy=386/direct=11/rules=10.
+**Баг по ходу:** mktemp без .json → `xray -test` «failed to get format»; пофикшено суффиксом .json.
 
 ### T9 · build-domains.sh читает доп. каталог /etc/gateway/domains/ · M · todo
 Кроме xray/domains/*.txt читать ещё /etc/gateway/domains/*.txt (пользовательские домены из UI вне репо).
