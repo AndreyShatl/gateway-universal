@@ -4,7 +4,7 @@
 
 Нативный xray (VLESS+Reality) + zapret (nfqws) + iptables + Instagram QUIC bypass. Без Docker.
 
-**Дополнительно:** защита от петли шлюза (fix-gateway) + опциональный реверс-туннель к VPS для экстренного доступа.
+**Дополнительно:** Discord-голос (UDP) через VLESS-туннель (discord-tproxy) + защита от петли шлюза (fix-gateway) + опциональный реверс-туннель к VPS для экстренного доступа.
 
 ## Как это работает
 
@@ -98,6 +98,7 @@ sudo bash install.sh
 | iptables rules | `/etc/iptables/rules.v4` (через netfilter-persistent) |
 | sysctl | `/etc/sysctl.d/99-gateway.conf` (ip_forward=1) |
 | fix-gateway.service | `/etc/systemd/system/fix-gateway.service` |
+| discord-tproxy (UDP-голос через туннель) | `/opt/gateway/discord-tproxy.sh` + `/etc/systemd/system/discord-tproxy.service` |
 | ssh-tunnel.service (опц.) | `/etc/systemd/system/ssh-tunnel.service` |
 
 ## Проверка после установки
@@ -156,6 +157,18 @@ journalctl -u zapret -f                         # логи zapret
 systemctl status ssh-tunnel                     # статус туннеля
 journalctl -u ssh-tunnel -f                     # логи туннеля
 ```
+
+## Добавить сайт/сервис в обход
+
+Список доменов, которые ходят через VPS, лежит в тематических файлах [xray/domains/](xray/domains/)
+(`streaming.txt`, `gaming.txt`, `ai-services.txt` и т.д.). Чтобы добавить сервис — допиши строку
+в подходящий файл (домен или `geosite:имя`):
+```bash
+echo "example.com" >> xray/domains/streaming.txt
+```
+При установке `install.sh` собирает из этих файлов единый список роутинга (`xray/build-domains.sh`).
+После правки — передеплой (`bash deploy.sh --host root@IP`) или вручную на шлюзе перерендерить конфиг
+и `systemctl restart xray`. Проверить, что шлюз жив: `bash tests/smoke.sh`.
 
 ## Обновление стратегий Zapret
 

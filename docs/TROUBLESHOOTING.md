@@ -60,10 +60,11 @@ for pid in $(pgrep -x nfqws); do kill -9 $pid; done
 
 ### Instagram видео зависает / бесконечная загрузка
 **Причина 1:** Все соединения идут через `proxy` (Vision) → он захлёбывается на десятках параллельных connection к CDN.
-**Лечение:** убедиться что в `xray/config.json` Meta/Instagram идут через `proxy-mux` (gRPC), а не `proxy`:
+**Лечение:** убедиться что в `xray/config.json` Meta/Instagram идут через `proxy-mux` (gRPC), а не `proxy`.
+Список доменов роутинга — единый сгенерированный блок, поэтому проверяем через парсинг JSON:
 ```bash
-grep -A2 'geosite:instagram' /opt/xray/config.json | grep outboundTag
-# должно быть "proxy-mux"
+python3 -c "import json;d=json.load(open('/opt/xray/config.json'));print([r['outboundTag'] for r in d['routing']['rules'] if 'geosite:instagram' in r.get('domain',[])])"
+# должно быть ['proxy-mux']
 ```
 
 **Причина 2:** QUIC к Meta блокируется глобальным DROP.
