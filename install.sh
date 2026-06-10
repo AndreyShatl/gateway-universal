@@ -165,8 +165,8 @@ ask_secret() {
 if [[ "$INSTALL_XRAY" == "yes" ]]; then
     say "VPS (VLESS + Reality) — данные из 3x-ui панели"
     ask        VPS_ADDR           "VPS IP или домен"
-    ask        VPS_PORT_VISION    "Порт VLESS Vision (основной)"             "$VPS_PORT_VISION"
-    ask        VPS_PORT_GRPC      "Порт VLESS gRPC (для Meta/Instagram)"     "$VPS_PORT_GRPC"
+    ask        VPS_PORT_GRPC      "Порт VLESS gRPC (ОСНОВНОЙ канал — весь proxy-трафик)" "$VPS_PORT_GRPC"
+    ask        VPS_PORT_VISION    "Порт VLESS Vision (запасной, в роутинге не используется)" "$VPS_PORT_VISION"
     ask_secret VPS_UUID_VISION    "UUID клиента Vision"
     ask_secret VPS_UUID_GRPC      "UUID клиента gRPC"                        "$VPS_UUID_VISION"
     ask_secret VPS_PUBKEY         "Reality Public Key"
@@ -283,10 +283,17 @@ if [[ "$INSTALL_XRAY" == "yes" ]]; then
         say "Resolved $VPS_ADDR → $VPS_ADDR_IP"
     fi
 
+    # Список доменов для роутинга генерируется из xray/domains/*.txt
+    # (единственный источник истины — пополняется правкой .txt, не JSON).
+    say "Building routing domain list from xray/domains/…"
+    ROUTING_DOMAINS="$(bash "$SCRIPT_DIR/xray/build-domains.sh")" \
+        || die "build-domains.sh failed"
+    ok "Routing domains: $(printf '%s\n' "$ROUTING_DOMAINS" | grep -c .) entries"
+
     # Конфиг из шаблона
     say "Rendering xray config…"
     export VPS_ADDR VPS_ADDR_IP VPS_PORT_VISION VPS_PORT_GRPC VPS_UUID_VISION VPS_UUID_GRPC
-    export VPS_PUBKEY VPS_SHORT_ID VPS_SERVER_NAME VPS_FINGERPRINT
+    export VPS_PUBKEY VPS_SHORT_ID VPS_SERVER_NAME VPS_FINGERPRINT ROUTING_DOMAINS
     envsubst < "$SCRIPT_DIR/xray/config.template.json" > "$XRAY_DIR/config.json"
 
     # Проверка конфига

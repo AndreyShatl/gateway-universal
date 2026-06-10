@@ -15,3 +15,7 @@ huggingface.co
 stability.ai
 deepmind.com
 replicate.com
+
+# --- доположено при переходе на txt-источник (T6, 2026-06-10) ---
+claude.com
+claudeusercontent.com

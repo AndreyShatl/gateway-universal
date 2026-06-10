@@ -19,3 +19,8 @@ stackexchange.com
 notion.so
 notion.site
 notion.com
+
+# --- доположено при переходе на txt-источник (T6, 2026-06-10) ---
+tdlib.github.io
+website-files.com
+localizeapi.com

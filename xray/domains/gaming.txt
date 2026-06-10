@@ -53,3 +53,20 @@ playstation.net
 sonyentertainmentnetwork.com
 nintendo.com
 nintendo.net
+
+# --- доположено при переходе на txt-источник (T6, 2026-06-10) ---
+atoma.cloud
+darktide.com
+fatshark.se
+fatsharkgames.com
+fbcfirebreak.com
+firebreak.firstlook.gg
+firstlook.gg
+gamesworkshop.com
+nakamacloud.io
+playfab.com
+playfabapi.com
+remedy.helpshift.com
+remedygames.com
+unigine.com
+warhammer.com
