@@ -43,9 +43,12 @@ embed.FS-шаблоны, /healthz, /api/ping, дашборд с заглушка
 верный→303+cookie; /api/ping под auth→{"status":"ok"}; дашборд отдаётся.
 **Осталось на потом:** systemd-юнит и bind-на-LAN+iptables — в T14; sha256→bcrypt/argon2 — позже.
 
-### T11 · UI: поле IP роутера · M · todo
-Чтение/запись ROUTER_IP в config.env, перерендер+рестарт fix-gateway.service.
-**Приёмка:** смена IP в UI меняет config.env и маршрут fix-gateway; видно на стенде.
+### T11 · UI: поле IP роутера · M · done
+Логика fix-gateway вынесена в [systemd/apply-fix-gateway.sh](systemd/apply-fix-gateway.sh) (общий код
+с install.sh). UI: GET/POST `/api/router-ip` ([gateway-ui/router.go](gateway-ui/router.go)) — читает/пишет
+ROUTER_IP в config.env (атомарно, права сохраняются) + зовёт apply-скрипт; форма в дашборде.
+**Приёмка (стенд):** GET=192.168.1.1; POST невалидный→400 без смены маршрута; POST валидный→200,
+fix-gateway applied, маршрут цел, интернет жив, config.env обновлён.
 
 ### T12 · UI: списки доменов · M · todo
 Показ/добавление/удаление доменов в /etc/gateway/domains/local.txt → build-domains → render-config → restart xray.
