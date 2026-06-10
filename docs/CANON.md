@@ -51,6 +51,12 @@ LAN ──┬─ TCP 80/443 ─► iptables REDIRECT :12345 ─► xray dokodemo
 - `discord-tproxy` — Discord voice UDP через туннель ([install.sh:435](../install.sh:435), [../iptables/discord-tproxy.sh](../iptables/discord-tproxy.sh)).
 - `ssh-tunnel` — reverse SSH для экстренного доступа ([install.sh:450](../install.sh:450)).
 
+### gateway-ui (веб-интерфейс) — ПЛАН (кода ещё нет)
+- Go, один статичный бинарник, фронтенд через embed.FS; systemd `gateway-ui.service`; bind на LAN-IP, доступ по паролю.
+- Тонкий оркестратор над примитивами: правит config.env / xray/domains, зовёт `render-config.sh` (ПЛАН — вынести из install.sh) + `build-domains.sh`, рестартит сервисы, гоняет `tests/smoke.sh`.
+- Пользовательские домены из UI — вне репо: `/etc/gateway/domains/local.txt` (переживают rsync --delete при передеплое).
+- Скоуп v1: IP роутера (ROUTER_IP в config.env), списки доменов, статус/управление. Детали — DECISIONS 2026-06-10, задачи T8–T15.
+
 ## Состояние и конфигурация
 - Конфигурация деплоя: `config.env` (НЕ в git, см. [../config.example.env](../config.example.env)).
 - Параметры берутся в порядке: CLI флаги → env → config.env → интерактив ([install.sh:23-27](../install.sh:23)).
