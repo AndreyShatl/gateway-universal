@@ -33,6 +33,14 @@
              font-family:ui-monospace,monospace; font-size:13px; }
   .list .del { background:none; border:0; color:#f87171; cursor:pointer; font-size:16px; }
   .empty { color:#6b7280; font-size:13px; margin-top:10px; }
+  .svc { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:4px; }
+  .svc .b { padding:3px 10px; border-radius:999px; font-size:12px; background:#1f2937; color:#9ca3af; }
+  .svc .b.up { background:#064e3b; color:#6ee7b7; }
+  .svc .b.down { background:#3f1d1d; color:#f87171; }
+  .out { background:#0b0d11; border:1px solid #262a33; border-radius:8px; padding:10px;
+         font-size:12px; white-space:pre-wrap; max-height:240px; overflow:auto; margin-top:10px; }
+  .out:empty { display:none; }
+  select { padding:9px 10px; border:1px solid #333; border-radius:8px; background:#0f1115; color:#e6e6e6; }
 </style>
 </head>
 <body>
@@ -66,7 +74,25 @@
     </div>
     <div class="card">
       <h2>Статус и управление</h2>
-      <div class="muted">Скоро (T13): статус xray/zapret, рестарт, exit IP, smoke.</div>
+      <div id="svc" class="svc"></div>
+      <div class="row" style="flex-wrap:wrap">
+        <button id="reXray">Рестарт xray</button>
+        <button id="reZapret">Рестарт zapret</button>
+        <button id="btnExit">Exit IP</button>
+        <button id="btnSmoke">Прогнать smoke</button>
+      </div>
+      <div id="mgmtMsg" class="msg"></div>
+      <pre id="mgmtOut" class="out"></pre>
+      <div class="row">
+        <select id="logSvc">
+          <option value="xray">xray</option>
+          <option value="zapret">zapret</option>
+          <option value="fix-gateway">fix-gateway</option>
+          <option value="discord-tproxy">discord-tproxy</option>
+        </select>
+        <button id="btnLogs">Логи</button>
+      </div>
+      <pre id="logOut" class="out"></pre>
     </div>
   </main>
   <script>
@@ -116,6 +142,57 @@
     document.getElementById('domAdd').onclick = () => { if (dInput.value.trim()) domAction('add', dInput.value.trim()); };
     dInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('domAdd').click(); });
     fetch('/api/domains').then(r => r.json()).then(d => renderDomains(d.domains));
+
+    // Статус и управление
+    const svcEl = document.getElementById('svc');
+    const mMsg = document.getElementById('mgmtMsg');
+    const mOut = document.getElementById('mgmtOut');
+    const logOut = document.getElementById('logOut');
+    function loadStatus() {
+      fetch('/api/status').then(r => r.json()).then(d => {
+        svcEl.innerHTML = '';
+        for (const [name, st] of Object.entries(d.services || {})) {
+          const b = document.createElement('span');
+          b.className = 'b ' + (st === 'active' ? 'up' : (st === 'inactive' ? '' : 'down'));
+          b.textContent = name + ': ' + st;
+          svcEl.append(b);
+        }
+        const n = document.createElement('span'); n.className = 'b'; n.textContent = 'nfqws: ' + d.nfqws;
+        svcEl.append(n);
+      });
+    }
+    loadStatus();
+    function restart(svc) {
+      mMsg.className = 'msg'; mMsg.textContent = 'Рестарт ' + svc + '…'; mOut.textContent = '';
+      fetch('/api/restart', { method:'POST', body:new URLSearchParams({ service: svc }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { mMsg.className = 'msg good'; mMsg.textContent = '✓ ' + svc + ': ' + d.state; loadStatus(); }
+          else { mMsg.className = 'msg bad'; mMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        });
+    }
+    document.getElementById('reXray').onclick = () => restart('xray');
+    document.getElementById('reZapret').onclick = () => restart('zapret');
+    document.getElementById('btnExit').onclick = () => {
+      mMsg.className = 'msg'; mMsg.textContent = 'Проверяю exit IP…'; mOut.textContent = '';
+      fetch('/api/exit-ip').then(r => r.json()).then(d => {
+        mMsg.className = 'msg good';
+        mMsg.textContent = `Провайдер: ${d.provider || '?'} · через VPS: ${d.vps || '?'}`;
+      });
+    };
+    document.getElementById('btnSmoke').onclick = () => {
+      mMsg.className = 'msg'; mMsg.textContent = 'Прогон smoke…'; mOut.textContent = '';
+      fetch('/api/smoke').then(r => r.json()).then(d => {
+        mMsg.className = 'msg ' + (d.pass ? 'good' : 'bad');
+        mMsg.textContent = d.pass ? '✓ SMOKE PASS' : '✗ SMOKE FAIL';
+        mOut.textContent = d.output || '';
+      });
+    };
+    document.getElementById('btnLogs').onclick = () => {
+      const svc = document.getElementById('logSvc').value;
+      logOut.textContent = 'Загрузка…';
+      fetch('/api/logs?lines=50&service=' + encodeURIComponent(svc))
+        .then(r => r.json()).then(d => { logOut.textContent = d.log || d.error || '(пусто)'; });
+    };
   </script>
 </body>
 </html>

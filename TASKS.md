@@ -57,9 +57,13 @@ fix-gateway applied, маршрут цел, интернет жив, config.env 
 **Приёмка (стенд, живой xray):** add невалидный→400; add домен→200, proxy 386→387, в конфиге,
 xray active; повтор→«без изменений»; remove→proxy 387→386. Домены вне репо → переживают передеплой (T9).
 
-### T13 · UI: статус и управление · M · todo
-Статус xray/zapret, кнопка рестарта, прогон tests/smoke.sh, текущий exit IP, хвост логов.
-**Приёмка:** дашборд показывает реальный статус и exit IP; рестарт работает; smoke виден в UI.
+### T13 · UI: статус и управление · M · done
+[gateway-ui/status.go](gateway-ui/status.go): /api/status (сервисы+nfqws), /api/exit-ip
+(провайдер vs VPS), /api/restart (whitelist xray/zapret/fix-gateway/discord-tproxy),
+/api/smoke (tests/smoke.sh), /api/logs (journalctl). Карточка управления в дашборде.
+**Приёмка (стенд):** status отдаёт состояния; exit-ip=провайдер+VPS; restart xray→active,
+запрещённый→400; smoke гоняет реальный smoke.sh (честно вернул FAIL сразу после рестарта,
+PASS когда xray устоялся); logs отдаёт N строк journalctl.
 
 ### T14 · install.sh: интеграция gateway-ui · M · todo
 INSTALL_WEB_UI=yes: положить бинарник (готовый из релиза, под arch), service, начальный пароль,

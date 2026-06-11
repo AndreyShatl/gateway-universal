@@ -81,6 +81,11 @@ func main() {
 	mux.HandleFunc("/api/ping", s.requireAuth(s.handlePing))
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
+	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
+	mux.HandleFunc("/api/exit-ip", s.requireAuth(s.handleExitIP))
+	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
+	mux.HandleFunc("/api/smoke", s.requireAuth(s.handleSmoke))
+	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
 	mux.HandleFunc("/", s.requireAuth(s.handleDashboard))
 
 	srv := &http.Server{
