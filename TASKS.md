@@ -69,10 +69,13 @@ API ([gateway-ui/zapret.go](gateway-ui/zapret.go)): GET /api/zapret/strategies, 
 **Приёмка (стенд):** set tcp_general repeats=8 → override-файл + nfqws repeats=8 + zapret active;
 reset → убрано; smoke 9/9; UI отдаёт 7 блоков.
 
-### T25 · Обновление zapret из апстрима (bol-van) · M · todo
-/opt/zapret — git-репо bol-van/zapret (shallow). Кнопка: показать текущий коммит, «Обновить» →
-git fetch --depth 1 + reset --hard origin + пересборка nfqws/mdig/tpws + рестарт zapret.
-**Критерий приёмки:** показывает версию; обновление подтягивает апстрим и пересобирает; smoke PASS после.
+### T25 · Обновление zapret из апстрима (bol-van) · M · done
+API ([gateway-ui/zapret.go](gateway-ui/zapret.go)): GET /api/zapret/version (коммит+описание+статус),
+POST /api/zapret/update → фон через systemd-run (unit gateway-zupdate): git fetch --depth 1 +
+reset --hard FETCH_HEAD + make nfq/mdig/tpws + рестарт zapret, лог в /etc/gateway/zupdate.log.
+UI: карточка «Движок zapret» (версия, кнопка Обновить с подтверждением, прогресс+лог). Стратегии/домены не трогаются.
+**Приёмка (стенд):** версия отображается; обновление отработало в фоне (rc=0, пересборка),
+zapret active, smoke 9/9 (апстрим уже был на последней — конвейер сработал вхолостую корректно).
 
 ## todo — хвосты / на будущее
 
