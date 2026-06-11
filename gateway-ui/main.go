@@ -58,6 +58,7 @@ func main() {
 	userDomains := flag.String("user-domains-dir", "/etc/gateway/domains", "каталог пользовательских доменов")
 	xrayConfig := flag.String("xray-config", "/opt/xray/config.json", "рабочий config.json")
 	xrayBin := flag.String("xray-bin", "/opt/xray/xray", "бинарник xray")
+	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
 	if *configEnv == "" {
@@ -69,6 +70,10 @@ func main() {
 	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
+	}
+	if *initPwd {
+		log.Printf("ui.conf готов (%s) — выходим", *conf)
+		return
 	}
 	s.tmpl = template.Must(template.ParseFS(staticFS, "static/*.html"))
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=gateway-ui — веб-интерфейс шлюза (LAN-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# LAN-only: разрешить UI-порт из локальной сети, остальное — DROP.
+# Делаем на каждом старте (идемпотентно), чтобы не писать в rules.v4
+# (иначе риск с NFQUEUE-персистентностью zapret — см. TROUBLESHOOTING).
+ExecStartPre=/bin/bash -c 'iptables -C INPUT -p tcp --dport __PORT__ -s __LAN__ -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport __PORT__ -s __LAN__ -j ACCEPT'
+ExecStartPre=/bin/bash -c 'iptables -C INPUT -p tcp --dport __PORT__ -j DROP 2>/dev/null || iptables -A INPUT -p tcp --dport __PORT__ -j DROP'
+ExecStart=__UI_BIN__ --listen :__PORT__ --repo __REPO__ --config-env __CONFIG_ENV__
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
