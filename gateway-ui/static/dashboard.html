@@ -86,6 +86,9 @@
              border-radius:8px; background:var(--input-bg); color:var(--text); font-family:ui-monospace,monospace;
              font-size:13px; resize:vertical; }
   .soon { color:var(--faint); font-size:13px; margin-top:8px; }
+  .kv { margin:12px 0 0; display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:13px; }
+  .kv dt { color:var(--muted); }
+  .kv dd { margin:0; font-family:ui-monospace,monospace; word-break:break-all; }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -132,9 +135,17 @@
 
       <section data-sec="connection">
         <div class="card">
-          <h2>Подключение к VPS</h2>
-          <div class="soon">Скоро (T19): вставить ссылку <code>vless://…</code> как в мобильных
-            VPN-клиентах — UI распарсит её и настроит VPS (адрес, UUID, Reality-ключи).</div>
+          <h2>Текущее подключение</h2>
+          <div class="muted">Только для чтения — чтобы случайно ничего не сбить. Сменить можно вставкой новой ссылки ниже.</div>
+          <dl id="connView" class="kv"><dd class="muted">загрузка…</dd></dl>
+        </div>
+        <div class="card">
+          <h2>Заменить подключение</h2>
+          <div class="muted">Вставьте ссылку <code>vless://…</code> (Reality, gRPC) — как в мобильных VPN-клиентах.
+            UI распарсит её и настроит VPS. Старое подключение будет заменено.</div>
+          <textarea id="connLink" rows="3" placeholder="vless://UUID@host:2083?type=grpc&security=reality&pbk=…&sid=…&sni=…"></textarea>
+          <div class="row"><button id="connApply">Применить</button></div>
+          <div id="connMsg" class="msg"></div>
         </div>
       </section>
 
@@ -207,6 +218,32 @@
     }
     applyTheme(document.documentElement.dataset.theme || 'dark');
     themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+
+    // --- Подключение ---
+    const connView = document.getElementById('connView');
+    const connMsg = document.getElementById('connMsg');
+    function loadConnection() {
+      fetch('/api/connection').then(r => r.json()).then(d => {
+        if (!d.configured) { connView.innerHTML = '<dd class="muted">Не настроено — вставьте ссылку ниже.</dd>'; return; }
+        const rows = [
+          ['Адрес VPS', d.addr], ['Порт gRPC', d.port_grpc], ['Порт Vision', d.port_vision],
+          ['SNI', d.sni], ['Fingerprint', d.fingerprint],
+          ['UUID (gRPC)', d.uuid_grpc], ['Reality pubkey', d.pubkey], ['Short ID', d.short_id],
+        ];
+        connView.innerHTML = rows.filter(r => r[1]).map(r => `<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join('');
+      }).catch(() => { connView.innerHTML = '<dd class="bad">ошибка загрузки</dd>'; });
+    }
+    loadConnection();
+    document.getElementById('connApply').onclick = () => {
+      const link = document.getElementById('connLink').value.trim();
+      if (!link) return;
+      connMsg.className = 'msg'; connMsg.textContent = 'Применяю…';
+      fetch('/api/connection', { method:'POST', body:new URLSearchParams({ link }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { connMsg.className = 'msg good'; connMsg.textContent = '✓ подключение обновлено (' + (d.addr || '') + ')'; document.getElementById('connLink').value = ''; loadConnection(); }
+          else { connMsg.className = 'msg bad'; connMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { connMsg.className = 'msg bad'; connMsg.textContent = '✗ сеть'; });
+    };
 
     // --- Навигация ---
     const navItems = document.querySelectorAll('.sidebar a[data-nav]');
