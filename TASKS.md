@@ -27,11 +27,13 @@
 **Приёмка (стенд):** 6 разделов в HTML, переключение работает, все API живы (status/domains/router/restart/logs),
 сервис active. Выкатано на живой UI.
 
-### T19 · Подключение: импорт vless:// ссылки (как в VPN-клиентах) · H · todo
-Вкладка «Подключение»: вставить vless:// URL (или подписку) → распарсить (адрес, порт, UUID,
-Reality pubkey/shortId/SNI/fingerprint, transport) → записать в config.env → render-config + restart xray.
-Так пользователь настраивает VPS без ручного заполнения полей.
-**Критерий приёмки:** валидная vless-ссылка gRPC настраивает рабочее подключение; невалидная — понятная ошибка.
+### T19 · Подключение: импорт vless:// ссылки (как в VPN-клиентах) · H · done
+[gateway-ui/connection.go](gateway-ui/connection.go): GET /api/connection — текущее подключение
+READ-ONLY с маскировкой секретов (чтобы случайно не сбить); POST link=vless://… → parseVless
+(Reality, grpc/tcp) → запись в config.env → render-config + restart xray. Раздел «Подключение» в UI:
+текущее (read-only dl) + поле вставки ссылки.
+**Приёмка (стенд):** GET отдаёт маскированные addr/порты/sni/uuid/pubkey/sid; POST валидной ссылкой
+(реконструированной из config.env) применяется идемпотентно, xray active; невалидная→400.
 
 ### T20 · Zapret: стратегии + домены + поиск · H · todo
 Вкладка «Zapret»: просмотр/правка стратегий (zapret.sh), управление zapret/domains/*.txt, поиск по стратегиям.

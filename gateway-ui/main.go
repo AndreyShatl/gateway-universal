@@ -91,6 +91,7 @@ func main() {
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/api/ping", s.requireAuth(s.handlePing))
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
+	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/exit-ip", s.requireAuth(s.handleExitIP))
