@@ -65,6 +65,17 @@ func (s *server) curatedSet() map[string]bool {
 	return set
 }
 
+// curatedList — курируемые записи (xray/domains/*.txt) отсортированные A-Z.
+func (s *server) curatedList() []string {
+	m := s.curatedSet()
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // splitEntries разбивает ввод (несколько доменов) по переводам строк,
 // запятым, точкам с запятой и пробелам.
 func splitEntries(raw string) []string {
@@ -75,7 +86,10 @@ func splitEntries(raw string) []string {
 func (s *server) handleDomains(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"domains": s.listDomains()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"domains":  s.listDomains(),  // пользовательские (редактируемые), A-Z
+			"defaults": s.curatedList(),  // курируемые по умолчанию (только чтение), A-Z
+		})
 
 	case http.MethodPost:
 		switch r.FormValue("action") {

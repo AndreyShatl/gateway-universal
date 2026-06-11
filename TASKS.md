@@ -77,6 +77,8 @@ xray active; повтор→«без изменений»; remove→proxy 387→
 **Доработка по фидбеку (batch + дедуп с дефолтами):** ввод пачкой (строки/запятые/пробелы);
 ответ разбит на added/skipped_present/skipped_default(уже в xray/domains курируемых)/invalid.
 Проверено: 2 новых добавлены, youtube.com→skipped_default, мусор→invalid, повтор→skipped_present.
+**Доработка 2 (вид):** GET /api/domains отдаёт ещё `defaults` (курируемые, A-Z); в дашборде они
+под сворачиваемой вкладкой `<details>` (read-only), пользовательские и дефолтные — отсортированы A-Z.
 
 ### T13 · UI: статус и управление · M · done
 [gateway-ui/status.go](gateway-ui/status.go): /api/status (сервисы+nfqws), /api/exit-ip

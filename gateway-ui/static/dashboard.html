@@ -33,6 +33,11 @@
              font-family:ui-monospace,monospace; font-size:13px; }
   .list .del { background:none; border:0; color:#f87171; cursor:pointer; font-size:16px; }
   .empty { color:#6b7280; font-size:13px; margin-top:10px; }
+  .defaults { margin-top:12px; }
+  .defaults summary { cursor:pointer; color:#9ca3af; font-size:13px; user-select:none; }
+  .defaults summary:hover { color:#e6e6e6; }
+  .defaults .list { margin-top:10px; }
+  .list.ro li { color:#9ca3af; }
   .svc { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:4px; }
   .svc .b { padding:3px 10px; border-radius:999px; font-size:12px; background:#1f2937; color:#9ca3af; }
   .svc .b.up { background:#064e3b; color:#6ee7b7; }
@@ -73,6 +78,10 @@
       <div class="row"><button id="domAdd">Добавить</button></div>
       <div id="domMsg" class="msg"></div>
       <ul id="domList" class="list"></ul>
+      <details class="defaults">
+        <summary>Списки по умолчанию (<span id="defCount">…</span>) — идут через VPS</summary>
+        <ul id="defList" class="list ro"></ul>
+      </details>
     </div>
     <div class="card">
       <h2>Статус и управление</h2>
@@ -156,7 +165,19 @@
           if (d.added?.length) dInput.value = '';
         }).catch(() => { dMsg.className = 'msg bad'; dMsg.textContent = '✗ сеть'; });
     };
-    fetch('/api/domains').then(r => r.json()).then(d => renderDomains(d.domains));
+    const defList = document.getElementById('defList');
+    const defCount = document.getElementById('defCount');
+    function renderDefaults(list) {
+      list = list || [];
+      defCount.textContent = list.length;
+      defList.innerHTML = '';
+      for (const d of list) {
+        const li = document.createElement('li');
+        li.textContent = d;
+        defList.append(li);
+      }
+    }
+    fetch('/api/domains').then(r => r.json()).then(d => { renderDomains(d.domains); renderDefaults(d.defaults); });
 
     // Статус и управление
     const svcEl = document.getElementById('svc');
