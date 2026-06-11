@@ -19,12 +19,13 @@
 
 ## todo — хвосты / на будущее
 
-### T16 · Кросс-компиляция release-бинарников gateway-ui (ARM) · M · todo
-Сейчас install собирает gateway-ui на месте через go (требует Go на устройстве). Для Raspberry Pi
-и тонких клиентов нужны готовые бинарники. Сделать сборку под linux/amd64 + arm64 + arm (v7),
-класть в gateway-ui/dist/gateway-ui-<ARCH> (install уже умеет их подхватывать — [install.sh](install.sh)).
-**Критерий приёмки:** скрипт сборки (gateway-ui/build-release.sh) выдаёт бинарники под 3 арх;
-install на устройстве без Go ставит UI из dist/.
+### T16 · Кросс-компиляция release-бинарников gateway-ui · M · blocked
+[gateway-ui/build-release.sh](gateway-ui/build-release.sh) собирает amd64/arm64/armv7l (CGO off,
+-s -w). Релиз v0.1.0 опубликован с тремя ассетами. install.sh скачивает
+gateway-ui-$(uname -m) из releases/latest, фолбэк — сборка из исходников (если есть go).
+**Проверено:** кросс-сборка ок (ELF x86-64/ARM64/ARM32), gh download работает, фолбэк-сборка работает.
+**BLOCKED:** репозиторий приватный → анонимный curl к release отдаёт 404. Нужно решение по доступу
+(сделать репо/релизы публичными или хостить бинарники иначе) — см. вопрос пользователю.
 
 ### T17 · Усилить хеш пароля UI (sha256 → bcrypt) · L · done
 Пароль теперь bcrypt (golang.org/x/crypto/bcrypt v0.31.0, go 1.22). Новый ui.conf — bcrypt-хеш

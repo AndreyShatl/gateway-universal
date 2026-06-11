@@ -217,7 +217,7 @@ apt-get update -qq
 APT_PKGS=(
     curl wget ca-certificates gettext-base
     iptables iproute2 iputils-ping dnsutils
-    gawk sed grep
+    gawk sed grep procps
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
     APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)
@@ -488,18 +488,19 @@ if [[ "$INSTALL_WEB_UI" == "yes" ]]; then
     UI_DIR="${INSTALL_PREFIX}/gateway-ui"
     mkdir -p "$UI_DIR" /etc/gateway
 
-    # 1) Бинарник: готовый из релиза (dist/) или сборка на месте (если есть go)
+    # 1) Бинарник: скачать готовый из GitHub release под арх; если не вышло —
+    #    собрать из исходников (только если на машине есть go).
     UI_OK=yes
-    PREBUILT="$SCRIPT_DIR/gateway-ui/dist/gateway-ui-${ARCH}"
-    if [[ -x "$PREBUILT" ]]; then
-        cp "$PREBUILT" "$UI_DIR/gateway-ui"
-        ok "gateway-ui: prebuilt ($ARCH)"
+    UI_URL="https://github.com/AndreyShatl/gateway-universal/releases/latest/download/gateway-ui-${ARCH}"
+    if curl -fsSL "$UI_URL" -o "$UI_DIR/gateway-ui" 2>/dev/null && [[ -s "$UI_DIR/gateway-ui" ]]; then
+        chmod +x "$UI_DIR/gateway-ui"
+        ok "gateway-ui: скачан из release ($ARCH)"
     elif command -v go >/dev/null 2>&1; then
-        say "Building gateway-ui from source…"
+        say "release недоступен — собираю из исходников…"
         ( cd "$SCRIPT_DIR/gateway-ui" && go build -o "$UI_DIR/gateway-ui" . ) \
             && ok "gateway-ui собран" || { warn "сборка gateway-ui не удалась"; UI_OK=no; }
     else
-        warn "нет prebuilt-бинарника ($PREBUILT) и нет Go — пропускаю gateway-ui"
+        warn "не удалось скачать gateway-ui ($ARCH) и нет Go для сборки — пропускаю"
         UI_OK=no
     fi
 
