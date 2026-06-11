@@ -10,7 +10,7 @@
 bash deploy.sh --host root@IP
 ```
 
-Компоненты: xray (VLESS+Reality, нативно, без Docker) + zapret (nfqws из исходников) + iptables + Instagram QUIC bypass + discord-tproxy (Discord-голос UDP через туннель) + fix-gateway (защита от петли). Список доменов роутинга генерируется из `xray/domains/*.txt` (см. `xray/build-domains.sh`).
+Компоненты: xray (VLESS+Reality, нативно, без Docker) + zapret (nfqws из исходников) + iptables + Instagram QUIC bypass + discord-tproxy (Discord-голос UDP через туннель) + fix-gateway (защита от петли) + gateway-ui (веб-интерфейс на :8088, LAN-only). Список доменов роутинга генерируется из `xray/domains/*.txt` (см. `xray/build-domains.sh`); пользовательские домены из UI — в `/etc/gateway/domains/`.
 
 ## Минимум, что надо спросить у пользователя
 

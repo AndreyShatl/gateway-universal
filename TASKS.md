@@ -77,9 +77,12 @@ WEB_UI_PASSWORD или случайный (печатается). Юнит [syst
 ACCEPT 192.168.0.0/16 + DROP остальное на :8088; вход верным паролем→303, неверным→401.
 **На потом:** кросс-компиляция release-бинарников под arm (сейчас сборка на месте через go).
 
-### T15 · Доки и smoke под gateway-ui · L · todo
-README/AGENT/CANON: как пользоваться UI; smoke.sh — проверка gateway-ui.service.
-**Приёмка:** доки описывают UI, smoke проверяет сервис.
+### T15 · Доки и smoke под gateway-ui · L · done
+README: раздел «Веб-интерфейс (gateway-ui)» (адрес, пароль, возможности, LAN-only, смена пароля).
+AGENT: gateway-ui в компонентах + /etc/gateway/domains. smoke.sh: проверка gateway-ui.service active
++ /healthz с LAN (условно — пропуск если не установлен). Мелочь по фидбеку: из выпадашки логов
+убраны oneshot-сервисы (fix-gateway/discord-tproxy), остались xray/zapret.
+**Приёмка (стенд):** smoke 9/9 PASS (вкл. gateway-ui active + /healthz LAN).
 
 ---
 
