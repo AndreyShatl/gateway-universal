@@ -17,6 +17,21 @@
 
 ---
 
+## todo — хвосты / на будущее
+
+### T16 · Кросс-компиляция release-бинарников gateway-ui (ARM) · M · todo
+Сейчас install собирает gateway-ui на месте через go (требует Go на устройстве). Для Raspberry Pi
+и тонких клиентов нужны готовые бинарники. Сделать сборку под linux/amd64 + arm64 + arm (v7),
+класть в gateway-ui/dist/gateway-ui-<ARCH> (install уже умеет их подхватывать — [install.sh](install.sh)).
+**Критерий приёмки:** скрипт сборки (gateway-ui/build-release.sh) выдаёт бинарники под 3 арх;
+install на устройстве без Go ставит UI из dist/.
+
+### T17 · Усилить хеш пароля UI (sha256 → bcrypt/argon2) · L · todo
+Сейчас пароль в /etc/gateway/ui.conf — salt+sha256 ([gateway-ui/main.go](gateway-ui/main.go)). Для
+админ-доступа лучше KDF. Перейти на bcrypt/argon2 (golang.org/x/crypto — появится зависимость,
+нужен go.sum/вендоринг для офлайн-сборки).
+**Критерий приёмки:** новый формат хеша, обратная совместимость или миграция; сборка офлайн не ломается.
+
 ## todo — веха: веб-интерфейс gateway-ui (архитектура в DECISIONS 2026-06-10)
 
 Порядок: T8→T9 (предусловия) → T10 (каркас) → T11–T13 (функции) → T14 (install) → T15 (доки).
