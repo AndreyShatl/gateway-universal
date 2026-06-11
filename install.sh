@@ -492,8 +492,11 @@ if [[ "$INSTALL_WEB_UI" == "yes" ]]; then
     #    собрать из исходников (только если на машине есть go).
     UI_OK=yes
     UI_URL="https://github.com/AndreyShatl/gateway-universal/releases/latest/download/gateway-ui-${ARCH}"
-    if curl -fsSL "$UI_URL" -o "$UI_DIR/gateway-ui" 2>/dev/null && [[ -s "$UI_DIR/gateway-ui" ]]; then
-        chmod +x "$UI_DIR/gateway-ui"
+    # качаем во временный файл и подменяем через mv — иначе curl -o поверх
+    # запущенного бинарника падает с "Text file busy" при переустановке.
+    if curl -fsSL "$UI_URL" -o "$UI_DIR/gateway-ui.new" 2>/dev/null && [[ -s "$UI_DIR/gateway-ui.new" ]]; then
+        chmod +x "$UI_DIR/gateway-ui.new"
+        mv "$UI_DIR/gateway-ui.new" "$UI_DIR/gateway-ui"
         ok "gateway-ui: скачан из release ($ARCH)"
     elif command -v go >/dev/null 2>&1; then
         say "release недоступен — собираю из исходников…"
