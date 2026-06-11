@@ -28,6 +28,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed static/*.html
@@ -37,8 +39,12 @@ const sessionCookie = "gwsess"
 const sessionTTL = 12 * time.Hour
 
 type server struct {
-	salt, hash string // пароль: salt + sha256hex(salt+password)
-	tmpl       *template.Template
+	// Пароль. Новый формат — bcrypt-хеш в pwHash (legacy=false).
+	// Legacy-формат (старые ui.conf) — salt:sha256hex, legacy=true.
+	pwHash string
+	salt   string
+	legacy bool
+	tmpl   *template.Template
 
 	repoDir        string // каталог репозитория (скрипты, шаблон)
 	configEnv      string // путь к config.env
@@ -108,42 +114,47 @@ func main() {
 func (s *server) loadOrInitPassword(path string) error {
 	data, err := os.ReadFile(path)
 	if err == nil {
-		parts := strings.SplitN(strings.TrimSpace(string(data)), ":", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return fmt.Errorf("повреждён %s (ожидается salt:hash)", path)
+		line := strings.TrimSpace(string(data))
+		switch {
+		case strings.HasPrefix(line, "$2"): // bcrypt
+			s.pwHash, s.legacy = line, false
+		case strings.Contains(line, ":"): // legacy salt:sha256
+			parts := strings.SplitN(line, ":", 2)
+			if parts[0] == "" || parts[1] == "" {
+				return fmt.Errorf("повреждён %s", path)
+			}
+			s.salt, s.pwHash, s.legacy = parts[0], parts[1], true
+		default:
+			return fmt.Errorf("повреждён %s (неизвестный формат)", path)
 		}
-		s.salt, s.hash = parts[0], parts[1]
 		return nil
 	}
 	if !os.IsNotExist(err) {
 		return fmt.Errorf("чтение %s: %w", path, err)
 	}
-	// Первый запуск — пароль из env
+	// Первый запуск — пароль из env, сохраняем как bcrypt
 	pw := os.Getenv("GATEWAY_UI_PASSWORD")
 	if pw == "" {
 		return fmt.Errorf("нет %s и не задан GATEWAY_UI_PASSWORD — пароль не настроен", path)
 	}
-	saltb := make([]byte, 16)
-	if _, err := rand.Read(saltb); err != nil {
+	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
+	if err != nil {
 		return err
 	}
-	s.salt = hex.EncodeToString(saltb)
-	s.hash = hashPassword(s.salt, pw)
-	if err := os.WriteFile(path, []byte(s.salt+":"+s.hash+"\n"), 0o600); err != nil {
+	s.pwHash, s.legacy = string(h), false
+	if err := os.WriteFile(path, append(h, '\n'), 0o600); err != nil {
 		return fmt.Errorf("запись %s: %w", path, err)
 	}
-	log.Printf("пароль инициализирован, сохранён в %s", path)
+	log.Printf("пароль инициализирован (bcrypt), сохранён в %s", path)
 	return nil
 }
 
-func hashPassword(salt, pw string) string {
-	sum := sha256.Sum256([]byte(salt + pw))
-	return hex.EncodeToString(sum[:])
-}
-
 func (s *server) checkPassword(pw string) bool {
-	want := hashPassword(s.salt, pw)
-	return subtle.ConstantTimeCompare([]byte(want), []byte(s.hash)) == 1
+	if s.legacy { // старый sha256(salt+pw)
+		sum := sha256.Sum256([]byte(s.salt + pw))
+		return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(s.pwHash)) == 1
+	}
+	return bcrypt.CompareHashAndPassword([]byte(s.pwHash), []byte(pw)) == nil
 }
 
 // ---- сессии -----------------------------------------------------------
