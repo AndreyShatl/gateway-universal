@@ -6,20 +6,31 @@
 <title>gateway-ui</title>
 <style>
   :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
   body { margin:0; font-family: system-ui, sans-serif; background:#0f1115; color:#e6e6e6; }
   header { display:flex; align-items:center; justify-content:space-between;
-           padding:16px 24px; background:#191c23; border-bottom:1px solid #262a33; }
+           padding:14px 20px; background:#191c23; border-bottom:1px solid #262a33; }
   header h1 { font-size:17px; margin:0; }
   .logout { color:#9ca3af; text-decoration:none; font-size:14px; }
   .logout:hover { color:#e6e6e6; }
-  main { max-width:760px; margin:24px auto; padding:0 16px; display:grid; gap:16px; }
+
+  .app { display:flex; align-items:flex-start; }
+  .sidebar { width:200px; flex-shrink:0; background:#161922; border-right:1px solid #262a33;
+             padding:12px 8px; min-height:calc(100vh - 53px); position:sticky; top:0; }
+  .sidebar a { display:block; padding:10px 12px; margin-bottom:2px; border-radius:8px;
+               color:#9ca3af; cursor:pointer; font-size:14px; text-decoration:none; user-select:none; }
+  .sidebar a:hover { background:#1f2937; color:#e6e6e6; }
+  .sidebar a.active { background:#3b82f6; color:#fff; }
+  main { flex:1; max-width:760px; margin:24px auto; padding:0 16px; width:100%; }
+  section[data-sec] > .card + .card { margin-top:16px; }
+
   .card { background:#191c23; border:1px solid #262a33; border-radius:12px; padding:18px 20px; }
   .card h2 { font-size:15px; margin:0 0 8px; }
   .muted { color:#9ca3af; font-size:13px; }
   .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px;
           background:#1f2937; color:#9ca3af; }
   .ok { background:#064e3b; color:#6ee7b7; }
-  .row { display:flex; gap:8px; margin-top:12px; }
+  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .row input { flex:1; padding:9px 10px; border:1px solid #333; border-radius:8px;
                background:#0f1115; color:#e6e6e6; }
   .row button { padding:9px 16px; border:0; border-radius:8px; background:#3b82f6;
@@ -27,7 +38,7 @@
   .row button:hover { background:#2f6fd6; }
   .msg { font-size:13px; margin-top:8px; min-height:16px; }
   .msg.good { color:#6ee7b7; } .msg.bad { color:#f87171; }
-  .list { list-style:none; padding:0; margin:12px 0 0; max-height:240px; overflow:auto; }
+  .list { list-style:none; padding:0; margin:12px 0 0; max-height:280px; overflow:auto; }
   .list li { display:flex; justify-content:space-between; align-items:center;
              padding:6px 10px; border:1px solid #262a33; border-radius:8px; margin-bottom:6px;
              font-family:ui-monospace,monospace; font-size:13px; }
@@ -46,9 +57,19 @@
          font-size:12px; white-space:pre-wrap; max-height:240px; overflow:auto; margin-top:10px; }
   .out:empty { display:none; }
   select { padding:9px 10px; border:1px solid #333; border-radius:8px; background:#0f1115; color:#e6e6e6; }
-  textarea { width:100%; box-sizing:border-box; margin-top:12px; padding:10px; border:1px solid #333;
+  textarea { width:100%; margin-top:12px; padding:10px; border:1px solid #333;
              border-radius:8px; background:#0f1115; color:#e6e6e6; font-family:ui-monospace,monospace;
              font-size:13px; resize:vertical; }
+  .soon { color:#6b7280; font-size:13px; margin-top:8px; }
+
+  /* Узкий/вертикальный экран — сайдбар в верхнюю полосу */
+  @media (max-width:760px) {
+    .app { flex-direction:column; }
+    .sidebar { width:100%; min-height:0; position:static; display:flex; gap:4px;
+               overflow-x:auto; border-right:0; border-bottom:1px solid #262a33; padding:8px; }
+    .sidebar a { margin-bottom:0; white-space:nowrap; }
+    main { margin:16px auto; }
+  }
 </style>
 </head>
 <body>
@@ -56,61 +77,120 @@
     <h1>🛡️ gateway-ui <span class="muted">— панель шлюза</span></h1>
     <a class="logout" href="/logout">Выйти</a>
   </header>
-  <main>
-    <div class="card">
-      <h2>Состояние сервера UI</h2>
-      <div>API: <span id="ping" class="pill">проверяю…</span></div>
-    </div>
-    <div class="card">
-      <h2>IP роутера</h2>
-      <div class="muted">Реальный шлюз вашей сети (для fix-gateway, чтобы машина не теряла интернет).</div>
-      <div class="row">
-        <input id="routerIp" type="text" placeholder="192.168.1.1" inputmode="numeric">
-        <button id="routerSave">Сохранить</button>
-      </div>
-      <div id="routerMsg" class="msg"></div>
-    </div>
-    <div class="card">
-      <h2>Домены в обход</h2>
-      <div class="muted">Сайты, которые ходят через VPS. Можно пачкой — по одному в строке
-        или через запятую. Домен (example.com) или geosite:тег.</div>
-      <textarea id="domInput" rows="3" placeholder="example.com, geosite:netflix&#10;another-site.org"></textarea>
-      <div class="row"><button id="domAdd">Добавить</button></div>
-      <div id="domMsg" class="msg"></div>
-      <ul id="domList" class="list"></ul>
-      <details class="defaults">
-        <summary>Списки по умолчанию (<span id="defCount">…</span>) — идут через VPS</summary>
-        <ul id="defList" class="list ro"></ul>
-      </details>
-    </div>
-    <div class="card">
-      <h2>Статус и управление</h2>
-      <div id="svc" class="svc"></div>
-      <div class="row" style="flex-wrap:wrap">
-        <button id="reXray">Рестарт xray</button>
-        <button id="reZapret">Рестарт zapret</button>
-        <button id="btnExit">Exit IP</button>
-        <button id="btnSmoke">Прогнать smoke</button>
-      </div>
-      <div id="mgmtMsg" class="msg"></div>
-      <pre id="mgmtOut" class="out"></pre>
-      <div class="row">
-        <select id="logSvc">
-          <option value="xray">xray</option>
-          <option value="zapret">zapret</option>
-        </select>
-        <button id="btnLogs">Логи</button>
-      </div>
-      <pre id="logOut" class="out"></pre>
-    </div>
-  </main>
+
+  <div class="app">
+    <nav class="sidebar">
+      <a data-nav="overview">Обзор</a>
+      <a data-nav="connection">Подключение</a>
+      <a data-nav="domains">Домены</a>
+      <a data-nav="zapret">Zapret</a>
+      <a data-nav="network">Сеть</a>
+      <a data-nav="services">Сервисы</a>
+    </nav>
+
+    <main>
+      <section data-sec="overview">
+        <div class="card">
+          <h2>Состояние</h2>
+          <div style="margin-bottom:10px">API: <span id="ping" class="pill">проверяю…</span></div>
+          <div id="svc" class="svc"></div>
+          <div class="row">
+            <button id="btnExit">Exit IP</button>
+            <button id="btnSmoke">Прогнать smoke</button>
+          </div>
+          <div id="mgmtMsg" class="msg"></div>
+          <pre id="mgmtOut" class="out"></pre>
+        </div>
+      </section>
+
+      <section data-sec="connection">
+        <div class="card">
+          <h2>Подключение к VPS</h2>
+          <div class="soon">Скоро (T19): вставить ссылку <code>vless://…</code> как в мобильных
+            VPN-клиентах — UI распарсит её и настроит VPS (адрес, UUID, Reality-ключи).</div>
+        </div>
+      </section>
+
+      <section data-sec="domains">
+        <div class="card">
+          <h2>Домены в обход</h2>
+          <div class="muted">Сайты, которые ходят через VPS. Можно пачкой — по одному в строке
+            или через запятую. Домен (example.com) или geosite:тег.</div>
+          <textarea id="domInput" rows="3" placeholder="example.com, geosite:netflix&#10;another-site.org"></textarea>
+          <div class="row"><button id="domAdd">Добавить</button></div>
+          <div id="domMsg" class="msg"></div>
+          <ul id="domList" class="list"></ul>
+          <details class="defaults">
+            <summary>Списки по умолчанию (<span id="defCount">…</span>) — идут через VPS</summary>
+            <ul id="defList" class="list ro"></ul>
+          </details>
+        </div>
+      </section>
+
+      <section data-sec="zapret">
+        <div class="card">
+          <h2>Zapret</h2>
+          <div class="soon">Скоро (T20): стратегии обхода DPI, домены zapret и поиск по стратегиям.</div>
+        </div>
+      </section>
+
+      <section data-sec="network">
+        <div class="card">
+          <h2>IP роутера</h2>
+          <div class="muted">Реальный шлюз вашей сети (для fix-gateway, чтобы машина не теряла интернет).</div>
+          <div class="row">
+            <input id="routerIp" type="text" placeholder="192.168.1.1" inputmode="numeric">
+            <button id="routerSave">Сохранить</button>
+          </div>
+          <div id="routerMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="services">
+        <div class="card">
+          <h2>Управление сервисами</h2>
+          <div class="row">
+            <button id="reXray">Рестарт xray</button>
+            <button id="reZapret">Рестарт zapret</button>
+          </div>
+          <div id="svcMsg" class="msg"></div>
+        </div>
+        <div class="card">
+          <h2>Логи</h2>
+          <div class="row">
+            <select id="logSvc">
+              <option value="xray">xray</option>
+              <option value="zapret">zapret</option>
+            </select>
+            <button id="btnLogs">Показать</button>
+          </div>
+          <pre id="logOut" class="out"></pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
   <script>
+    // --- Навигация ---
+    const navItems = document.querySelectorAll('.sidebar a[data-nav]');
+    const sections = document.querySelectorAll('section[data-sec]');
+    function show(name) {
+      let found = false;
+      sections.forEach(s => { const on = s.dataset.sec === name; s.hidden = !on; if (on) found = true; });
+      if (!found) { name = 'overview'; sections.forEach(s => s.hidden = s.dataset.sec !== name); }
+      navItems.forEach(n => n.classList.toggle('active', n.dataset.nav === name));
+      try { localStorage.setItem('gw-sec', name); } catch (e) {}
+    }
+    navItems.forEach(n => n.addEventListener('click', () => show(n.dataset.nav)));
+    show((() => { try { return localStorage.getItem('gw-sec'); } catch (e) { return null; } })() || 'overview');
+
+    // --- Обзор: ping ---
     fetch('/api/ping').then(r => r.json()).then(d => {
       const el = document.getElementById('ping');
       el.textContent = d.status; el.classList.add('ok');
     }).catch(() => { document.getElementById('ping').textContent = 'ошибка'; });
 
-    // IP роутера
+    // --- Сеть: IP роутера ---
     const rIp = document.getElementById('routerIp');
     const rMsg = document.getElementById('routerMsg');
     fetch('/api/router-ip').then(r => r.json()).then(d => { if (d.router_ip) rIp.value = d.router_ip; });
@@ -124,7 +204,7 @@
       }).catch(() => { rMsg.className = 'msg bad'; rMsg.textContent = '✗ сеть'; });
     };
 
-    // Домены
+    // --- Домены ---
     const dInput = document.getElementById('domInput');
     const dMsg = document.getElementById('domMsg');
     const dList = document.getElementById('domList');
@@ -171,19 +251,14 @@
       list = list || [];
       defCount.textContent = list.length;
       defList.innerHTML = '';
-      for (const d of list) {
-        const li = document.createElement('li');
-        li.textContent = d;
-        defList.append(li);
-      }
+      for (const d of list) { const li = document.createElement('li'); li.textContent = d; defList.append(li); }
     }
     fetch('/api/domains').then(r => r.json()).then(d => { renderDomains(d.domains); renderDefaults(d.defaults); });
 
-    // Статус и управление
+    // --- Обзор: статус + exit IP + smoke ---
     const svcEl = document.getElementById('svc');
     const mMsg = document.getElementById('mgmtMsg');
     const mOut = document.getElementById('mgmtOut');
-    const logOut = document.getElementById('logOut');
     function loadStatus() {
       fetch('/api/status').then(r => r.json()).then(d => {
         svcEl.innerHTML = '';
@@ -198,16 +273,6 @@
       });
     }
     loadStatus();
-    function restart(svc) {
-      mMsg.className = 'msg'; mMsg.textContent = 'Рестарт ' + svc + '…'; mOut.textContent = '';
-      fetch('/api/restart', { method:'POST', body:new URLSearchParams({ service: svc }) })
-        .then(async r => { const d = await r.json();
-          if (r.ok) { mMsg.className = 'msg good'; mMsg.textContent = '✓ ' + svc + ': ' + d.state; loadStatus(); }
-          else { mMsg.className = 'msg bad'; mMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
-        });
-    }
-    document.getElementById('reXray').onclick = () => restart('xray');
-    document.getElementById('reZapret').onclick = () => restart('zapret');
     document.getElementById('btnExit').onclick = () => {
       mMsg.className = 'msg'; mMsg.textContent = 'Проверяю exit IP…'; mOut.textContent = '';
       fetch('/api/exit-ip').then(r => r.json()).then(d => {
@@ -223,6 +288,20 @@
         mOut.textContent = d.output || '';
       });
     };
+
+    // --- Сервисы: рестарт + логи ---
+    const sMsg = document.getElementById('svcMsg');
+    function restart(svc) {
+      sMsg.className = 'msg'; sMsg.textContent = 'Рестарт ' + svc + '…';
+      fetch('/api/restart', { method:'POST', body:new URLSearchParams({ service: svc }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { sMsg.className = 'msg good'; sMsg.textContent = '✓ ' + svc + ': ' + d.state; loadStatus(); }
+          else { sMsg.className = 'msg bad'; sMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        });
+    }
+    document.getElementById('reXray').onclick = () => restart('xray');
+    document.getElementById('reZapret').onclick = () => restart('zapret');
+    const logOut = document.getElementById('logOut');
     document.getElementById('btnLogs').onclick = () => {
       const svc = document.getElementById('logSvc').value;
       logOut.textContent = 'Загрузка…';
