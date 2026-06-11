@@ -59,6 +59,19 @@ else
     ok "G2 туннель работает (direct=${DIRECT:-?}, через VPS=$VIATUN)"
 fi
 
+# gateway-ui (если установлен) — сервис active + /healthz
+if [[ -f /etc/systemd/system/gateway-ui.service ]]; then
+    systemctl is-active --quiet gateway-ui.service && ok "gateway-ui.service active" || bad "gateway-ui.service не active"
+    PORT="$(sed -n 's/.*--listen :\([0-9]*\).*/\1/p' /etc/systemd/system/gateway-ui.service | head -1)"
+    LANIP="$(ip -o -4 addr show 2>/dev/null | awk '$4 ~ /^192\.168\.|^10\.|^172\.(1[6-9]|2[0-9]|3[01])\./{sub(/\/.*/,"",$4); print $4; exit}')"
+    if [[ -n "$PORT" && -n "$LANIP" ]]; then
+        curl -s --max-time 4 "http://$LANIP:$PORT/healthz" | grep -q ok \
+            && ok "gateway-ui /healthz (LAN)" || bad "gateway-ui /healthz недоступен с LAN"
+    fi
+else
+    note "gateway-ui не установлен — пропуск"
+fi
+
 echo "-----------------------------------------------"
 if [[ "$FAIL" -eq 0 ]]; then
     printf "${GRN}SMOKE PASS${OFF} — проверок: %d\n" "$PASS"; exit 0
