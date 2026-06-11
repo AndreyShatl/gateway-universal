@@ -22,6 +22,82 @@ type zStrategy struct {
 	Domains []string `json:"domains"` // домены из hostlist
 }
 
+// Блоки стратегий zapret.sh: id → переменная DESYNC_<VAR> + калиброванный дефолт.
+// Оверрайды живут в /etc/gateway/zapret-overrides.env (DESYNC_<VAR>="...").
+type zapBlock struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Varname string `json:"var"`
+	Default string `json:"default"`
+}
+
+var zapBlocks = []zapBlock{
+	{"tcp_instagram", "Instagram (TCP)", "DESYNC_TCP_INSTAGRAM", `--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=11 --dpi-desync-fooling=md5sig,badseq --dpi-desync-autottl=2:2-12 $FAKE_TLS`},
+	{"tcp_discord", "Discord (TCP)", "DESYNC_TCP_DISCORD", `--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS`},
+	{"tcp_general", "General (TCP)", "DESYNC_TCP_GENERAL", `--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS`},
+	{"tcp_youtube", "YouTube (TCP)", "DESYNC_TCP_YOUTUBE", `--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts`},
+	{"udp_instagram", "Instagram (UDP/QUIC)", "DESYNC_UDP_INSTAGRAM", `--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC`},
+	{"udp_general", "General (UDP/QUIC)", "DESYNC_UDP_GENERAL", `--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC`},
+	{"udp_discord", "Discord voice (UDP)", "DESYNC_UDP_DISCORD", `--dpi-desync=fake --dpi-desync-repeats=6`},
+}
+
+func zapBlockByID(id string) *zapBlock {
+	for i := range zapBlocks {
+		if zapBlocks[i].ID == id {
+			return &zapBlocks[i]
+		}
+	}
+	return nil
+}
+
+// handleStrategies — GET: блоки с дефолтом и текущим оверрайдом (если есть).
+func (s *server) handleStrategies(w http.ResponseWriter, r *http.Request) {
+	type row struct {
+		zapBlock
+		Override string `json:"override"`
+	}
+	out := []row{}
+	for _, b := range zapBlocks {
+		ov, _ := readConfigVar(s.overrides, b.Varname)
+		out = append(out, row{b, ov})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"blocks": out})
+}
+
+// handleStrategySet — POST id + desync: записать оверрайд блока и рестартить zapret.
+// action=reset убирает оверрайд (возврат к калиброванному дефолту).
+func (s *server) handleStrategySet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b := zapBlockByID(r.FormValue("id"))
+	if b == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "неизвестный блок"})
+		return
+	}
+	var err error
+	if r.FormValue("action") == "reset" {
+		err = removeConfigVar(s.overrides, b.Varname)
+	} else {
+		desync := strings.TrimSpace(r.FormValue("desync"))
+		if desync == "" || !strings.Contains(desync, "--dpi-desync") {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "пустая или некорректная стратегия (нужны --dpi-desync…)"})
+			return
+		}
+		err = upsertConfigVar(s.overrides, b.Varname, desync)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	if out, err := runCmd("systemctl", "restart", "zapret.service"); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "рестарт zapret: " + err.Error(), "output": out})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 func (s *server) handleZapret(w http.ResponseWriter, r *http.Request) {
 	out, _ := runCmd("bash", "-c", "pgrep -a nfqws")
 	if strings.TrimSpace(out) == "" {

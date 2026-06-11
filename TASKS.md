@@ -60,12 +60,14 @@ udp…), desync совпадает с реальными аргументами 
 статус + список найденных рабочих (накопительно) + лог под `<details>`, авто-опрос каждые 5с пока идёт.
 **Приёмка (стенд):** форма в HTML, /api/scan can_start=true, старт/стоп/опрос работают (проверено в T22).
 
-### T24 · Применить найденную стратегию (per сервис/прото оверрайды) · H · in_progress
-Основа: zapret.sh читает desync каждого блока из переменных DESYNC_<BLOCK> (TCP_INSTAGRAM/DISCORD/
-GENERAL/YOUTUBE, UDP_INSTAGRAM/GENERAL/DISCORD); калиброванные дефолты, оверрайды из
-/etc/gateway/zapret-overrides.env ([zapret/zapret.sh](zapret/zapret.sh)). ✅ сделано, smoke PASS (поведение без оверрайда идентично; nfqws косметически munges argv — не баг).
-Осталось: API get/set оверрайда по блоку + рестарт zapret; UI — редактор стратегии per блок + «применить» из результатов поиска.
-**Критерий приёмки:** задать стратегию блоку из UI/скана → пишется override, zapret рестартует, smoke PASS; сброс к дефолту.
+### T24 · Применить найденную стратегию (per сервис/прото оверрайды) · H · done
+zapret.sh: desync каждого блока из DESYNC_<BLOCK> (TCP instagram/discord/general/youtube,
+UDP instagram/general/discord), дефолты калиброванные, оверрайды из /etc/gateway/zapret-overrides.env.
+API ([gateway-ui/zapret.go](gateway-ui/zapret.go)): GET /api/zapret/strategies, POST /api/zapret/strategy
+(set desync / action=reset) → рестарт zapret. UI: карточка «Стратегии по сервисам» (textarea per блок,
+Сохранить/Сброс) + «Применить в блок» из результатов поиска (вставляет для проверки перед сохранением).
+**Приёмка (стенд):** set tcp_general repeats=8 → override-файл + nfqws repeats=8 + zapret active;
+reset → убрано; smoke 9/9; UI отдаёт 7 блоков.
 
 ### T25 · Обновление zapret из апстрима (bol-van) · M · todo
 /opt/zapret — git-репо bol-van/zapret (shallow). Кнопка: показать текущий коммит, «Обновить» →

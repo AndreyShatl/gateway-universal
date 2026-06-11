@@ -206,6 +206,12 @@
           <div id="scanWorking"></div>
           <details class="defaults"><summary>Лог поиска</summary><pre id="scanLog" class="out"></pre></details>
         </div>
+        <div class="card">
+          <h2>Стратегии по сервисам</h2>
+          <div class="muted">desync-флаги для каждого блока (TCP/UDP отдельно). Пусто = калиброванный дефолт.
+            Сохранение рестартит zapret. Можно вставить найденную поиском стратегию.</div>
+          <div id="stratList"><div class="soon">загрузка…</div></div>
+        </div>
       </section>
 
       <section data-sec="network">
@@ -322,9 +328,14 @@
       const st = d.status ? ('статус: ' + d.status + (d.running ? ' (идёт…)' : '')) : 'не запускался';
       scanMsg.className = 'msg'; scanMsg.textContent = st;
       const ws = d.working || [];
+      const opts = (stratBlocks || []).map(b => `<option value="${b.id}">${esc(b.label)}</option>`).join('');
       scanWorking.innerHTML = ws.length
-        ? '<div class="muted" style="margin-top:10px">Найдено рабочих: ' + ws.length + '</div><ul class="list ro">' +
-          ws.map(w => `<li>${esc(w.domain)} → ${esc(w.strategy)}</li>`).join('') + '</ul>'
+        ? '<div class="muted" style="margin-top:10px">Найдено рабочих: ' + ws.length + '</div>' +
+          ws.map(w => `<div class="strat">
+            <div class="params">${esc(w.domain)} → ${esc(w.strategy)}</div>
+            <div class="row"><select>${opts}</select>
+              <button data-strategy="${esc(w.strategy)}" onclick="applyFound(this)">Применить в блок</button></div>
+          </div>`).join('')
         : '<div class="soon">Рабочих стратегий пока нет.</div>';
       scanLog.textContent = d.log_tail || '';
       // авто-обновление пока идёт
@@ -350,6 +361,55 @@
     scStop.onclick = () => {
       scanMsg.className = 'msg'; scanMsg.textContent = 'Останавливаю…';
       fetch('/api/scan/stop', { method:'POST' }).then(() => loadScan());
+    };
+
+    // --- Стратегии по сервисам (оверрайды) ---
+    const stratList = document.getElementById('stratList');
+    let stratBlocks = [];
+    function loadStrategies() {
+      fetch('/api/zapret/strategies').then(r => r.json()).then(d => {
+        stratBlocks = d.blocks || [];
+        stratList.innerHTML = stratBlocks.map(b => {
+          const val = b.override || '';
+          return `<div class="strat">
+            <div class="h"><span class="tag q">${esc(b.label)}</span>${b.override?'<span class="tag">оверрайд</span>':'<span class="tag">дефолт</span>'}</div>
+            <textarea id="strat_${b.id}" rows="2" placeholder="${esc(b.default)}">${esc(val)}</textarea>
+            <div class="row">
+              <button onclick="saveStrat('${b.id}')">Сохранить</button>
+              <button onclick="resetStrat('${b.id}')">Сброс</button>
+            </div>
+            <div class="msg" id="stratMsg_${b.id}"></div>
+          </div>`;
+        }).join('');
+      });
+    }
+    loadStrategies();
+    window.saveStrat = function (id) {
+      const desync = document.getElementById('strat_' + id).value.trim();
+      const m = document.getElementById('stratMsg_' + id);
+      m.className = 'msg'; m.textContent = 'Сохраняю + рестарт zapret…';
+      fetch('/api/zapret/strategy', { method:'POST', body:new URLSearchParams({ id, desync }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { m.className = 'msg good'; m.textContent = '✓ применено'; loadStrategies(); }
+          else { m.className = 'msg bad'; m.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { m.className = 'msg bad'; m.textContent = '✗ сеть'; });
+    };
+    window.resetStrat = function (id) {
+      const m = document.getElementById('stratMsg_' + id);
+      m.className = 'msg'; m.textContent = 'Сброс к дефолту…';
+      fetch('/api/zapret/strategy', { method:'POST', body:new URLSearchParams({ id, action:'reset' }) })
+        .then(() => { loadStrategies(); });
+    };
+    // применить найденную стратегию в выбранный блок (без авто-сохранения)
+    window.applyFound = function (btn) {
+      const id = btn.closest('.row').querySelector('select').value;
+      const strategy = btn.dataset.strategy || '';
+      let s = strategy.replace(/^\s*nfqws\s+/, '').replace(/--hostlist=\S+/g, '').replace(/--filter-\S+/g, '').trim();
+      const ta = document.getElementById('strat_' + id);
+      ta.value = s;
+      ta.scrollIntoView({ behavior:'smooth', block:'center' });
+      const m = document.getElementById('stratMsg_' + id);
+      m.className = 'msg'; m.textContent = 'Вставлено — проверьте и нажмите «Сохранить»';
     };
 
     // --- Навигация ---
