@@ -68,6 +68,9 @@ CONFIG_ENV="${SCRIPT_DIR}/config.env"
 : "${VPS_TUNNEL_PORT:=2222}"
 : "${INSTALL_FIX_GATEWAY:=yes}"
 : "${ROUTER_IP:=}"
+: "${INSTALL_WEB_UI:=yes}"
+: "${WEB_UI_PORT:=8088}"
+: "${WEB_UI_PASSWORD:=}"
 : "${NON_INTERACTIVE:=no}"
 : "${SKIP_HEALTHCHECK:=no}"
 
@@ -90,6 +93,8 @@ while [[ $# -gt 0 ]]; do
         --no-zapret)           INSTALL_ZAPRET=no; shift;;
         --no-build-zapret)     BUILD_ZAPRET_FROM_SOURCE=no; shift;;
         --no-ig-quic)          INSTAGRAM_QUIC_BYPASS=no; shift;;
+        --no-web-ui)           INSTALL_WEB_UI=no; shift;;
+        --web-ui-port)         WEB_UI_PORT="$2"; shift 2;;
         --no-block-quic)       BLOCK_QUIC=no; shift;;
         --non-interactive|-y)  NON_INTERACTIVE=yes; shift;;
         --skip-healthcheck)    SKIP_HEALTHCHECK=yes; shift;;
@@ -473,6 +478,63 @@ if [[ "$INSTALL_REVERSE_TUNNEL" == "yes" ]]; then
     echo
     say "После добавления ключа туннель поднимется автоматически (RestartSec=15)"
     say "Доступ через VPS: ssh -p ${VPS_TUNNEL_PORT} root@localhost"
+fi
+
+# ==========================================================================
+#                            WEB UI (gateway-ui)
+# ==========================================================================
+if [[ "$INSTALL_WEB_UI" == "yes" ]]; then
+    say "Installing gateway-ui (веб-интерфейс)…"
+    UI_DIR="${INSTALL_PREFIX}/gateway-ui"
+    mkdir -p "$UI_DIR" /etc/gateway
+
+    # 1) Бинарник: готовый из релиза (dist/) или сборка на месте (если есть go)
+    UI_OK=yes
+    PREBUILT="$SCRIPT_DIR/gateway-ui/dist/gateway-ui-${ARCH}"
+    if [[ -x "$PREBUILT" ]]; then
+        cp "$PREBUILT" "$UI_DIR/gateway-ui"
+        ok "gateway-ui: prebuilt ($ARCH)"
+    elif command -v go >/dev/null 2>&1; then
+        say "Building gateway-ui from source…"
+        ( cd "$SCRIPT_DIR/gateway-ui" && go build -o "$UI_DIR/gateway-ui" . ) \
+            && ok "gateway-ui собран" || { warn "сборка gateway-ui не удалась"; UI_OK=no; }
+    else
+        warn "нет prebuilt-бинарника ($PREBUILT) и нет Go — пропускаю gateway-ui"
+        UI_OK=no
+    fi
+
+    if [[ "$UI_OK" == "yes" ]]; then
+        # 2) Пароль (если ui.conf ещё нет): из WEB_UI_PASSWORD или случайный
+        UI_GEN_PW=""
+        if [[ ! -f /etc/gateway/ui.conf ]]; then
+            if [[ -z "$WEB_UI_PASSWORD" ]]; then
+                WEB_UI_PASSWORD="$(head -c 9 /dev/urandom | base64 | tr -d '/+=' | cut -c1-12)"
+                UI_GEN_PW="$WEB_UI_PASSWORD"
+            fi
+            GATEWAY_UI_PASSWORD="$WEB_UI_PASSWORD" "$UI_DIR/gateway-ui" \
+                --conf /etc/gateway/ui.conf --init-password >/dev/null \
+                && ok "пароль UI сохранён в /etc/gateway/ui.conf"
+        fi
+
+        # 3) systemd unit (LAN-only через ExecStartPre iptables)
+        sed -e "s|__PORT__|$WEB_UI_PORT|g" \
+            -e "s|__LAN__|$LAN|g" \
+            -e "s|__UI_BIN__|$UI_DIR/gateway-ui|g" \
+            -e "s|__REPO__|$SCRIPT_DIR|g" \
+            -e "s|__CONFIG_ENV__|$CONFIG_ENV|g" \
+            "$SCRIPT_DIR/systemd/gateway-ui.service" > /etc/systemd/system/gateway-ui.service
+        systemctl daemon-reload
+        systemctl enable gateway-ui.service >/dev/null
+        systemctl restart gateway-ui.service
+        sleep 1
+        if systemctl is-active --quiet gateway-ui.service; then
+            ok "gateway-ui.service running (LAN:$WEB_UI_PORT)"
+        else
+            journalctl -u gateway-ui.service -n 15 --no-pager || true
+            warn "gateway-ui не стартовал — см. логи"
+        fi
+        [[ -n "$UI_GEN_PW" ]] && warn "Пароль веб-интерфейса (сохрани!): ${C_BLD}${UI_GEN_PW}${C_OFF}"
+    fi
 fi
 
 # ==========================================================================

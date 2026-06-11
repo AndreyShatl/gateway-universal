@@ -65,10 +65,14 @@ xray active; повтор→«без изменений»; remove→proxy 387→
 запрещённый→400; smoke гоняет реальный smoke.sh (честно вернул FAIL сразу после рестарта,
 PASS когда xray устоялся); logs отдаёт N строк journalctl.
 
-### T14 · install.sh: интеграция gateway-ui · M · todo
-INSTALL_WEB_UI=yes: положить бинарник (готовый из релиза, под arch), service, начальный пароль,
-iptables-правило «UI-порт только из LAN».
-**Приёмка:** после install UI доступен из LAN по паролю, недоступен снаружи.
+### T14 · install.sh: интеграция gateway-ui · M · done
+install.sh: INSTALL_WEB_UI/WEB_UI_PORT/WEB_UI_PASSWORD, --no-web-ui/--web-ui-port. Бинарник —
+prebuilt из gateway-ui/dist/gateway-ui-$ARCH или сборка на месте (если есть go). Пароль из
+WEB_UI_PASSWORD или случайный (печатается). Юнит [systemd/gateway-ui.service](systemd/gateway-ui.service)
+с LAN-only через ExecStartPre iptables (не пишем в rules.v4). --init-password в бинарнике.
+**Приёмка (стенд):** сервис active; /healthz с LAN→ok, с loopback→заблокирован; iptables
+ACCEPT 192.168.0.0/16 + DROP остальное на :8088; вход верным паролем→303, неверным→401.
+**На потом:** кросс-компиляция release-бинарников под arm (сейчас сборка на месте через go).
 
 ### T15 · Доки и smoke под gateway-ui · L · todo
 README/AGENT/CANON: как пользоваться UI; smoke.sh — проверка gateway-ui.service.

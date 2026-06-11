@@ -54,7 +54,8 @@ LAN ──┬─ TCP 80/443 ─► iptables REDIRECT :12345 ─► xray dokodemo
 
 ### gateway-ui (веб-интерфейс) — каркас готов (T10), функции в работе
 - Go, один статичный бинарник (stdlib-only), фронтенд через embed.FS — исходники в [../gateway-ui/](../gateway-ui/) ([main.go](../gateway-ui/main.go)).
-- Каркас (T10): HTTP-сервер `--listen`, вход по паролю (salt:sha256 в `/etc/gateway/ui.conf`, первый пароль из env `GATEWAY_UI_PASSWORD`), сессии-cookie, `/healthz`, `/api/ping`. bind на LAN-IP + iptables-ограничение — T14.
+- Каркас (T10): HTTP-сервер `--listen`, вход по паролю (salt:sha256 в `/etc/gateway/ui.conf`, первый пароль из env `GATEWAY_UI_PASSWORD` или `--init-password`), сессии-cookie, `/healthz`, `/api/ping`.
+- Установка (T14): install.sh собирает/кладёт бинарник в `/opt/gateway-ui/`, юнит [systemd/gateway-ui.service](../systemd/gateway-ui.service) с LAN-only через ExecStartPre iptables (ACCEPT из LAN, DROP остального на порт — не пишем в rules.v4). Флаги INSTALL_WEB_UI/WEB_UI_PORT/WEB_UI_PASSWORD.
 - Функции (тонкая обвязка): `/api/router-ip` (T11) — ROUTER_IP в config.env + [systemd/apply-fix-gateway.sh](../systemd/apply-fix-gateway.sh); `/api/domains` (T12) — правка /etc/gateway/domains/local.txt → render-config.sh → restart xray, с откатом при ошибке; `/api/status|exit-ip|restart|smoke|logs` (T13) — статус/управление через systemctl/curl/smoke.sh/journalctl.
 - Тонкий оркестратор над примитивами: правит config.env / xray/domains, зовёт `render-config.sh` (готов, T8) + `build-domains.sh`, рестартит сервисы, гоняет `tests/smoke.sh`.
 - Пользовательские домены из UI — вне репо: `/etc/gateway/domains/local.txt` (переживают rsync --delete при передеплое).
