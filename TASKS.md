@@ -45,14 +45,14 @@ udp…), desync совпадает с реальными аргументами 
 
 ## todo — Zapret: поиск рабочих стратегий (архитектура в DECISIONS 2026-06-11)
 
-### T22 · Бэкенд поиска стратегий (обёртка blockcheck, фон, хранение) · H · todo
-Раннер: формирует env для blockcheck (DOMAINS/ENABLE_*/SCANLEVEL/PARALLEL, QNUM=59780),
-запускает `systemd-run --unit=gateway-scan`, парсит вывод → рабочие стратегии.
-Хранение в /etc/gateway/scan/: job.json, results.json (дополняется), scan.log.
-API: POST /api/scan/start (с параметрами + гейт предусловий), POST /api/scan/stop,
-GET /api/scan (статус + результаты + хвост лога). После ребута: unit нет + job=running → «прервано».
-**Критерий приёмки:** старт запускает фоновый скан, который переживает рестарт UI; рабочие стратегии
-копятся в results.json по ходу; стоп останавливает; живой zapret/клиенты не падают (smoke PASS во время скана).
+### T22 · Бэкенд поиска стратегий (обёртка blockcheck, фон, хранение) · H · done
+[gateway-ui/scan.go](gateway-ui/scan.go): API /api/scan (GET статус), /api/scan/start, /api/scan/stop.
+Раннер пишет run.sh (env DOMAINS/ENABLE_*/SCANLEVEL/PARALLEL, QNUM=59780, авто-сборка mdig/tpws
+при отсутствии), запуск `systemd-run --unit=gateway-scan --collect`. Состояние в /etc/gateway/scan/
+(job.json, scan.log); рабочие стратегии парсятся из лога (regex "working strategy found for ipv\d+ DOMAIN : STRAT").
+Гейт: ip_forward=1 + zapret active. После ребута unit нет + job=running → interrupted.
+**Приёмка (стенд):** старт→фон, лог стримит реальный перебор blockcheck; стоп→stopped/inactive;
+изоляция подтверждена — SMOKE PASS 9/9 во время скана (клиенты/xray/zapret целы).
 
 ### T23 · UI: раздел поиска стратегий в Zapret · M · todo
 Подвкладка «Поиск стратегий»: форма выбора (домены, протоколы, уровень, параллельность) — как в скрипте;

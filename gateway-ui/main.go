@@ -51,6 +51,8 @@ type server struct {
 	userDomainsDir string // /etc/gateway/domains (домены из UI)
 	xrayConfig     string // /opt/xray/config.json (рабочий конфиг)
 	xrayBin        string // /opt/xray/xray
+	scanDir        string // /etc/gateway/scan (состояние поиска стратегий)
+	blockcheck     string // /opt/zapret/blockcheck.sh
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -64,6 +66,8 @@ func main() {
 	userDomains := flag.String("user-domains-dir", "/etc/gateway/domains", "каталог пользовательских доменов")
 	xrayConfig := flag.String("xray-config", "/opt/xray/config.json", "рабочий config.json")
 	xrayBin := flag.String("xray-bin", "/opt/xray/xray", "бинарник xray")
+	scanDir := flag.String("scan-dir", "/etc/gateway/scan", "каталог состояния поиска стратегий")
+	blockcheck := flag.String("blockcheck", "/opt/zapret/blockcheck.sh", "путь к blockcheck.sh")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -73,6 +77,7 @@ func main() {
 	s := &server{
 		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
 		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
+		scanDir: *scanDir, blockcheck: *blockcheck,
 	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
@@ -94,6 +99,9 @@ func main() {
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
+	mux.HandleFunc("/api/scan", s.requireAuth(s.handleScan))
+	mux.HandleFunc("/api/scan/start", s.requireAuth(s.handleScanStart))
+	mux.HandleFunc("/api/scan/stop", s.requireAuth(s.handleScanStop))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/exit-ip", s.requireAuth(s.handleExitIP))
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
