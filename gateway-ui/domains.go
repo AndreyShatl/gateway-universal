@@ -22,14 +22,54 @@ var (
 
 func (s *server) localDomainsFile() string { return filepath.Join(s.userDomainsDir, "local.txt") }
 
+// normalizeEntry приводит запись к каноническому виду (lower, без префикса domain:).
+func normalizeEntry(raw string) string {
+	e := strings.ToLower(strings.TrimSpace(raw))
+	if strings.HasPrefix(e, "geosite:") {
+		return e
+	}
+	return strings.TrimPrefix(e, "domain:")
+}
+
 // validateEntry нормализует и проверяет запись (домен или geosite:тег).
 func validateEntry(raw string) (string, bool) {
-	e := strings.ToLower(strings.TrimSpace(raw))
+	e := normalizeEntry(raw)
 	if strings.HasPrefix(e, "geosite:") {
 		return e, reGeosite.MatchString(e)
 	}
-	e = strings.TrimPrefix(e, "domain:") // если ввели с префиксом — убрать
 	return e, reDomain.MatchString(e)
+}
+
+// curatedSet — записи из курируемых списков репо (xray/domains/*.txt).
+// Их незачем дублировать в local.txt: build-domains всё равно дедуплицирует.
+func (s *server) curatedSet() map[string]bool {
+	set := map[string]bool{}
+	dir := filepath.Join(s.repoDir, "xray", "domains")
+	entries, _ := os.ReadDir(dir)
+	for _, de := range entries {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".txt") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		for _, ln := range strings.Split(string(data), "\n") {
+			t := strings.TrimSpace(ln)
+			if t == "" || strings.HasPrefix(t, "#") {
+				continue
+			}
+			set[normalizeEntry(t)] = true
+		}
+	}
+	return set
+}
+
+// splitEntries разбивает ввод (несколько доменов) по переводам строк,
+// запятым, точкам с запятой и пробелам.
+func splitEntries(raw string) []string {
+	f := func(r rune) bool { return r == '\n' || r == '\r' || r == ',' || r == ';' || r == ' ' || r == '\t' }
+	return strings.FieldsFunc(raw, f)
 }
 
 func (s *server) handleDomains(w http.ResponseWriter, r *http.Request) {
@@ -38,37 +78,14 @@ func (s *server) handleDomains(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"domains": s.listDomains()})
 
 	case http.MethodPost:
-		action := r.FormValue("action")
-		entry, ok := validateEntry(r.FormValue("domain"))
-		if !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "некорректная запись (домен или geosite:тег)"})
-			return
-		}
-		var changed bool
-		var err error
-		switch action {
+		switch r.FormValue("action") {
 		case "add":
-			changed, err = s.addDomain(entry)
+			s.handleDomainsAdd(w, r)
 		case "remove":
-			changed, err = s.removeDomain(entry)
+			s.handleDomainsRemove(w, r)
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "action: add|remove"})
-			return
 		}
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			return
-		}
-		if !changed {
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domains": s.listDomains(), "note": "без изменений"})
-			return
-		}
-		// Применить: render-config + restart xray; при ошибке — откат файла
-		if out, err := s.applyXray(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось, изменение откатано: " + err.Error(), "output": out})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domains": s.listDomains()})
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -95,24 +112,82 @@ func (s *server) listDomains() []string {
 	return out
 }
 
-func (s *server) addDomain(entry string) (bool, error) {
+// handleDomainsAdd — пакетное добавление: несколько доменов за раз, с разбором
+// дублей (уже добавленные / уже в списках по умолчанию) и невалидных.
+func (s *server) handleDomainsAdd(w http.ResponseWriter, r *http.Request) {
+	raws := splitEntries(r.FormValue("domain"))
+	if len(raws) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "пусто — впишите домен(ы)"})
+		return
+	}
+	curated := s.curatedSet()
+	local := map[string]bool{}
 	for _, e := range s.listDomains() {
-		if e == entry {
-			return false, nil // уже есть
+		local[e] = true
+	}
+	var add, dupPresent, dupDefault, invalid []string
+	seen := map[string]bool{}
+	for _, raw := range raws {
+		e, ok := validateEntry(raw)
+		if !ok {
+			invalid = append(invalid, raw)
+		} else if local[e] || seen[e] {
+			dupPresent = append(dupPresent, e)
+		} else if curated[e] {
+			dupDefault = append(dupDefault, e)
+		} else {
+			add = append(add, e)
+			seen[e] = true
 		}
 	}
+	if len(add) > 0 {
+		if err := s.appendDomains(add); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		if out, err := s.applyXray(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось, откатано: " + err.Error(), "output": out})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "added": add, "skipped_present": dupPresent,
+		"skipped_default": dupDefault, "invalid": invalid, "domains": s.listDomains(),
+	})
+}
+
+func (s *server) handleDomainsRemove(w http.ResponseWriter, r *http.Request) {
+	entry, ok := validateEntry(r.FormValue("domain"))
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "некорректная запись"})
+		return
+	}
+	changed, err := s.removeDomain(entry)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	if changed {
+		if out, err := s.applyXray(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось, откатано: " + err.Error(), "output": out})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domains": s.listDomains()})
+}
+
+// appendDomains дописывает записи в local.txt (вызывающий уже отфильтровал дубли).
+func (s *server) appendDomains(entries []string) error {
 	if err := os.MkdirAll(s.userDomainsDir, 0o755); err != nil {
-		return false, err
+		return err
 	}
 	f, err := os.OpenFile(s.localDomainsFile(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer f.Close()
-	if _, err := f.WriteString(entry + "\n"); err != nil {
-		return false, err
-	}
-	return true, nil
+	_, err = f.WriteString(strings.Join(entries, "\n") + "\n")
+	return err
 }
 
 func (s *server) removeDomain(entry string) (bool, error) {

@@ -41,6 +41,9 @@
          font-size:12px; white-space:pre-wrap; max-height:240px; overflow:auto; margin-top:10px; }
   .out:empty { display:none; }
   select { padding:9px 10px; border:1px solid #333; border-radius:8px; background:#0f1115; color:#e6e6e6; }
+  textarea { width:100%; box-sizing:border-box; margin-top:12px; padding:10px; border:1px solid #333;
+             border-radius:8px; background:#0f1115; color:#e6e6e6; font-family:ui-monospace,monospace;
+             font-size:13px; resize:vertical; }
 </style>
 </head>
 <body>
@@ -64,11 +67,10 @@
     </div>
     <div class="card">
       <h2>Домены в обход</h2>
-      <div class="muted">Сайты, которые ходят через VPS. Домен (example.com) или geosite:тег.</div>
-      <div class="row">
-        <input id="domInput" type="text" placeholder="example.com или geosite:netflix">
-        <button id="domAdd">Добавить</button>
-      </div>
+      <div class="muted">Сайты, которые ходят через VPS. Можно пачкой — по одному в строке
+        или через запятую. Домен (example.com) или geosite:тег.</div>
+      <textarea id="domInput" rows="3" placeholder="example.com, geosite:netflix&#10;another-site.org"></textarea>
+      <div class="row"><button id="domAdd">Добавить</button></div>
       <div id="domMsg" class="msg"></div>
       <ul id="domList" class="list"></ul>
     </div>
@@ -126,21 +128,36 @@
         const li = document.createElement('li');
         const span = document.createElement('span'); span.textContent = d;
         const btn = document.createElement('button'); btn.className = 'del'; btn.textContent = '×';
-        btn.title = 'Удалить'; btn.onclick = () => domAction('remove', d);
+        btn.title = 'Удалить'; btn.onclick = () => domRemove(d);
         li.append(span, btn); dList.append(li);
       }
     }
-    function domAction(action, domain) {
-      dMsg.className = 'msg'; dMsg.textContent = action === 'add' ? 'Применяю…' : 'Удаляю…';
-      fetch('/api/domains', { method:'POST', body:new URLSearchParams({ action, domain }) })
-        .then(async r => {
-          const d = await r.json();
-          if (r.ok) { dMsg.className = 'msg good'; dMsg.textContent = d.note || '✓ готово'; renderDomains(d.domains); if (action==='add') dInput.value=''; }
+    function domRemove(domain) {
+      dMsg.className = 'msg'; dMsg.textContent = 'Удаляю…';
+      fetch('/api/domains', { method:'POST', body:new URLSearchParams({ action:'remove', domain }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { dMsg.className = 'msg good'; dMsg.textContent = '✓ удалено'; renderDomains(d.domains); }
           else { dMsg.className = 'msg bad'; dMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
         }).catch(() => { dMsg.className = 'msg bad'; dMsg.textContent = '✗ сеть'; });
     }
-    document.getElementById('domAdd').onclick = () => { if (dInput.value.trim()) domAction('add', dInput.value.trim()); };
-    dInput.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('domAdd').click(); });
+    document.getElementById('domAdd').onclick = () => {
+      if (!dInput.value.trim()) return;
+      dMsg.className = 'msg'; dMsg.textContent = 'Применяю…';
+      fetch('/api/domains', { method:'POST', body:new URLSearchParams({ action:'add', domain:dInput.value }) })
+        .then(async r => {
+          const d = await r.json();
+          if (!r.ok) { dMsg.className = 'msg bad'; dMsg.textContent = '✗ ' + (d.error || 'ошибка'); return; }
+          const parts = [];
+          if (d.added?.length) parts.push('добавлено ' + d.added.length);
+          if (d.skipped_present?.length) parts.push('уже было ' + d.skipped_present.length);
+          if (d.skipped_default?.length) parts.push('в списках по умолчанию ' + d.skipped_default.length);
+          if (d.invalid?.length) parts.push('невалидно ' + d.invalid.length + ' (' + d.invalid.join(', ') + ')');
+          dMsg.className = 'msg ' + (d.invalid?.length ? 'bad' : 'good');
+          dMsg.textContent = (d.added?.length ? '✓ ' : '') + (parts.join(' · ') || 'без изменений');
+          renderDomains(d.domains);
+          if (d.added?.length) dInput.value = '';
+        }).catch(() => { dMsg.className = 'msg bad'; dMsg.textContent = '✗ сеть'; });
+    };
     fetch('/api/domains').then(r => r.json()).then(d => renderDomains(d.domains));
 
     // Статус и управление
