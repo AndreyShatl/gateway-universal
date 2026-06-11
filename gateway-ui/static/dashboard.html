@@ -89,6 +89,12 @@
   .kv { margin:12px 0 0; display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:13px; }
   .kv dt { color:var(--muted); }
   .kv dd { margin:0; font-family:ui-monospace,monospace; word-break:break-all; }
+  .strat { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-top:12px; }
+  .strat .h { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px; }
+  .strat .tag { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--pill-bg); color:var(--pill-tx); }
+  .strat .tag.q { background:var(--accent); color:var(--on-accent); }
+  .strat .params { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted); }
+  .strat .doms summary { cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -167,8 +173,9 @@
 
       <section data-sec="zapret">
         <div class="card">
-          <h2>Zapret</h2>
-          <div class="soon">Скоро (T20): стратегии обхода DPI, домены zapret и поиск по стратегиям.</div>
+          <h2>Zapret — работающие стратегии</h2>
+          <div class="muted">Что реально крутится в nfqws сейчас и для каких доменов (только просмотр).</div>
+          <div id="zapList"><div class="soon">загрузка…</div></div>
         </div>
       </section>
 
@@ -244,6 +251,31 @@
           else { connMsg.className = 'msg bad'; connMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
         }).catch(() => { connMsg.className = 'msg bad'; connMsg.textContent = '✗ сеть'; });
     };
+
+    // --- Zapret (read-only) ---
+    const zapList = document.getElementById('zapList');
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+    fetch('/api/zapret').then(r => r.json()).then(d => {
+      if (!d.running) { zapList.innerHTML = '<div class="soon">nfqws не запущен.</div>'; return; }
+      const ss = d.strategies || [];
+      if (!ss.length) { zapList.innerHTML = '<div class="soon">Стратегий не найдено.</div>'; return; }
+      zapList.innerHTML = ss.map(st => {
+        const doms = (st.domains || []);
+        const domBlock = doms.length
+          ? `<details class="doms"><summary>${st.list || 'домены'} — ${doms.length}</summary><ul class="list ro">${doms.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`
+          : (st.l7 ? `<div class="params">по протоколу: ${esc(st.l7)}</div>` : '<div class="params">все домены</div>');
+        const params = ['desync='+(st.desync||'—'), st.repeats?('repeats='+st.repeats):'', st.fooling?('fooling='+st.fooling):''].filter(Boolean).join('  ');
+        return `<div class="strat">
+          <div class="h">
+            <span class="tag q">queue ${esc(st.queue)}</span>
+            <span class="tag">${esc(st.proto)} ${esc(st.ports)}</span>
+            ${st.list?`<span class="tag">${esc(st.list)}</span>`:''}
+          </div>
+          <div class="params">${esc(params)}</div>
+          ${domBlock}
+        </div>`;
+      }).join('');
+    }).catch(() => { zapList.innerHTML = '<div class="msg bad">ошибка загрузки</div>'; });
 
     // --- Навигация ---
     const navItems = document.querySelectorAll('.sidebar a[data-nav]');
