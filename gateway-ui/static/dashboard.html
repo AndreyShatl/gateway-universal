@@ -207,6 +207,14 @@
           <details class="defaults"><summary>Лог поиска</summary><pre id="scanLog" class="out"></pre></details>
         </div>
         <div class="card">
+          <h2>Движок zapret</h2>
+          <div class="muted">Обновление из апстрима bol-van/zapret (nfqws и т.д.). Стратегии и домены не трогаются.</div>
+          <div id="zverView" class="kv"><dd class="muted">загрузка…</dd></div>
+          <div class="row"><button id="zUpdate">Обновить движок</button></div>
+          <div id="zupMsg" class="msg"></div>
+          <details class="defaults"><summary>Лог обновления</summary><pre id="zupLog" class="out"></pre></details>
+        </div>
+        <div class="card">
           <h2>Стратегии по сервисам</h2>
           <div class="muted">desync-флаги для каждого блока (TCP/UDP отдельно). Пусто = калиброванный дефолт.
             Сохранение рестартит zapret. Можно вставить найденную поиском стратегию.</div>
@@ -361,6 +369,30 @@
     scStop.onclick = () => {
       scanMsg.className = 'msg'; scanMsg.textContent = 'Останавливаю…';
       fetch('/api/scan/stop', { method:'POST' }).then(() => loadScan());
+    };
+
+    // --- Движок zapret (версия + обновление) ---
+    const zverView = document.getElementById('zverView');
+    const zupMsg = document.getElementById('zupMsg');
+    const zupLog = document.getElementById('zupLog');
+    let zupTimer = null;
+    function loadZver() {
+      fetch('/api/zapret/version').then(r => r.json()).then(d => {
+        zverView.innerHTML = `<dt>Коммит</dt><dd>${esc(d.commit||'?')}</dd><dt>Описание</dt><dd>${esc(d.desc||'')}</dd>`;
+        document.getElementById('zUpdate').disabled = !!d.updating;
+        if (d.updating) { zupMsg.className = 'msg'; zupMsg.textContent = 'Обновление идёт…'; }
+        zupLog.textContent = d.log_tail || '';
+        if (d.updating && !zupTimer) zupTimer = setInterval(loadZver, 4000);
+        if (!d.updating && zupTimer) { clearInterval(zupTimer); zupTimer = null; zupMsg.className='msg good'; zupMsg.textContent='✓ готово'; }
+      });
+    }
+    loadZver();
+    document.getElementById('zUpdate').onclick = () => {
+      if (!confirm('Обновить движок zapret из апстрима и пересобрать? Займёт ~минуту, zapret перезапустится.')) return;
+      zupMsg.className = 'msg'; zupMsg.textContent = 'Запускаю обновление…';
+      fetch('/api/zapret/update', { method:'POST' }).then(async r => { const d = await r.json();
+        if (r.ok) loadZver(); else { zupMsg.className='msg bad'; zupMsg.textContent='✗ '+(d.error||'ошибка'); }
+      });
     };
 
     // --- Стратегии по сервисам (оверрайды) ---

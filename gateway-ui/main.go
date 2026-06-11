@@ -103,6 +103,8 @@ func main() {
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
 	mux.HandleFunc("/api/zapret/strategies", s.requireAuth(s.handleStrategies))
 	mux.HandleFunc("/api/zapret/strategy", s.requireAuth(s.handleStrategySet))
+	mux.HandleFunc("/api/zapret/version", s.requireAuth(s.handleZapretVersion))
+	mux.HandleFunc("/api/zapret/update", s.requireAuth(s.handleZapretUpdate))
 	mux.HandleFunc("/api/scan", s.requireAuth(s.handleScan))
 	mux.HandleFunc("/api/scan/start", s.requireAuth(s.handleScanStart))
 	mux.HandleFunc("/api/scan/stop", s.requireAuth(s.handleScanStop))
