@@ -5,7 +5,7 @@
 #
 # Запуск:
 #   На самом шлюзе:   bash tests/smoke.sh
-#   Удалённо с Mac:   bash tests/smoke.sh --host root@192.168.1.132
+#   Удалённо с Mac:   bash tests/smoke.sh --host root@<IP-шлюза>
 #                     (ssh-доступ должен быть настроен; пароль спросит ssh)
 #
 # Что проверяет (см. GOALS.md):

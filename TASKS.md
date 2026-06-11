@@ -110,7 +110,7 @@ AGENT: gateway-ui в компонентах + /etc/gateway/domains. smoke.sh: п
 **Результат (2026-06-10) — PASS:**
 - install: `Routing domains: 386 entries`, `xray config valid`, healthcheck все ✓.
 - Селективный роутинг подтверждён через socks-инбаунд:
-  - cloudflare (в списке) → VPS (egress 2a0d:d940:...), ipify (не в списке) → провайдер (195.178.4.131).
+  - cloudflare (в списке) → VPS (egress = IP VPS), ipify (не в списке) → провайдер (IP провайдера).
 - steam = 11 direct-доменов (без регрессии).
 **Откат при необходимости:** `cp /opt/xray/config.json.bak.1781119654 /opt/xray/config.json && systemctl restart xray`.
 **Процедура (чистая установка с нуля — честный тест fresh-деплоя):**
@@ -133,7 +133,7 @@ bash deploy.sh --host root@СТЕНД_IP                # поставить с 
 Проверяет G1 (порты :12345/:1080), G2 (egress через VPS != прямой), G3 (nfqws), G4 (NFQUEUE),
 + active сервисов. Локально на шлюзе или удалённо `bash tests/smoke.sh --host root@IP`.
 **Приёмка (2026-06-10, стенд 192.168.1.132):** 7/7 PASS, exit 0;
-G2 direct=195.178.4.133 vs через VPS=2a0d:d940:1a:1813::2 ✓.
+G2 direct=IP провайдера vs через VPS=egress VPS ✓.
 
 ### T4 · Сверить остальную прозу с кодом · L · done
 Прошёл README/AGENT/docs. Стратегии zapret в STRATEGIES.md и пути установки — совпадают с кодом.
