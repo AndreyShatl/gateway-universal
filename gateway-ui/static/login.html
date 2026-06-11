@@ -30,14 +30,29 @@
            color:#fff; font-weight:600; cursor:pointer; }
   button:hover { background:var(--accent-h); }
   .err { color:var(--bad); font-size:13px; margin-bottom:12px; }
+  .theme-toggle { position:fixed; top:16px; right:16px; width:auto; padding:6px 10px;
+                  background:none; border:1px solid var(--border); border-radius:8px;
+                  color:var(--text); font-size:15px; cursor:pointer; }
+  .theme-toggle:hover { border-color:var(--accent); background:none; }
 </style>
 </head>
 <body>
+  <button id="themeBtn" class="theme-toggle" type="button" title="Сменить тему">🌙</button>
   <form class="card" method="POST" action="/login">
     <h1>🛡️ gateway-ui</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     <input type="password" name="password" placeholder="Пароль" autofocus required>
     <button type="submit">Войти</button>
   </form>
+  <script>
+    const themeBtn = document.getElementById('themeBtn');
+    function applyTheme(t) {
+      document.documentElement.dataset.theme = t;
+      themeBtn.textContent = t === 'light' ? '☀️' : '🌙';
+      try { localStorage.setItem('gw-theme', t); } catch (e) {}
+    }
+    applyTheme(document.documentElement.dataset.theme || 'dark');
+    themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+  </script>
 </body>
 </html>
