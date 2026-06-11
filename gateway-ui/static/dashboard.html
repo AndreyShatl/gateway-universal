@@ -95,6 +95,9 @@
   .strat .tag.q { background:var(--accent); color:var(--on-accent); }
   .strat .params { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted); }
   .strat .doms summary { cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
+  .chk { display:flex; flex-wrap:wrap; gap:14px; margin-top:12px; font-size:13px; }
+  .chk label { display:flex; align-items:center; gap:6px; cursor:pointer; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -176,6 +179,32 @@
           <h2>Zapret — работающие стратегии</h2>
           <div class="muted">Что реально крутится в nfqws сейчас и для каких доменов (только просмотр).</div>
           <div id="zapList"><div class="soon">загрузка…</div></div>
+        </div>
+        <div class="card">
+          <h2>Поиск рабочих стратегий</h2>
+          <div class="muted">Перебор стратегий обхода DPI (как родной blockcheck), собираются только рабочие.
+            Идёт в фоне (может длиться долго), не мешает клиентам. Выберите параметры перед запуском.</div>
+          <div id="scanPre" class="msg"></div>
+          <textarea id="scanDomains" rows="2" placeholder="домены для проверки, через пробел или с новой строки&#10;rutracker.org youtube.com"></textarea>
+          <div class="chk">
+            <label><input type="checkbox" id="scHttp"> HTTP</label>
+            <label><input type="checkbox" id="scTls12" checked> HTTPS TLS1.2</label>
+            <label><input type="checkbox" id="scTls13"> HTTPS TLS1.3</label>
+            <label><input type="checkbox" id="scQuic"> QUIC</label>
+            <label><input type="checkbox" id="scParallel" checked> параллельно</label>
+          </div>
+          <div class="row">
+            <select id="scLevel">
+              <option value="quick">quick — быстро, первая рабочая</option>
+              <option value="standard" selected>standard</option>
+              <option value="force">force — полный перебор</option>
+            </select>
+            <button id="scStart">Старт</button>
+            <button id="scStop">Стоп</button>
+          </div>
+          <div id="scanMsg" class="msg"></div>
+          <div id="scanWorking"></div>
+          <details class="defaults"><summary>Лог поиска</summary><pre id="scanLog" class="out"></pre></details>
         </div>
       </section>
 
@@ -276,6 +305,52 @@
         </div>`;
       }).join('');
     }).catch(() => { zapList.innerHTML = '<div class="msg bad">ошибка загрузки</div>'; });
+
+    // --- Поиск стратегий ---
+    const scStart = document.getElementById('scStart');
+    const scStop = document.getElementById('scStop');
+    const scanPre = document.getElementById('scanPre');
+    const scanMsg = document.getElementById('scanMsg');
+    const scanWorking = document.getElementById('scanWorking');
+    const scanLog = document.getElementById('scanLog');
+    let scanTimer = null;
+    function renderScan(d) {
+      if (!d.precondition_ok) { scanPre.className = 'msg bad'; scanPre.textContent = '✗ ' + (d.precondition || 'нельзя запустить'); }
+      else { scanPre.className = 'msg'; scanPre.textContent = ''; }
+      scStart.disabled = !d.can_start;
+      scStop.disabled = !d.running;
+      const st = d.status ? ('статус: ' + d.status + (d.running ? ' (идёт…)' : '')) : 'не запускался';
+      scanMsg.className = 'msg'; scanMsg.textContent = st;
+      const ws = d.working || [];
+      scanWorking.innerHTML = ws.length
+        ? '<div class="muted" style="margin-top:10px">Найдено рабочих: ' + ws.length + '</div><ul class="list ro">' +
+          ws.map(w => `<li>${esc(w.domain)} → ${esc(w.strategy)}</li>`).join('') + '</ul>'
+        : '<div class="soon">Рабочих стратегий пока нет.</div>';
+      scanLog.textContent = d.log_tail || '';
+      // авто-обновление пока идёт
+      if (d.running && !scanTimer) scanTimer = setInterval(loadScan, 5000);
+      if (!d.running && scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    }
+    function loadScan() { fetch('/api/scan').then(r => r.json()).then(renderScan).catch(() => {}); }
+    loadScan();
+    scStart.onclick = () => {
+      const domains = document.getElementById('scanDomains').value.split(/[\s,]+/).filter(Boolean);
+      if (!domains.length) { scanMsg.className = 'msg bad'; scanMsg.textContent = 'укажите домены'; return; }
+      const body = JSON.stringify({
+        domains, http: scHttp.checked, tls12: scTls12.checked, tls13: scTls13.checked,
+        quic: scQuic.checked, parallel: scParallel.checked, scanlevel: document.getElementById('scLevel').value
+      });
+      scanMsg.className = 'msg'; scanMsg.textContent = 'Запускаю…';
+      fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { scanMsg.className = 'msg good'; scanMsg.textContent = '✓ поиск запущен'; loadScan(); }
+          else { scanMsg.className = 'msg bad'; scanMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { scanMsg.className = 'msg bad'; scanMsg.textContent = '✗ сеть'; });
+    };
+    scStop.onclick = () => {
+      scanMsg.className = 'msg'; scanMsg.textContent = 'Останавливаю…';
+      fetch('/api/scan/stop', { method:'POST' }).then(() => loadScan());
+    };
 
     // --- Навигация ---
     const navItems = document.querySelectorAll('.sidebar a[data-nav]');
