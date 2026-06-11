@@ -93,6 +93,7 @@ func main() {
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
+	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/exit-ip", s.requireAuth(s.handleExitIP))
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
