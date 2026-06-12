@@ -96,6 +96,14 @@ API GET/POST /api/zapret/services ([gateway-ui/zapret.go](gateway-ui/zapret.go))
 восстановление сида → smoke PASS.
 **Хвост:** в Go остались неиспользуемые upsert/removeConfigVar + overrides (от T24) — подчистить при случае.
 
+### T28 · Домены zapret автоисключаются из VPS-роутинга · M · done
+Домен в zapret-сервисе должен идти напрямую (локальный DPI-обход), а не в туннель.
+build-domains.sh ([xray/build-domains.sh](xray/build-domains.sh)) вычитает домены из zapret services.json
+(jq) из VPS-списка. handleServices (POST) перегенерирует xray-конфиг + рестарт xray + zapret.
+**Нюанс:** вычитаются только точные домены; широкий geosite:* не трогается (убирать вручную).
+**Приёмка (стенд):** youtube/instagram/discord (в zapret) → 0 в proxy-mux; anthropic (не в zapret) остался;
+POST сервисов перегенерил xray; smoke 9/9.
+
 ## todo — хвосты / на будущее
 
 ### T16 · Кросс-компиляция release-бинарников gateway-ui · M · done

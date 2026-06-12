@@ -87,6 +87,16 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		os.Rename(tmp, s.servicesFile)
+		// Перегенерировать xray-конфиг: домены, отданные в zapret, исключаются из
+		// VPS-роутинга (build-domains вычитает их). Затем рестарт xray и zapret.
+		if out, err := s.runScript("xray/render-config.sh",
+			"--template", filepath.Join(s.repoDir, "xray", "config.template.json"),
+			"--out", s.xrayConfig, "--config", s.configEnv, "--xray", s.xrayBin,
+			"--user-domains-dir", s.userDomainsDir); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "render xray: " + err.Error(), "output": out})
+			return
+		}
+		runCmd("systemctl", "restart", "xray.service")
 		if out, err := runCmd("systemctl", "restart", "zapret.service"); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "рестарт zapret: " + err.Error(), "output": out})
 			return
