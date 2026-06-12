@@ -77,6 +77,22 @@ UI: карточка «Движок zapret» (версия, кнопка Обн�
 **Приёмка (стенд):** версия отображается; обновление отработало в фоне (rc=0, пересборка),
 zapret active, smoke 9/9 (апстрим уже был на последней — конвейер сработал вхолостую корректно).
 
+## todo — Zapret: динамические сервисы
+
+### T26 · Движок: zapret.sh генерируется из services.json · H · done
+zapret.sh: функция build_proto читает [zapret/services.json](zapret/services.json) через jq,
+генерит nfqws-сегменты (--new на сервис) + NFQUEUE на очереди 200(tcp)/201(udp). Сид мигрирует
+текущие блоки (instagram/discord/general/youtube/quic_fallback). install ставит jq + копирует
+services.json (сид + /etc/gateway/zapret-services.json). Заменяет статические блоки и T24-overrides.env.
+**Приёмка (стенд):** 2 nfqws (q200/q201), сегменты идентичны прежним (hostlist/l7/desync), smoke 9/9.
+**Баг по ходу:** read с IFS=tab схлопывал пустые поля → разделитель сменён на .
+
+### T27 · CRUD сервисов в UI (заменяет редактор T24) · H · todo
+API: list/add/update/delete сервисов в /etc/gateway/zapret-services.json → рестарт zapret.
+UI (раздел Zapret): список сервисов с «+»/удалением/правкой (имя, домены, tcp/udp каналы: порты+desync),
+«применить» из поиска. Старый редактор фикс-блоков (T24) убрать.
+**Критерий приёмки:** добавить/удалить/изменить сервис из UI → zapret перегенерён, smoke PASS.
+
 ## todo — хвосты / на будущее
 
 ### T16 · Кросс-компиляция release-бинарников gateway-ui · M · done
