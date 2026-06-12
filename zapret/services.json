@@ -2,6 +2,8 @@
   {
     "id": "instagram",
     "name": "Instagram",
+    "featured": true,
+    "mode": "vps",
     "domains": [
       "instagram.com",
       "www.instagram.com",
@@ -89,6 +91,8 @@
   {
     "id": "discord",
     "name": "Discord",
+    "featured": true,
+    "mode": "vps",
     "domains": [
       "discord.com",
       "www.discord.com",
@@ -129,6 +133,8 @@
   {
     "id": "general",
     "name": "General",
+    "featured": false,
+    "mode": "zapret",
     "domains": [
       "twitch.tv",
       "www.twitch.tv",
@@ -162,6 +168,8 @@
   {
     "id": "youtube",
     "name": "YouTube",
+    "featured": true,
+    "mode": "vps",
     "domains": [
       "youtube.com",
       "www.youtube.com",
@@ -218,6 +226,8 @@
   {
     "id": "quic_fallback",
     "name": "QUIC fallback (прочий UDP/443)",
+    "featured": false,
+    "mode": "zapret",
     "domains": [],
     "channels": [
       {

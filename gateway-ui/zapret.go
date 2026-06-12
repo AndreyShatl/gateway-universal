@@ -36,6 +36,8 @@ type zChannel struct {
 type zService struct {
 	ID       string     `json:"id"`
 	Name     string     `json:"name"`
+	Featured bool       `json:"featured"`
+	Mode     string     `json:"mode"` // vps | zapret (пусто = zapret)
 	Domains  []string   `json:"domains"`
 	Channels []zChannel `json:"channels"`
 }

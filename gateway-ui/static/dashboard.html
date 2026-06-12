@@ -98,6 +98,11 @@
   .chk { display:flex; flex-wrap:wrap; gap:14px; margin-top:12px; font-size:13px; }
   .chk label { display:flex; align-items:center; gap:6px; cursor:pointer; }
   button:disabled { opacity:.45; cursor:not-allowed; }
+  .frame { border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-top:12px; }
+  .frame-t { font-size:12px; color:var(--muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em; }
+  .mode-tog { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .mode-tog button { background:var(--input-bg); color:var(--muted); border:0; padding:6px 14px; cursor:pointer; font-size:13px; }
+  .mode-tog button.on { background:var(--accent); color:var(--on-accent); font-weight:600; }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -215,14 +220,19 @@
           <details class="defaults"><summary>Лог обновления</summary><pre id="zupLog" class="out"></pre></details>
         </div>
         <div class="card">
-          <h2>Сервисы zapret</h2>
-          <div class="muted">Каждый сервис: имя, домены и каналы (tcp/udp с портами и стратегией desync).
-            Очереди 200(tcp)/201(udp) назначаются автоматически. Сохранение рестартит zapret.</div>
-          <div id="svcList"><div class="soon">загрузка…</div></div>
-          <div class="row">
-            <button id="svcAdd">+ Сервис</button>
-            <button id="svcSave">Сохранить всё</button>
+          <h2>Сервисы</h2>
+          <div class="muted">Ключевые сервисы переключаются между VPN (через VPS-туннель) и Zapret
+            (локальный обход DPI напрямую). Прочие — всегда через zapret. Сохранение рестартит xray+zapret.</div>
+          <div class="frame">
+            <div class="frame-t">⭐ Ключевые — VPN / Zapret</div>
+            <div id="svcFeatured"><div class="soon">загрузка…</div></div>
           </div>
+          <div class="frame">
+            <div class="frame-t">Прочие сервисы (zapret)</div>
+            <div id="svcOthers"></div>
+            <div class="row"><button id="svcAdd">+ Сервис</button></div>
+          </div>
+          <div class="row"><button id="svcSave">Сохранить всё</button></div>
           <div id="svcMsg2" class="msg"></div>
         </div>
       </section>
@@ -398,13 +408,13 @@
       });
     };
 
-    // --- Сервисы zapret (CRUD) ---
-    const svcList = document.getElementById('svcList');
+    // --- Сервисы (CRUD + режим VPN/Zapret) ---
+    const svcFeatured = document.getElementById('svcFeatured');
+    const svcOthers = document.getElementById('svcOthers');
     const svcMsg2 = document.getElementById('svcMsg2');
     let svcState = [];
     function scrapeSvc() {
-      // считать текущие значения из DOM обратно в svcState
-      svcList.querySelectorAll('[data-svc]').forEach(card => {
+      document.querySelectorAll('[data-svc]').forEach(card => {
         const i = +card.dataset.svc;
         const s = svcState[i]; if (!s) return;
         s.name = card.querySelector('.svc-name').value.trim();
@@ -417,31 +427,38 @@
         }));
       });
     }
-    function renderSvc() {
-      svcList.innerHTML = svcState.map((s, i) => `
-        <div class="strat" data-svc="${i}">
-          <div class="row">
-            <input class="svc-name" value="${esc(s.name||'')}" placeholder="Название сервиса">
-            <button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>
-          </div>
-          <textarea class="svc-domains" rows="2" placeholder="домены через пробел/с новой строки (пусто = по протоколу/без hostlist)">${esc((s.domains||[]).join(' '))}</textarea>
-          <div class="chans">${(s.channels||[]).map((c, j) => `
-            <div class="strat" data-ch="${j}">
-              <div class="row">
-                <select class="ch-proto">
-                  <option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option>
-                  <option value="udp"${c.proto==='udp'?' selected':''}>udp</option>
-                </select>
-                <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
-                <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
-                <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
-              </div>
-              <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… (стратегия). Можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
-            </div>`).join('')}
-          </div>
-          <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>
-        </div>`).join('') || '<div class="soon">Нет сервисов.</div>';
+    function cardHTML(s, i) {
+      const tog = s.featured ? `
+        <div class="row"><div class="mode-tog">
+          <button class="${s.mode!=='zapret'?'on':''}" onclick="svcMode(${i},'vps')">VPN</button>
+          <button class="${s.mode==='zapret'?'on':''}" onclick="svcMode(${i},'zapret')">Zapret</button>
+        </div></div>` : '';
+      const delBtn = s.featured ? '' : `<button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>`;
+      return `<div class="strat" data-svc="${i}">
+        <div class="row"><input class="svc-name" value="${esc(s.name||'')}" placeholder="Название">${delBtn}</div>
+        ${tog}
+        <textarea class="svc-domains" rows="2" placeholder="домены через пробел/с новой строки">${esc((s.domains||[]).join(' '))}</textarea>
+        <div class="chans">${(s.channels||[]).map((c, j) => `
+          <div class="strat" data-ch="${j}">
+            <div class="row">
+              <select class="ch-proto"><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>
+              <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
+              <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
+              <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
+            </div>
+            <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
+          </div>`).join('')}
+        </div>
+        <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>
+      </div>`;
     }
+    function renderSvc() {
+      const feat = [], oth = [];
+      svcState.forEach((s, i) => (s.featured ? feat : oth).push(cardHTML(s, i)));
+      svcFeatured.innerHTML = feat.join('') || '<div class="soon">Нет ключевых сервисов.</div>';
+      svcOthers.innerHTML = oth.join('') || '<div class="soon">Нет прочих сервисов.</div>';
+    }
+    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderSvc(); };
     function loadServices() {
       fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderSvc(); });
     }

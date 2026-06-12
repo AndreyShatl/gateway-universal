@@ -37,7 +37,7 @@ build_proto() {
         fi
         cmd+=($desync)
         case " ${portsets[*]} " in *" $ports "*) ;; *) portsets+=("$ports");; esac
-    done < <(jq -r --arg p "$proto" '.[] | .id as $id | .channels[] | select(.proto==$p) | [$id, .ports, (.l7 // ""), .desync] | join("\u001f")' "$SERVICES")
+    done < <(jq -r --arg p "$proto" '.[] | select((.mode // "zapret")!="vps") | .id as $id | .channels[] | select(.proto==$p) | [$id, .ports, (.l7 // ""), .desync] | join("\u001f")' "$SERVICES")
 
     [ $first -eq 1 ] && return 0   # нет сервисов этого протокола
     "${cmd[@]}"
@@ -67,7 +67,7 @@ start() {
     # Материализовать hostlist'ы из inline-доменов JSON
     rm -rf "$GENDIR"; mkdir -p "$GENDIR"
     local sid
-    jq -r '.[] | select((.domains|length)>0) | .id' "$SERVICES" | while read -r sid; do
+    jq -r '.[] | select((.mode // "zapret")!="vps") | select((.domains|length)>0) | .id' "$SERVICES" | while read -r sid; do
         jq -r --arg id "$sid" '.[] | select(.id==$id) | .domains[]' "$SERVICES" > "$GENDIR/$sid.txt"
     done
 

@@ -104,6 +104,15 @@ build-domains.sh ([xray/build-domains.sh](xray/build-domains.sh)) вычитае
 **Приёмка (стенд):** youtube/instagram/discord (в zapret) → 0 в proxy-mux; anthropic (не в zapret) остался;
 POST сервисов перегенерил xray; smoke 9/9.
 
+### T29 · Featured-сервисы с переключателем VPN/Zapret · H · done
+Сервис получил поля `featured` + `mode` (vps|zapret). YouTube/Discord/Instagram — featured
+(дефолт mode=vps), со своими стратегиями и полными доменами. Переключатель в UI (рамка «Ключевые»),
+прочие — во второй рамке (zapret-only). mode=vps → домены в VPS-туннель (build-domains добавляет);
+mode=zapret → сегмент nfqws + исключение из VPS. Сохранение перегенерирует xray+zapret.
+**Приёмка (стенд):** дефолт — featured в VPS (zapret крутит только general+quic); youtube.com в VPS,
+twitch исключён; toggle youtube→zapret → youtube в nfqws + вне VPS; обратно ок; smoke 9/9.
+**Примечание:** install.sh при установке перерендеривает /opt/zapret-config/zapret.sh (mode-фильтр) — на боевом применится при следующем install/деплое.
+
 ## todo — хвосты / на будущее
 
 ### T16 · Кросс-компиляция release-бинарников gateway-ui · M · done
