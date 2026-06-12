@@ -38,9 +38,13 @@ SERVICES_JSON="${GATEWAY_ZAPRET_SERVICES:-/etc/gateway/zapret-services.json}"
 [[ -f "$SERVICES_JSON" ]] || SERVICES_JSON="$SCRIPT_DIR/../zapret/services.json"
 EXCLUDE_FILE=""
 if command -v jq >/dev/null 2>&1 && [[ -f "$SERVICES_JSON" ]]; then
-    EXCLUDE_FILE="$(mktemp)"
-    trap 'rm -f "$EXCLUDE_FILE"' EXIT
-    jq -r '.[].domains[]?' "$SERVICES_JSON" 2>/dev/null > "$EXCLUDE_FILE" || true
+    # mode=zapret → домены идут напрямую, исключаем из VPS.
+    # mode=vps    → домены сервиса добавляем в VPS-список (источник — карточка сервиса).
+    EXCLUDE_FILE="$(mktemp)"; INCLUDE_FILE="$(mktemp)"
+    trap 'rm -f "$EXCLUDE_FILE" "$INCLUDE_FILE"' EXIT
+    jq -r '.[] | select((.mode // "zapret")=="zapret") | .domains[]?' "$SERVICES_JSON" 2>/dev/null > "$EXCLUDE_FILE" || true
+    jq -r '.[] | select(.mode=="vps") | .domains[]?' "$SERVICES_JSON" 2>/dev/null > "$INCLUDE_FILE" || true
+    [[ -s "$INCLUDE_FILE" ]] && FILES+=("$INCLUDE_FILE")
 fi
 
 # Нормализовать, дедуплицировать (сохраняя geosite:/domain: префикс), исключить
