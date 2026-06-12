@@ -217,7 +217,7 @@ apt-get update -qq
 APT_PKGS=(
     curl wget ca-certificates gettext-base
     iptables iproute2 iputils-ping dnsutils
-    gawk sed grep procps
+    gawk sed grep procps jq
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
     APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)
@@ -340,6 +340,12 @@ if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
     sed -i "s|^CONFIG_DIR=.*|CONFIG_DIR=$ZAPRET_CFG|" "$ZAPRET_CFG/zapret.sh"
     chmod +x "$ZAPRET_CFG/zapret.sh"
     ok "zapret.sh rendered with LAN=$LAN"
+
+    # Список сервисов: сид рядом с конфигом + пользовательский в /etc/gateway (если ещё нет)
+    cp "$SCRIPT_DIR/zapret/services.json" "$ZAPRET_CFG/services.json"
+    mkdir -p /etc/gateway
+    [[ -f /etc/gateway/zapret-services.json ]] || cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
+    ok "zapret services.json установлен"
 
     # systemd unit
     say "Installing zapret.service…"

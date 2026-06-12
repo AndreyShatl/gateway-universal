@@ -1,0 +1,44 @@
+[
+  {
+    "id": "instagram",
+    "name": "Instagram",
+    "domains_file": "instagram.txt",
+    "channels": [
+      { "proto": "tcp", "ports": "443", "desync": "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=11 --dpi-desync-fooling=md5sig,badseq --dpi-desync-autottl=2:2-12 $FAKE_TLS" },
+      { "proto": "udp", "ports": "443", "desync": "--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC" }
+    ]
+  },
+  {
+    "id": "discord",
+    "name": "Discord",
+    "domains_file": "discord.txt",
+    "channels": [
+      { "proto": "tcp", "ports": "443,2053,2083,2087,2096,8443", "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS" },
+      { "proto": "udp", "ports": "19294-19344,50000-50100", "l7": "discord,stun", "desync": "--dpi-desync=fake --dpi-desync-repeats=6" }
+    ]
+  },
+  {
+    "id": "general",
+    "name": "General",
+    "domains_file": "general.txt",
+    "channels": [
+      { "proto": "tcp", "ports": "80,443", "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS" }
+    ]
+  },
+  {
+    "id": "youtube",
+    "name": "YouTube",
+    "domains_file": "youtube.txt",
+    "channels": [
+      { "proto": "tcp", "ports": "80,443", "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts" }
+    ]
+  },
+  {
+    "id": "quic_fallback",
+    "name": "QUIC fallback (прочий UDP/443)",
+    "domains_file": "",
+    "channels": [
+      { "proto": "udp", "ports": "443", "desync": "--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC" }
+    ]
+  }
+]
