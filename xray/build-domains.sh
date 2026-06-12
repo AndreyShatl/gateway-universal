@@ -32,11 +32,24 @@ for d in "${DIRS[@]}"; do
 done
 [[ ${#FILES[@]} -gt 0 ]] || { echo "build-domains: нет .txt в: ${DIRS[*]}" >&2; exit 1; }
 
-# Нормализовать, дедуплицировать (сохраняя geosite:/domain: префикс) и
-# напечатать как элементы JSON-массива с отступом 10 пробелов, через запятую.
-out="$(awk '
+# Исключения: домены, отданные в zapret (локальный DPI-обход), не должны идти
+# в VPS-туннель — иначе zapret их не увидит. Вычитаем их из VPS-списка.
+SERVICES_JSON="${GATEWAY_ZAPRET_SERVICES:-/etc/gateway/zapret-services.json}"
+[[ -f "$SERVICES_JSON" ]] || SERVICES_JSON="$SCRIPT_DIR/../zapret/services.json"
+EXCLUDE_FILE=""
+if command -v jq >/dev/null 2>&1 && [[ -f "$SERVICES_JSON" ]]; then
+    EXCLUDE_FILE="$(mktemp)"
+    trap 'rm -f "$EXCLUDE_FILE"' EXIT
+    jq -r '.[].domains[]?' "$SERVICES_JSON" 2>/dev/null > "$EXCLUDE_FILE" || true
+fi
+
+# Нормализовать, дедуплицировать (сохраняя geosite:/domain: префикс), исключить
+# zapret-домены и напечатать как элементы JSON-массива.
+out="$(awk -v exf="$EXCLUDE_FILE" '
+    BEGIN{ if(exf!=""){ while((getline d < exf)>0){ gsub(/[ \t\r]/,"",d); if(d!="") ex[tolower(d)]=1 } } }
     { line=$0; sub(/#.*/,"",line); gsub(/[ \t\r]/,"",line); if(line=="") next;
-      if(line ~ /^geosite:/) e="geosite:" substr(line,9); else e="domain:" line;
+      if(line ~ /^geosite:/){ e="geosite:" substr(line,9) }
+      else { if(tolower(line) in ex) next; e="domain:" line }
       if(!(e in seen)){ seen[e]=1; arr[n++]=e } }
     END{ for(i=0;i<n;i++) printf "          \"%s\"%s\n", arr[i], (i==n-1?"":",") }
 ' "${FILES[@]}")"
