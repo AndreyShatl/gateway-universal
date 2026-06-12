@@ -13,6 +13,7 @@ FAKE_QUIC="--dpi-desync-fake-quic=$ZAPRET_DIR/files/fake/quic_initial_www_google
 # Список сервисов (правит веб-UI). Пользовательский — в /etc/gateway, сид — рядом.
 SERVICES=/etc/gateway/zapret-services.json
 [ -f "$SERVICES" ] || SERVICES=$CONFIG_DIR/services.json
+GENDIR=$CONFIG_DIR/domains.gen   # hostlist'ы, материализованные из inline-доменов JSON
 
 # build_proto <tcp|udp> <queue> — поднять nfqws со всеми сегментами этого протокола
 # (по одному --new на сервис, порядок из JSON = приоритет) и навесить NFQUEUE.
@@ -22,7 +23,7 @@ build_proto() {
     local -a cmd=("$NFQWS" --daemon --qnum=$qnum)
     local -a portsets=()
     # разделитель полей — Unit Separator (\037), не-whitespace: read не схлопывает пустые поля
-    while IFS=$'\037' read -r df ports l7 desync; do
+    while IFS=$'\037' read -r id ports l7 desync; do
         [ -n "$ports" ] || continue
         desync=${desync//\$FAKE_TLS/$FAKE_TLS}
         desync=${desync//\$FAKE_QUIC/$FAKE_QUIC}
@@ -31,12 +32,12 @@ build_proto() {
         cmd+=(--filter-$proto=$ports)
         if [ -n "$l7" ]; then
             cmd+=(--filter-l7=$l7)
-        elif [ -n "$df" ]; then
-            cmd+=(--hostlist=$CONFIG_DIR/domains/$df)
+        elif [ -f "$GENDIR/$id.txt" ]; then
+            cmd+=(--hostlist=$GENDIR/$id.txt)
         fi
         cmd+=($desync)
         case " ${portsets[*]} " in *" $ports "*) ;; *) portsets+=("$ports");; esac
-    done < <(jq -r --arg p "$proto" '.[] | .domains_file as $df | .channels[] | select(.proto==$p) | [$df, .ports, (.l7 // ""), .desync] | join("\u001f")' "$SERVICES")
+    done < <(jq -r --arg p "$proto" '.[] | .id as $id | .channels[] | select(.proto==$p) | [$id, .ports, (.l7 // ""), .desync] | join("\u001f")' "$SERVICES")
 
     [ $first -eq 1 ] && return 0   # нет сервисов этого протокола
     "${cmd[@]}"
@@ -62,6 +63,13 @@ start() {
         iptables -I FORWARD 1 -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT
     done
     echo "  Allowed QUIC to Meta IPs (Instagram bypass)"
+
+    # Материализовать hostlist'ы из inline-доменов JSON
+    rm -rf "$GENDIR"; mkdir -p "$GENDIR"
+    local sid
+    jq -r '.[] | select((.domains|length)>0) | .id' "$SERVICES" | while read -r sid; do
+        jq -r --arg id "$sid" '.[] | select(.id==$id) | .domains[]' "$SERVICES" > "$GENDIR/$sid.txt"
+    done
 
     # === Сервисы из JSON: очередь 200 (TCP) / 201 (UDP) ===
     build_proto tcp 200

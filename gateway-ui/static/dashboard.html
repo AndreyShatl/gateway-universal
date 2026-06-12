@@ -215,10 +215,15 @@
           <details class="defaults"><summary>Лог обновления</summary><pre id="zupLog" class="out"></pre></details>
         </div>
         <div class="card">
-          <h2>Стратегии по сервисам</h2>
-          <div class="muted">desync-флаги для каждого блока (TCP/UDP отдельно). Пусто = калиброванный дефолт.
-            Сохранение рестартит zapret. Можно вставить найденную поиском стратегию.</div>
-          <div id="stratList"><div class="soon">загрузка…</div></div>
+          <h2>Сервисы zapret</h2>
+          <div class="muted">Каждый сервис: имя, домены и каналы (tcp/udp с портами и стратегией desync).
+            Очереди 200(tcp)/201(udp) назначаются автоматически. Сохранение рестартит zapret.</div>
+          <div id="svcList"><div class="soon">загрузка…</div></div>
+          <div class="row">
+            <button id="svcAdd">+ Сервис</button>
+            <button id="svcSave">Сохранить всё</button>
+          </div>
+          <div id="svcMsg2" class="msg"></div>
         </div>
       </section>
 
@@ -336,13 +341,11 @@
       const st = d.status ? ('статус: ' + d.status + (d.running ? ' (идёт…)' : '')) : 'не запускался';
       scanMsg.className = 'msg'; scanMsg.textContent = st;
       const ws = d.working || [];
-      const opts = (stratBlocks || []).map(b => `<option value="${b.id}">${esc(b.label)}</option>`).join('');
       scanWorking.innerHTML = ws.length
         ? '<div class="muted" style="margin-top:10px">Найдено рабочих: ' + ws.length + '</div>' +
           ws.map(w => `<div class="strat">
             <div class="params">${esc(w.domain)} → ${esc(w.strategy)}</div>
-            <div class="row"><select>${opts}</select>
-              <button data-strategy="${esc(w.strategy)}" onclick="applyFound(this)">Применить в блок</button></div>
+            <div class="row"><button data-strategy="${esc(w.strategy)}" onclick="applyFound(this)">Скопировать стратегию</button></div>
           </div>`).join('')
         : '<div class="soon">Рабочих стратегий пока нет.</div>';
       scanLog.textContent = d.log_tail || '';
@@ -395,53 +398,77 @@
       });
     };
 
-    // --- Стратегии по сервисам (оверрайды) ---
-    const stratList = document.getElementById('stratList');
-    let stratBlocks = [];
-    function loadStrategies() {
-      fetch('/api/zapret/strategies').then(r => r.json()).then(d => {
-        stratBlocks = d.blocks || [];
-        stratList.innerHTML = stratBlocks.map(b => {
-          const val = b.override || '';
-          return `<div class="strat">
-            <div class="h"><span class="tag q">${esc(b.label)}</span>${b.override?'<span class="tag">оверрайд</span>':'<span class="tag">дефолт</span>'}</div>
-            <textarea id="strat_${b.id}" rows="2" placeholder="${esc(b.default)}">${esc(val)}</textarea>
-            <div class="row">
-              <button onclick="saveStrat('${b.id}')">Сохранить</button>
-              <button onclick="resetStrat('${b.id}')">Сброс</button>
-            </div>
-            <div class="msg" id="stratMsg_${b.id}"></div>
-          </div>`;
-        }).join('');
+    // --- Сервисы zapret (CRUD) ---
+    const svcList = document.getElementById('svcList');
+    const svcMsg2 = document.getElementById('svcMsg2');
+    let svcState = [];
+    function scrapeSvc() {
+      // считать текущие значения из DOM обратно в svcState
+      svcList.querySelectorAll('[data-svc]').forEach(card => {
+        const i = +card.dataset.svc;
+        const s = svcState[i]; if (!s) return;
+        s.name = card.querySelector('.svc-name').value.trim();
+        s.domains = card.querySelector('.svc-domains').value.split(/[\s,]+/).filter(Boolean);
+        s.channels = [...card.querySelectorAll('[data-ch]')].map(ch => ({
+          proto: ch.querySelector('.ch-proto').value,
+          ports: ch.querySelector('.ch-ports').value.trim(),
+          l7: ch.querySelector('.ch-l7').value.trim() || undefined,
+          desync: ch.querySelector('.ch-desync').value.trim()
+        }));
       });
     }
-    loadStrategies();
-    window.saveStrat = function (id) {
-      const desync = document.getElementById('strat_' + id).value.trim();
-      const m = document.getElementById('stratMsg_' + id);
-      m.className = 'msg'; m.textContent = 'Сохраняю + рестарт zapret…';
-      fetch('/api/zapret/strategy', { method:'POST', body:new URLSearchParams({ id, desync }) })
+    function renderSvc() {
+      svcList.innerHTML = svcState.map((s, i) => `
+        <div class="strat" data-svc="${i}">
+          <div class="row">
+            <input class="svc-name" value="${esc(s.name||'')}" placeholder="Название сервиса">
+            <button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>
+          </div>
+          <textarea class="svc-domains" rows="2" placeholder="домены через пробел/с новой строки (пусто = по протоколу/без hostlist)">${esc((s.domains||[]).join(' '))}</textarea>
+          <div class="chans">${(s.channels||[]).map((c, j) => `
+            <div class="strat" data-ch="${j}">
+              <div class="row">
+                <select class="ch-proto">
+                  <option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option>
+                  <option value="udp"${c.proto==='udp'?' selected':''}>udp</option>
+                </select>
+                <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
+                <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
+                <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
+              </div>
+              <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… (стратегия). Можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
+            </div>`).join('')}
+          </div>
+          <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>
+        </div>`).join('') || '<div class="soon">Нет сервисов.</div>';
+    }
+    function loadServices() {
+      fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderSvc(); });
+    }
+    loadServices();
+    window.svcDel = i => { scrapeSvc(); svcState.splice(i, 1); renderSvc(); };
+    window.svcChDel = (i, j) => { scrapeSvc(); svcState[i].channels.splice(j, 1); renderSvc(); };
+    window.svcChAdd = i => { scrapeSvc(); (svcState[i].channels = svcState[i].channels || []).push({ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }); renderSvc(); };
+    document.getElementById('svcAdd').onclick = () => {
+      scrapeSvc();
+      const id = 'svc' + Date.now().toString(36);
+      svcState.push({ id, name:'Новый сервис', domains:[], channels:[{ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }] });
+      renderSvc();
+    };
+    document.getElementById('svcSave').onclick = () => {
+      scrapeSvc();
+      svcMsg2.className = 'msg'; svcMsg2.textContent = 'Сохраняю + рестарт zapret…';
+      fetch('/api/zapret/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(svcState) })
         .then(async r => { const d = await r.json();
-          if (r.ok) { m.className = 'msg good'; m.textContent = '✓ применено'; loadStrategies(); }
-          else { m.className = 'msg bad'; m.textContent = '✗ ' + (d.error || 'ошибка'); }
-        }).catch(() => { m.className = 'msg bad'; m.textContent = '✗ сеть'; });
+          if (r.ok) { svcMsg2.className = 'msg good'; svcMsg2.textContent = '✓ сохранено и применено'; loadServices(); }
+          else { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ сеть'; });
     };
-    window.resetStrat = function (id) {
-      const m = document.getElementById('stratMsg_' + id);
-      m.className = 'msg'; m.textContent = 'Сброс к дефолту…';
-      fetch('/api/zapret/strategy', { method:'POST', body:new URLSearchParams({ id, action:'reset' }) })
-        .then(() => { loadStrategies(); });
-    };
-    // применить найденную стратегию в выбранный блок (без авто-сохранения)
+    // применить найденную поиском стратегию: показать для копирования (вставить в канал вручную)
     window.applyFound = function (btn) {
-      const id = btn.closest('.row').querySelector('select').value;
-      const strategy = btn.dataset.strategy || '';
-      let s = strategy.replace(/^\s*nfqws\s+/, '').replace(/--hostlist=\S+/g, '').replace(/--filter-\S+/g, '').trim();
-      const ta = document.getElementById('strat_' + id);
-      ta.value = s;
-      ta.scrollIntoView({ behavior:'smooth', block:'center' });
-      const m = document.getElementById('stratMsg_' + id);
-      m.className = 'msg'; m.textContent = 'Вставлено — проверьте и нажмите «Сохранить»';
+      const s = (btn.dataset.strategy || '').replace(/^\s*nfqws\s+/, '').replace(/--hostlist=\S+/g, '').replace(/--filter-\S+/g, '').trim();
+      navigator.clipboard?.writeText(s);
+      alert('Стратегия скопирована — вставьте в поле desync нужного канала сервиса:\n\n' + s);
     };
 
     // --- Навигация ---

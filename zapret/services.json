@@ -2,43 +2,229 @@
   {
     "id": "instagram",
     "name": "Instagram",
-    "domains_file": "instagram.txt",
+    "domains": [
+      "instagram.com",
+      "www.instagram.com",
+      "i.instagram.com",
+      "api.instagram.com",
+      "graph.instagram.com",
+      "about.instagram.com",
+      "accountscenter.instagram.com",
+      "help.instagram.com",
+      "edge-chat.instagram.com",
+      "lookaside.instagram.com",
+      "test-gateway.instagram.com",
+      "gateway.instagram.com",
+      "static.cdninstagram.com",
+      "scontent.cdninstagram.com",
+      "video.cdninstagram.com",
+      "cdninstagram.com",
+      "scontent-arn2-1.cdninstagram.com",
+      "scontent-fra3-1.cdninstagram.com",
+      "scontent-fra3-2.cdninstagram.com",
+      "scontent-fra5-1.cdninstagram.com",
+      "scontent-fra5-2.cdninstagram.com",
+      "scontent-dus1-1.cdninstagram.com",
+      "scontent-muc2-1.cdninstagram.com",
+      "z-p3-scontent.cdninstagram.com",
+      "z-p4-scontent.cdninstagram.com",
+      "facebook.com",
+      "www.facebook.com",
+      "m.facebook.com",
+      "web.facebook.com",
+      "b-graph.facebook.com",
+      "business.facebook.com",
+      "edge-chat.facebook.com",
+      "edge-star-mini-shv-01-any2.facebook.com",
+      "mqtt-mini.facebook.com",
+      "rupload.facebook.com",
+      "star-mini.c10r.facebook.com",
+      "z-m-gateway.facebook.com",
+      "graph.facebook.com",
+      "api.facebook.com",
+      "b-api.facebook.com",
+      "z-m-graph.facebook.com",
+      "edge-mqtt.facebook.com",
+      "connect.facebook.net",
+      "facebook.net",
+      "fb.com",
+      "fbsbx.com",
+      "fbcdn.net",
+      "scontent.xx.fbcdn.net",
+      "static.xx.fbcdn.net",
+      "video.xx.fbcdn.net",
+      "external.xx.fbcdn.net",
+      "z-p3-scontent.xx.fbcdn.net",
+      "z-p4-scontent.xx.fbcdn.net",
+      "z-m-scontent.xx.fbcdn.net",
+      "scontent-fra.xx.fbcdn.net",
+      "scontent-muc.xx.fbcdn.net",
+      "lookaside.facebook.com",
+      "lookaside.fbsbx.com",
+      "platform-lookaside.fbsbx.com",
+      "meta.com",
+      "meta.ai",
+      "threads.net",
+      "www.threads.net",
+      "ig.me",
+      "igcdn.com",
+      "igsonar.com",
+      "messenger.com",
+      "oculus.com",
+      "oculuscdn.com"
+    ],
     "channels": [
-      { "proto": "tcp", "ports": "443", "desync": "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=11 --dpi-desync-fooling=md5sig,badseq --dpi-desync-autottl=2:2-12 $FAKE_TLS" },
-      { "proto": "udp", "ports": "443", "desync": "--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC" }
+      {
+        "proto": "tcp",
+        "ports": "443",
+        "desync": "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=11 --dpi-desync-fooling=md5sig,badseq --dpi-desync-autottl=2:2-12 $FAKE_TLS"
+      },
+      {
+        "proto": "udp",
+        "ports": "443",
+        "desync": "--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC"
+      }
     ]
   },
   {
     "id": "discord",
     "name": "Discord",
-    "domains_file": "discord.txt",
+    "domains": [
+      "discord.com",
+      "www.discord.com",
+      "cdn.discordapp.com",
+      "media.discordapp.net",
+      "images-ext-1.discordapp.net",
+      "images-ext-2.discordapp.net",
+      "discordapp.com",
+      "discordapp.net",
+      "discord.gg",
+      "discord.media",
+      "discordcdn.com",
+      "dis.gd",
+      "discord.co",
+      "gateway.discord.gg",
+      "dl.discordapp.net",
+      "status.discord.com",
+      "support.discord.com",
+      "blog.discord.com",
+      "streamkit.discord.com",
+      "canary.discord.com",
+      "ptb.discord.com"
+    ],
     "channels": [
-      { "proto": "tcp", "ports": "443,2053,2083,2087,2096,8443", "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS" },
-      { "proto": "udp", "ports": "19294-19344,50000-50100", "l7": "discord,stun", "desync": "--dpi-desync=fake --dpi-desync-repeats=6" }
+      {
+        "proto": "tcp",
+        "ports": "443,2053,2083,2087,2096,8443",
+        "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS"
+      },
+      {
+        "proto": "udp",
+        "ports": "19294-19344,50000-50100",
+        "l7": "discord,stun",
+        "desync": "--dpi-desync=fake --dpi-desync-repeats=6"
+      }
     ]
   },
   {
     "id": "general",
     "name": "General",
-    "domains_file": "general.txt",
+    "domains": [
+      "twitch.tv",
+      "www.twitch.tv",
+      "m.twitch.tv",
+      "gql.twitch.tv",
+      "api.twitch.tv",
+      "clips.twitch.tv",
+      "dashboard.twitch.tv",
+      "ttvnw.net",
+      "usher.ttvnw.net",
+      "static-cdn.jtvnw.net",
+      "jtvnw.net",
+      "twitchcdn.net",
+      "twitchsvc.net",
+      "twitchcdn.com",
+      "ext-twitch.tv",
+      "moddb.com",
+      "www.moddb.com",
+      "static.moddb.com",
+      "media.moddb.com",
+      "cdn.moddb.com"
+    ],
     "channels": [
-      { "proto": "tcp", "ports": "80,443", "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS" }
+      {
+        "proto": "tcp",
+        "ports": "80,443",
+        "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS"
+      }
     ]
   },
   {
     "id": "youtube",
     "name": "YouTube",
-    "domains_file": "youtube.txt",
+    "domains": [
+      "youtube.com",
+      "www.youtube.com",
+      "m.youtube.com",
+      "music.youtube.com",
+      "tv.youtube.com",
+      "kids.youtube.com",
+      "studio.youtube.com",
+      "accounts.youtube.com",
+      "gaming.youtube.com",
+      "youtu.be",
+      "youtube-nocookie.com",
+      "youtube-ui.l.google.com",
+      "withyoutube.com",
+      "googlevideo.com",
+      "ytimg.com",
+      "i.ytimg.com",
+      "i9.ytimg.com",
+      "s.ytimg.com",
+      "yt3.ggpht.com",
+      "yt4.ggpht.com",
+      "ggpht.com",
+      "googleapis.com",
+      "www.googleapis.com",
+      "fonts.googleapis.com",
+      "video.google.com",
+      "gstatic.com",
+      "fonts.gstatic.com",
+      "encrypted-tbn0.gstatic.com",
+      "googleusercontent.com",
+      "lh3.googleusercontent.com",
+      "yt3.googleusercontent.com",
+      "play.google.com",
+      "google.com",
+      "www.google.com",
+      "accounts.google.com",
+      "clients1.google.com",
+      "clients2.google.com",
+      "clients3.google.com",
+      "clients4.google.com",
+      "clients5.google.com",
+      "clients6.google.com",
+      "redirector.googlevideo.com",
+      "manifest.googlevideo.com"
+    ],
     "channels": [
-      { "proto": "tcp", "ports": "80,443", "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts" }
+      {
+        "proto": "tcp",
+        "ports": "80,443",
+        "desync": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts"
+      }
     ]
   },
   {
     "id": "quic_fallback",
     "name": "QUIC fallback (прочий UDP/443)",
-    "domains_file": "",
+    "domains": [],
     "channels": [
-      { "proto": "udp", "ports": "443", "desync": "--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC" }
+      {
+        "proto": "udp",
+        "ports": "443",
+        "desync": "--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC"
+      }
     ]
   }
 ]
