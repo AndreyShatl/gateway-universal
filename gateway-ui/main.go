@@ -53,7 +53,8 @@ type server struct {
 	xrayBin        string // /opt/xray/xray
 	scanDir        string // /etc/gateway/scan (состояние поиска стратегий)
 	blockcheck     string // /opt/zapret/blockcheck.sh
-	overrides      string // /etc/gateway/zapret-overrides.env (оверрайды стратегий)
+	overrides      string // (устар.) оверрайды стратегий
+	servicesFile   string // /etc/gateway/zapret-services.json (динамические сервисы)
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -69,7 +70,8 @@ func main() {
 	xrayBin := flag.String("xray-bin", "/opt/xray/xray", "бинарник xray")
 	scanDir := flag.String("scan-dir", "/etc/gateway/scan", "каталог состояния поиска стратегий")
 	blockcheck := flag.String("blockcheck", "/opt/zapret/blockcheck.sh", "путь к blockcheck.sh")
-	overrides := flag.String("zapret-overrides", "/etc/gateway/zapret-overrides.env", "файл оверрайдов стратегий zapret")
+	overrides := flag.String("zapret-overrides", "/etc/gateway/zapret-overrides.env", "(устар.) файл оверрайдов")
+	servicesFile := flag.String("zapret-services", "/etc/gateway/zapret-services.json", "файл сервисов zapret")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -79,7 +81,7 @@ func main() {
 	s := &server{
 		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
 		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
-		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides,
+		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
 	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
@@ -101,8 +103,7 @@ func main() {
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
-	mux.HandleFunc("/api/zapret/strategies", s.requireAuth(s.handleStrategies))
-	mux.HandleFunc("/api/zapret/strategy", s.requireAuth(s.handleStrategySet))
+	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))
 	mux.HandleFunc("/api/zapret/version", s.requireAuth(s.handleZapretVersion))
 	mux.HandleFunc("/api/zapret/update", s.requireAuth(s.handleZapretUpdate))
 	mux.HandleFunc("/api/scan", s.requireAuth(s.handleScan))

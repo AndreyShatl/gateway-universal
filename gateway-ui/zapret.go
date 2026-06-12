@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,78 +26,104 @@ type zStrategy struct {
 
 // Блоки стратегий zapret.sh: id → переменная DESYNC_<VAR> + калиброванный дефолт.
 // Оверрайды живут в /etc/gateway/zapret-overrides.env (DESYNC_<VAR>="...").
-type zapBlock struct {
-	ID      string `json:"id"`
-	Label   string `json:"label"`
-	Varname string `json:"var"`
-	Default string `json:"default"`
+// Сервис zapret: имя, домены (inline) и каналы (tcp/udp с портами+desync).
+type zChannel struct {
+	Proto  string `json:"proto"`
+	Ports  string `json:"ports"`
+	L7     string `json:"l7,omitempty"`
+	Desync string `json:"desync"`
+}
+type zService struct {
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	Domains  []string   `json:"domains"`
+	Channels []zChannel `json:"channels"`
 }
 
-var zapBlocks = []zapBlock{
-	{"tcp_instagram", "Instagram (TCP)", "DESYNC_TCP_INSTAGRAM", `--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=11 --dpi-desync-fooling=md5sig,badseq --dpi-desync-autottl=2:2-12 $FAKE_TLS`},
-	{"tcp_discord", "Discord (TCP)", "DESYNC_TCP_DISCORD", `--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS`},
-	{"tcp_general", "General (TCP)", "DESYNC_TCP_GENERAL", `--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts $FAKE_TLS`},
-	{"tcp_youtube", "YouTube (TCP)", "DESYNC_TCP_YOUTUBE", `--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts`},
-	{"udp_instagram", "Instagram (UDP/QUIC)", "DESYNC_UDP_INSTAGRAM", `--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC`},
-	{"udp_general", "General (UDP/QUIC)", "DESYNC_UDP_GENERAL", `--dpi-desync=fake --dpi-desync-repeats=6 $FAKE_QUIC`},
-	{"udp_discord", "Discord voice (UDP)", "DESYNC_UDP_DISCORD", `--dpi-desync=fake --dpi-desync-repeats=6`},
-}
-
-func zapBlockByID(id string) *zapBlock {
-	for i := range zapBlocks {
-		if zapBlocks[i].ID == id {
-			return &zapBlocks[i]
+func (s *server) readServices() ([]zService, error) {
+	data, err := os.ReadFile(s.servicesFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []zService{}, nil
 		}
+		return nil, err
 	}
-	return nil
+	var svc []zService
+	if err := json.Unmarshal(data, &svc); err != nil {
+		return nil, err
+	}
+	return svc, nil
 }
 
-// handleStrategies — GET: блоки с дефолтом и текущим оверрайдом (если есть).
-func (s *server) handleStrategies(w http.ResponseWriter, r *http.Request) {
-	type row struct {
-		zapBlock
-		Override string `json:"override"`
-	}
-	out := []row{}
-	for _, b := range zapBlocks {
-		ov, _ := readConfigVar(s.overrides, b.Varname)
-		out = append(out, row{b, ov})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"blocks": out})
-}
-
-// handleStrategySet — POST id + desync: записать оверрайд блока и рестартить zapret.
-// action=reset убирает оверрайд (возврат к калиброванному дефолту).
-func (s *server) handleStrategySet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	b := zapBlockByID(r.FormValue("id"))
-	if b == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "неизвестный блок"})
-		return
-	}
-	var err error
-	if r.FormValue("action") == "reset" {
-		err = removeConfigVar(s.overrides, b.Varname)
-	} else {
-		desync := strings.TrimSpace(r.FormValue("desync"))
-		if desync == "" || !strings.Contains(desync, "--dpi-desync") {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "пустая или некорректная стратегия (нужны --dpi-desync…)"})
+// handleServices — GET список сервисов; POST — заменить весь список и рестартить zapret.
+func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		svc, err := s.readServices()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
-		err = upsertConfigVar(s.overrides, b.Varname, desync)
+		writeJSON(w, http.StatusOK, map[string]any{"services": svc})
+
+	case http.MethodPost:
+		var svc []zService
+		if err := json.NewDecoder(r.Body).Decode(&svc); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "плохой JSON"})
+			return
+		}
+		if msg := validateServices(svc); msg != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": msg})
+			return
+		}
+		b, _ := json.MarshalIndent(svc, "", "  ")
+		if err := os.MkdirAll(filepath.Dir(s.servicesFile), 0o755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		tmp := s.servicesFile + ".tmp"
+		if err := os.WriteFile(tmp, b, 0o644); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		os.Rename(tmp, s.servicesFile)
+		if out, err := runCmd("systemctl", "restart", "zapret.service"); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "рестарт zapret: " + err.Error(), "output": out})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
+}
+
+func validateServices(svc []zService) string {
+	seen := map[string]bool{}
+	for _, s := range svc {
+		if strings.TrimSpace(s.ID) == "" || strings.TrimSpace(s.Name) == "" {
+			return "у сервиса пустой id или имя"
+		}
+		if seen[s.ID] {
+			return "повторяющийся id: " + s.ID
+		}
+		seen[s.ID] = true
+		if len(s.Channels) == 0 {
+			return s.Name + ": нет каналов (tcp/udp)"
+		}
+		for _, c := range s.Channels {
+			if c.Proto != "tcp" && c.Proto != "udp" {
+				return s.Name + ": proto должен быть tcp или udp"
+			}
+			if strings.TrimSpace(c.Ports) == "" {
+				return s.Name + ": пустые порты"
+			}
+			if !strings.Contains(c.Desync, "--dpi-desync") {
+				return s.Name + ": стратегия без --dpi-desync"
+			}
+		}
 	}
-	if out, err := runCmd("systemctl", "restart", "zapret.service"); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "рестарт zapret: " + err.Error(), "output": out})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return ""
 }
 
 const zupdateUnit = "gateway-zupdate"

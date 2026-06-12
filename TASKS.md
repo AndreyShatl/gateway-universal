@@ -87,11 +87,14 @@ services.json (сид + /etc/gateway/zapret-services.json). Заменяет с�
 **Приёмка (стенд):** 2 nfqws (q200/q201), сегменты идентичны прежним (hostlist/l7/desync), smoke 9/9.
 **Баг по ходу:** read с IFS=tab схлопывал пустые поля → разделитель сменён на .
 
-### T27 · CRUD сервисов в UI (заменяет редактор T24) · H · todo
-API: list/add/update/delete сервисов в /etc/gateway/zapret-services.json → рестарт zapret.
-UI (раздел Zapret): список сервисов с «+»/удалением/правкой (имя, домены, tcp/udp каналы: порты+desync),
-«применить» из поиска. Старый редактор фикс-блоков (T24) убрать.
-**Критерий приёмки:** добавить/удалить/изменить сервис из UI → zapret перегенерён, smoke PASS.
+### T27 · CRUD сервисов в UI (заменяет редактор T24) · H · done
+API GET/POST /api/zapret/services ([gateway-ui/zapret.go](gateway-ui/zapret.go)) — читает/пишет
+весь список в /etc/gateway/zapret-services.json (валидация) → рестарт zapret. UI «Сервисы zapret»:
+список с inline-правкой (имя, домены, каналы tcp/udp: порты+l7+desync), «+ Сервис»/«+ Канал»/удаление,
+«Сохранить всё». Старый редактор фикс-блоков и /api/zapret/strategy* убраны. Из поиска — «Скопировать стратегию».
+**Приёмка (стенд):** GET 5; POST +тестовый сервис → iptables 8444 + hostlist материализован + smoke PASS;
+восстановление сида → smoke PASS.
+**Хвост:** в Go остались неиспользуемые upsert/removeConfigVar + overrides (от T24) — подчистить при случае.
 
 ## todo — хвосты / на будущее
 
