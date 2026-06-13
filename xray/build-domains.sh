@@ -42,7 +42,9 @@ if command -v jq >/dev/null 2>&1 && [[ -f "$SERVICES_JSON" ]]; then
     # mode=vps    → домены сервиса добавляем в VPS-список (источник — карточка сервиса).
     EXCLUDE_FILE="$(mktemp)"; INCLUDE_FILE="$(mktemp)"
     trap 'rm -f "$EXCLUDE_FILE" "$INCLUDE_FILE"' EXIT
-    jq -r '.[] | select((.mode // "zapret")=="zapret") | .domains[]?' "$SERVICES_JSON" 2>/dev/null > "$EXCLUDE_FILE" || true
+    # exclude: всё, что НЕ vps (zapret и direct идут мимо туннеля).
+    # include: только vps — домены сервиса добавляем в VPS-список.
+    jq -r '.[] | select((.mode // "zapret")!="vps") | .domains[]?' "$SERVICES_JSON" 2>/dev/null > "$EXCLUDE_FILE" || true
     jq -r '.[] | select(.mode=="vps") | .domains[]?' "$SERVICES_JSON" 2>/dev/null > "$INCLUDE_FILE" || true
     [[ -s "$INCLUDE_FILE" ]] && FILES+=("$INCLUDE_FILE")
 fi

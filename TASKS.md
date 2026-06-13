@@ -115,6 +115,15 @@ twitch исключён; toggle youtube→zapret → youtube в nfqws + вне V
 **Доработка по фидбеку:** переключатели VPN/Zapret ключевых сервисов вынесены в сайдбар (рамка ⭐Ключевые),
 применяются сразу; в карточке VPN-режима zapret-поля (каналы) скрыты; channels не затираются при scrape в VPN.
 
+### T30 · YouTube/Discord/Instagram — отдельные вкладки, 3 режима, поиск · H · done
+Ключевые сервисы вынесены в свои вкладки навигации (YouTube/Discord/Instagram). В каждой:
+3-режимный переключатель VPN / Zapret / Напрямую, полный список доменов сервиса, поля стратегий
+(каналы tcp/udp) только в режиме Zapret, кнопка «Найти стратегии» (scan по доменам сервиса).
+Режимы: vps→в VPS-роутинг; zapret→nfqws+исключение из VPS; direct→исключение из VPS и не в zapret.
+build-domains: include=vps, exclude=не-vps. zapret.sh: сегменты только mode==zapret. Дефолт featured=vps.
+Вкладка Zapret → «Прочие сервисы» (без featured). Сайдбар-панель убрана.
+**Приёмка (стенд):** 3 вкладки/секции; toggle youtube vps→direct → не в VPS и не в zapret (materialized=только general); smoke 9/9.
+
 ## todo — хвосты / на будущее
 
 ### T16 · Кросс-компиляция release-бинарников gateway-ui · M · done
