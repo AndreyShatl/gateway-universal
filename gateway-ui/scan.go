@@ -20,6 +20,7 @@ const scanUnit = "gateway-scan"
 const scanQNUM = "59780"
 
 type scanParams struct {
+	Owner     string   `json:"owner"` // кто запустил: id сервиса или "zapret"
 	Domains   []string `json:"domains"`
 	HTTP      bool     `json:"http"`
 	TLS12     bool     `json:"tls12"`
@@ -113,6 +114,7 @@ func (s *server) scanStatus(w http.ResponseWriter) {
 		resp["status"] = j.Status
 		resp["started"] = j.Started
 		resp["params"] = j.Params
+		resp["owner"] = j.Params.Owner
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

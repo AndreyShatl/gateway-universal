@@ -325,9 +325,9 @@
     }).catch(() => { zapList.innerHTML = '<div class="msg bad">ошибка загрузки</div>'; });
 
     // --- Поиск стратегий: переиспользуемый виджет (единый фоновый job) ---
-    function scanWidgetHTML(serviceId) {
-      const dom = serviceId ? '' : '<textarea class="sw-domains" rows="2" placeholder="домены через пробел или с новой строки&#10;rutracker.org youtube.com"></textarea>';
-      return `<div class="scanw" data-service="${serviceId||''}">
+    function scanWidgetHTML(owner, withInput) {
+      const dom = withInput ? '<textarea class="sw-domains" rows="2" placeholder="домены через пробел или с новой строки&#10;rutracker.org youtube.com"></textarea>' : '';
+      return `<div class="scanw" data-owner="${owner}">
         <div class="sw-pre msg"></div>
         ${dom}
         <div class="chk">
@@ -353,13 +353,14 @@
     }
     window.swStart = (btn) => {
       const w = btn.closest('.scanw'); const msg = w.querySelector('.sw-msg');
+      const owner = w.dataset.owner;
       let domains; const ta = w.querySelector('.sw-domains');
       if (ta) domains = ta.value.split(/[\s,]+/).filter(Boolean);
-      else { const s = svcState.find(x => x.id === w.dataset.service); domains = s ? (s.domains||[]) : []; }
+      else { const s = svcState.find(x => x.id === owner); domains = s ? (s.domains||[]) : []; }
       if (!domains.length) { msg.className = 'msg bad'; msg.textContent = 'нет доменов'; return; }
       msg.className = 'msg'; msg.textContent = 'Запускаю…';
       fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-        domains, http:w.querySelector('.sw-http').checked, tls12:w.querySelector('.sw-tls12').checked,
+        owner, domains, http:w.querySelector('.sw-http').checked, tls12:w.querySelector('.sw-tls12').checked,
         tls13:w.querySelector('.sw-tls13').checked, quic:w.querySelector('.sw-quic').checked,
         parallel:w.querySelector('.sw-parallel').checked, scanlevel:w.querySelector('.sw-level').value }) })
         .then(async r => { const d = await r.json(); if (!r.ok) { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); } pollScan(); });
@@ -367,6 +368,7 @@
     window.swStop = () => { fetch('/api/scan/stop', { method:'POST' }).then(() => pollScan()); };
     function pollScan() {
       fetch('/api/scan').then(r => r.json()).then(d => {
+        const jobOwner = d.owner || '';
         const ws = d.working || [];
         const workHTML = ws.length
           ? '<div class="muted" style="margin-top:8px">Найдено рабочих: ' + ws.length + '</div>' +
@@ -374,18 +376,25 @@
           : '<div class="soon">Рабочих стратегий пока нет.</div>';
         const status = d.status ? ('статус: ' + d.status + (d.running ? ' (идёт…)' : '')) : 'не запускался';
         document.querySelectorAll('.scanw').forEach(w => {
+          const mine = !d.exists || jobOwner === w.dataset.owner; // нет job или поиск этого раздела
           const pre = w.querySelector('.sw-pre');
           if (!d.precondition_ok) { pre.className = 'msg bad'; pre.textContent = '✗ ' + (d.precondition || 'нельзя запустить'); }
           else { pre.className = 'msg'; pre.textContent = ''; }
           w.querySelector('.sw-start').disabled = !d.can_start;
-          w.querySelector('.sw-stop').disabled = !d.running;
-          w.querySelector('.sw-msg').textContent = status;
-          w.querySelector('.sw-working').innerHTML = workHTML;
-          w.querySelector('.sw-log').textContent = d.log_tail || '';
+          w.querySelector('.sw-stop').disabled = !(d.running && mine);
+          if (mine) {
+            w.querySelector('.sw-msg').textContent = d.exists ? status : 'не запускался';
+            w.querySelector('.sw-working').innerHTML = workHTML;
+            w.querySelector('.sw-log').textContent = d.log_tail || '';
+          } else {
+            w.querySelector('.sw-msg').textContent = 'идёт поиск в другом разделе: ' + jobOwner;
+            w.querySelector('.sw-working').innerHTML = '';
+            w.querySelector('.sw-log').textContent = '';
+          }
         });
       }).catch(() => {});
     }
-    document.getElementById('zapScan').innerHTML = scanWidgetHTML('');
+    document.getElementById('zapScan').innerHTML = scanWidgetHTML('zapret', true);
     pollScan(); setInterval(pollScan, 5000);
 
     // --- Движок zapret (версия + обновление) ---
@@ -471,7 +480,7 @@
         body = '<div class="soon">VPN — трафик идёт через VPS-туннель.</div>';
       }
       const search = s.featured
-        ? `<div class="frame" style="margin-top:14px"><div class="frame-t">🔍 Поиск рабочих стратегий для ${esc(s.name)}</div>${scanWidgetHTML(s.id)}</div>`
+        ? `<div class="frame" style="margin-top:14px"><div class="frame-t">🔍 Поиск рабочих стратегий для ${esc(s.name)}</div>${scanWidgetHTML(s.id, false)}</div>`
         : '';
       return `<div class="strat" data-svc="${i}">
         ${head}
