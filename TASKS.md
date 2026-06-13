@@ -112,6 +112,8 @@ mode=zapret → сегмент nfqws + исключение из VPS. Сохра
 **Приёмка (стенд):** дефолт — featured в VPS (zapret крутит только general+quic); youtube.com в VPS,
 twitch исключён; toggle youtube→zapret → youtube в nfqws + вне VPS; обратно ок; smoke 9/9.
 **Примечание:** install.sh при установке перерендеривает /opt/zapret-config/zapret.sh (mode-фильтр) — на боевом применится при следующем install/деплое.
+**Доработка по фидбеку:** переключатели VPN/Zapret ключевых сервисов вынесены в сайдбар (рамка ⭐Ключевые),
+применяются сразу; в карточке VPN-режима zapret-поля (каналы) скрыты; channels не затираются при scrape в VPN.
 
 ## todo — хвосты / на будущее
 
