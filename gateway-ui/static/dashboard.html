@@ -103,6 +103,13 @@
   .mode-tog { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
   .mode-tog button { background:var(--input-bg); color:var(--muted); border:0; padding:6px 14px; cursor:pointer; font-size:13px; }
   .mode-tog button.on { background:var(--accent); color:var(--on-accent); font-weight:600; }
+  .side-feat { margin-top:16px; border:1px solid var(--border); border-radius:10px; padding:8px 8px 4px; }
+  .side-feat .t { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:2px 4px 8px; }
+  .side-feat .sf { margin-bottom:8px; }
+  .side-feat .sf .nm { font-size:13px; margin:0 0 4px 2px; color:var(--text); }
+  .side-feat .mode-tog { display:flex; width:100%; }
+  .side-feat .mode-tog button { flex:1; padding:5px 0; font-size:12px; }
+  @media (max-width:760px){ .side-feat{ display:none; } }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -130,6 +137,7 @@
       <a data-nav="zapret">Zapret</a>
       <a data-nav="network">Сеть</a>
       <a data-nav="services">Сервисы</a>
+      <div id="sideFeat" class="side-feat"></div>
     </nav>
 
     <main>
@@ -419,46 +427,67 @@
         const s = svcState[i]; if (!s) return;
         s.name = card.querySelector('.svc-name').value.trim();
         s.domains = card.querySelector('.svc-domains').value.split(/[\s,]+/).filter(Boolean);
-        s.channels = [...card.querySelectorAll('[data-ch]')].map(ch => ({
-          proto: ch.querySelector('.ch-proto').value,
-          ports: ch.querySelector('.ch-ports').value.trim(),
-          l7: ch.querySelector('.ch-l7').value.trim() || undefined,
-          desync: ch.querySelector('.ch-desync').value.trim()
-        }));
+        // каналы скрыты в VPN-режиме — не затираем сохранённые
+        if (card.querySelector('.chans')) {
+          s.channels = [...card.querySelectorAll('[data-ch]')].map(ch => ({
+            proto: ch.querySelector('.ch-proto').value,
+            ports: ch.querySelector('.ch-ports').value.trim(),
+            l7: ch.querySelector('.ch-l7').value.trim() || undefined,
+            desync: ch.querySelector('.ch-desync').value.trim()
+          }));
+        }
       });
     }
+    const sideFeat = document.getElementById('sideFeat');
     function cardHTML(s, i) {
-      const tog = s.featured ? `
-        <div class="row"><div class="mode-tog">
-          <button class="${s.mode!=='zapret'?'on':''}" onclick="svcMode(${i},'vps')">VPN</button>
-          <button class="${s.mode==='zapret'?'on':''}" onclick="svcMode(${i},'zapret')">Zapret</button>
-        </div></div>` : '';
+      const vpn = s.featured && s.mode !== 'zapret';
       const delBtn = s.featured ? '' : `<button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>`;
+      const chans = vpn
+        ? '<div class="soon">Режим VPN — трафик идёт через VPS-туннель, стратегии zapret не используются.</div>'
+        : `<div class="chans">${(s.channels||[]).map((c, j) => `
+            <div class="strat" data-ch="${j}">
+              <div class="row">
+                <select class="ch-proto"><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>
+                <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
+                <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
+                <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
+              </div>
+              <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
+            </div>`).join('')}</div>
+           <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>`;
       return `<div class="strat" data-svc="${i}">
         <div class="row"><input class="svc-name" value="${esc(s.name||'')}" placeholder="Название">${delBtn}</div>
-        ${tog}
         <textarea class="svc-domains" rows="2" placeholder="домены через пробел/с новой строки">${esc((s.domains||[]).join(' '))}</textarea>
-        <div class="chans">${(s.channels||[]).map((c, j) => `
-          <div class="strat" data-ch="${j}">
-            <div class="row">
-              <select class="ch-proto"><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>
-              <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
-              <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
-              <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
-            </div>
-            <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
-          </div>`).join('')}
-        </div>
-        <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>
+        ${chans}
       </div>`;
+    }
+    function renderSidebar() {
+      const items = svcState.map((s, i) => ({ s, i })).filter(x => x.s.featured);
+      sideFeat.innerHTML = items.length ? '<div class="t">⭐ Ключевые</div>' + items.map(({ s, i }) => `
+        <div class="sf"><div class="nm">${esc(s.name)}</div>
+          <div class="mode-tog">
+            <button class="${s.mode!=='zapret'?'on':''}" onclick="svcMode(${i},'vps')">VPN</button>
+            <button class="${s.mode==='zapret'?'on':''}" onclick="svcMode(${i},'zapret')">Zapret</button>
+          </div></div>`).join('') : '';
     }
     function renderSvc() {
       const feat = [], oth = [];
       svcState.forEach((s, i) => (s.featured ? feat : oth).push(cardHTML(s, i)));
       svcFeatured.innerHTML = feat.join('') || '<div class="soon">Нет ключевых сервисов.</div>';
       svcOthers.innerHTML = oth.join('') || '<div class="soon">Нет прочих сервисов.</div>';
+      renderSidebar();
     }
-    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderSvc(); };
+    function saveServices() {
+      scrapeSvc();
+      svcMsg2.className = 'msg'; svcMsg2.textContent = 'Сохраняю + рестарт xray/zapret…';
+      return fetch('/api/zapret/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(svcState) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { svcMsg2.className = 'msg good'; svcMsg2.textContent = '✓ применено'; loadServices(); }
+          else { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ сеть'; });
+    }
+    // переключение режима (из сайдбара или карточки) — применяется сразу
+    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderSvc(); saveServices(); };
     function loadServices() {
       fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderSvc(); });
     }
@@ -469,18 +498,10 @@
     document.getElementById('svcAdd').onclick = () => {
       scrapeSvc();
       const id = 'svc' + Date.now().toString(36);
-      svcState.push({ id, name:'Новый сервис', domains:[], channels:[{ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }] });
+      svcState.push({ id, name:'Новый сервис', featured:false, mode:'zapret', domains:[], channels:[{ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }] });
       renderSvc();
     };
-    document.getElementById('svcSave').onclick = () => {
-      scrapeSvc();
-      svcMsg2.className = 'msg'; svcMsg2.textContent = 'Сохраняю + рестарт zapret…';
-      fetch('/api/zapret/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(svcState) })
-        .then(async r => { const d = await r.json();
-          if (r.ok) { svcMsg2.className = 'msg good'; svcMsg2.textContent = '✓ сохранено и применено'; loadServices(); }
-          else { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ ' + (d.error || 'ошибка'); }
-        }).catch(() => { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ сеть'; });
-    };
+    document.getElementById('svcSave').onclick = () => saveServices();
     // применить найденную поиском стратегию: показать для копирования (вставить в канал вручную)
     window.applyFound = function (btn) {
       const s = (btn.dataset.strategy || '').replace(/^\s*nfqws\s+/, '').replace(/--hostlist=\S+/g, '').replace(/--filter-\S+/g, '').trim();
