@@ -46,6 +46,7 @@
                color:var(--muted); cursor:pointer; font-size:14px; text-decoration:none; user-select:none; }
   .sidebar a:hover { background:var(--pill-bg); color:var(--text); }
   .sidebar a.active { background:var(--accent); color:var(--on-accent); }
+  .nav-grp { font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.05em; padding:14px 12px 4px; }
   main { flex:1; max-width:760px; margin:24px auto; padding:0 16px; width:100%; }
   section[data-sec] > .card + .card { margin-top:16px; }
 
@@ -134,10 +135,14 @@
       <a data-nav="overview">Обзор</a>
       <a data-nav="connection">Подключение</a>
       <a data-nav="domains">Домены</a>
-      <a data-nav="zapret">Zapret</a>
+      <div class="nav-grp">Сервисы</div>
+      <a data-nav="youtube">▸ YouTube</a>
+      <a data-nav="discord">▸ Discord</a>
+      <a data-nav="instagram">▸ Instagram</a>
+      <a data-nav="zapret">▸ Zapret (прочие)</a>
+      <div class="nav-grp">Система</div>
       <a data-nav="network">Сеть</a>
-      <a data-nav="services">Сервисы</a>
-      <div id="sideFeat" class="side-feat"></div>
+      <a data-nav="services">Управление</a>
     </nav>
 
     <main>
@@ -187,6 +192,10 @@
         </div>
       </section>
 
+      <section data-sec="youtube"><div class="card"><div id="feat_youtube"><div class="soon">загрузка…</div></div></div></section>
+      <section data-sec="discord"><div class="card"><div id="feat_discord"><div class="soon">загрузка…</div></div></div></section>
+      <section data-sec="instagram"><div class="card"><div id="feat_instagram"><div class="soon">загрузка…</div></div></div></section>
+
       <section data-sec="zapret">
         <div class="card">
           <h2>Zapret — работающие стратегии</h2>
@@ -228,19 +237,11 @@
           <details class="defaults"><summary>Лог обновления</summary><pre id="zupLog" class="out"></pre></details>
         </div>
         <div class="card">
-          <h2>Сервисы</h2>
-          <div class="muted">Ключевые сервисы переключаются между VPN (через VPS-туннель) и Zapret
-            (локальный обход DPI напрямую). Прочие — всегда через zapret. Сохранение рестартит xray+zapret.</div>
-          <div class="frame">
-            <div class="frame-t">⭐ Ключевые — VPN / Zapret</div>
-            <div id="svcFeatured"><div class="soon">загрузка…</div></div>
-          </div>
-          <div class="frame">
-            <div class="frame-t">Прочие сервисы (zapret)</div>
-            <div id="svcOthers"></div>
-            <div class="row"><button id="svcAdd">+ Сервис</button></div>
-          </div>
-          <div class="row"><button id="svcSave">Сохранить всё</button></div>
+          <h2>Прочие сервисы</h2>
+          <div class="muted">Сервисы по вашему усмотрению (всегда через zapret). YouTube/Discord/Instagram —
+            в отдельных вкладках. Сохранение рестартит xray+zapret.</div>
+          <div id="svcOthers"></div>
+          <div class="row"><button id="svcAdd">+ Сервис</button><button id="svcSave">Сохранить всё</button></div>
           <div id="svcMsg2" class="msg"></div>
         </div>
       </section>
@@ -416,10 +417,10 @@
       });
     };
 
-    // --- Сервисы (CRUD + режим VPN/Zapret) ---
-    const svcFeatured = document.getElementById('svcFeatured');
+    // --- Сервисы (CRUD + режим VPN/Zapret/Напрямую) ---
     const svcOthers = document.getElementById('svcOthers');
     const svcMsg2 = document.getElementById('svcMsg2');
+    const FEATURED = ['youtube', 'discord', 'instagram'];
     let svcState = [];
     function scrapeSvc() {
       document.querySelectorAll('[data-svc]').forEach(card => {
@@ -427,7 +428,7 @@
         const s = svcState[i]; if (!s) return;
         s.name = card.querySelector('.svc-name').value.trim();
         s.domains = card.querySelector('.svc-domains').value.split(/[\s,]+/).filter(Boolean);
-        // каналы скрыты в VPN-режиме — не затираем сохранённые
+        // каналы скрыты вне zapret-режима — не затираем сохранённые
         if (card.querySelector('.chans')) {
           s.channels = [...card.querySelectorAll('[data-ch]')].map(ch => ({
             proto: ch.querySelector('.ch-proto').value,
@@ -438,45 +439,57 @@
         }
       });
     }
-    const sideFeat = document.getElementById('sideFeat');
-    function cardHTML(s, i) {
-      const vpn = s.featured && s.mode !== 'zapret';
-      const delBtn = s.featured ? '' : `<button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>`;
-      const chans = vpn
-        ? '<div class="soon">Режим VPN — трафик идёт через VPS-туннель, стратегии zapret не используются.</div>'
-        : `<div class="chans">${(s.channels||[]).map((c, j) => `
-            <div class="strat" data-ch="${j}">
-              <div class="row">
-                <select class="ch-proto"><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>
-                <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
-                <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
-                <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
-              </div>
-              <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
-            </div>`).join('')}</div>
-           <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>`;
-      return `<div class="strat" data-svc="${i}">
-        <div class="row"><input class="svc-name" value="${esc(s.name||'')}" placeholder="Название">${delBtn}</div>
-        <textarea class="svc-domains" rows="2" placeholder="домены через пробел/с новой строки">${esc((s.domains||[]).join(' '))}</textarea>
-        ${chans}
+    function chanHTML(c, i, j) {
+      return `<div class="strat" data-ch="${j}">
+        <div class="row">
+          <select class="ch-proto"><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>
+          <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
+          <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
+          <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
+        </div>
+        <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
       </div>`;
     }
-    function renderSidebar() {
-      const items = svcState.map((s, i) => ({ s, i })).filter(x => x.s.featured);
-      sideFeat.innerHTML = items.length ? '<div class="t">⭐ Ключевые</div>' + items.map(({ s, i }) => `
-        <div class="sf"><div class="nm">${esc(s.name)}</div>
-          <div class="mode-tog">
-            <button class="${s.mode!=='zapret'?'on':''}" onclick="svcMode(${i},'vps')">VPN</button>
-            <button class="${s.mode==='zapret'?'on':''}" onclick="svcMode(${i},'zapret')">Zapret</button>
-          </div></div>`).join('') : '';
+    function cardHTML(s, i) {
+      const mode = s.mode || 'vps';
+      const isZap = !s.featured || mode === 'zapret';
+      const delBtn = s.featured ? '' : `<button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>`;
+      const tog = s.featured ? `<div class="row"><div class="mode-tog">
+          <button class="${mode==='vps'?'on':''}" onclick="svcMode(${i},'vps')">VPN</button>
+          <button class="${mode==='zapret'?'on':''}" onclick="svcMode(${i},'zapret')">Zapret</button>
+          <button class="${mode==='direct'?'on':''}" onclick="svcMode(${i},'direct')">Напрямую</button>
+        </div></div>` : '';
+      let body;
+      if (isZap) {
+        body = `<div class="chans">${(s.channels||[]).map((c, j) => chanHTML(c, i, j)).join('')}</div>
+          <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>`;
+      } else if (mode === 'direct') {
+        body = '<div class="soon">Напрямую — без VPS и без zapret, обычный трафик через провайдера.</div>';
+      } else {
+        body = '<div class="soon">VPN — трафик идёт через VPS-туннель.</div>';
+      }
+      const search = s.featured ? `<div class="row"><button onclick="svcSearch('${s.id}')">🔍 Найти стратегии для ${esc(s.name)}</button></div><div class="msg" id="featMsg_${s.id}"></div>` : '';
+      return `<div class="strat" data-svc="${i}">
+        <div class="row"><input class="svc-name" value="${esc(s.name||'')}" placeholder="Название">${delBtn}</div>
+        ${tog}
+        <textarea class="svc-domains" rows="3" placeholder="домены через пробел/с новой строки">${esc((s.domains||[]).join(' '))}</textarea>
+        ${body}
+        ${search}
+      </div>`;
+    }
+    function renderFeat() {
+      FEATURED.forEach(id => {
+        const el = document.getElementById('feat_' + id); if (!el) return;
+        const i = svcState.findIndex(s => s.id === id);
+        el.innerHTML = i >= 0 ? `<h2>${esc(svcState[i].name)}</h2>` + cardHTML(svcState[i], i)
+                              : '<div class="soon">сервис не настроен</div>';
+      });
     }
     function renderSvc() {
-      const feat = [], oth = [];
-      svcState.forEach((s, i) => (s.featured ? feat : oth).push(cardHTML(s, i)));
-      svcFeatured.innerHTML = feat.join('') || '<div class="soon">Нет ключевых сервисов.</div>';
-      svcOthers.innerHTML = oth.join('') || '<div class="soon">Нет прочих сервисов.</div>';
-      renderSidebar();
+      svcOthers.innerHTML = svcState.map((s, i) => s.featured ? '' : cardHTML(s, i)).filter(Boolean).join('')
+        || '<div class="soon">Нет прочих сервисов.</div>';
     }
+    function renderAll() { renderSvc(); renderFeat(); }
     function saveServices() {
       scrapeSvc();
       svcMsg2.className = 'msg'; svcMsg2.textContent = 'Сохраняю + рестарт xray/zapret…';
@@ -486,20 +499,30 @@
           else { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ ' + (d.error || 'ошибка'); }
         }).catch(() => { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ сеть'; });
     }
-    // переключение режима (из сайдбара или карточки) — применяется сразу
-    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderSvc(); saveServices(); };
+    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderAll(); saveServices(); };
+    window.svcSearch = (id) => {
+      const s = svcState.find(x => x.id === id); const m = document.getElementById('featMsg_' + id);
+      if (!s || !(s.domains||[]).length) { m.className='msg bad'; m.textContent='нет доменов'; return; }
+      m.className = 'msg'; m.textContent = 'Запускаю поиск…';
+      fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ domains:s.domains, tls12:true, quic:true, scanlevel:'standard', parallel:true }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { m.className='msg good'; m.textContent='✓ поиск запущен — прогресс в разделе Zapret → Поиск стратегий'; }
+          else { m.className='msg bad'; m.textContent='✗ ' + (d.error||'ошибка'); }
+        }).catch(() => { m.className='msg bad'; m.textContent='✗ сеть'; });
+    };
     function loadServices() {
-      fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderSvc(); });
+      fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderAll(); });
     }
     loadServices();
-    window.svcDel = i => { scrapeSvc(); svcState.splice(i, 1); renderSvc(); };
-    window.svcChDel = (i, j) => { scrapeSvc(); svcState[i].channels.splice(j, 1); renderSvc(); };
-    window.svcChAdd = i => { scrapeSvc(); (svcState[i].channels = svcState[i].channels || []).push({ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }); renderSvc(); };
+    window.svcDel = i => { scrapeSvc(); svcState.splice(i, 1); renderAll(); };
+    window.svcChDel = (i, j) => { scrapeSvc(); svcState[i].channels.splice(j, 1); renderAll(); };
+    window.svcChAdd = i => { scrapeSvc(); (svcState[i].channels = svcState[i].channels || []).push({ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }); renderAll(); };
     document.getElementById('svcAdd').onclick = () => {
       scrapeSvc();
       const id = 'svc' + Date.now().toString(36);
       svcState.push({ id, name:'Новый сервис', featured:false, mode:'zapret', domains:[], channels:[{ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }] });
-      renderSvc();
+      renderAll();
     };
     document.getElementById('svcSave').onclick = () => saveServices();
     // применить найденную поиском стратегию: показать для копирования (вставить в канал вручную)
