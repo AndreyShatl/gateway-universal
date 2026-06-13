@@ -206,27 +206,7 @@
           <h2>Поиск рабочих стратегий</h2>
           <div class="muted">Перебор стратегий обхода DPI (как родной blockcheck), собираются только рабочие.
             Идёт в фоне (может длиться долго), не мешает клиентам. Выберите параметры перед запуском.</div>
-          <div id="scanPre" class="msg"></div>
-          <textarea id="scanDomains" rows="2" placeholder="домены для проверки, через пробел или с новой строки&#10;rutracker.org youtube.com"></textarea>
-          <div class="chk">
-            <label><input type="checkbox" id="scHttp"> HTTP</label>
-            <label><input type="checkbox" id="scTls12" checked> HTTPS TLS1.2</label>
-            <label><input type="checkbox" id="scTls13"> HTTPS TLS1.3</label>
-            <label><input type="checkbox" id="scQuic"> QUIC</label>
-            <label><input type="checkbox" id="scParallel" checked> параллельно</label>
-          </div>
-          <div class="row">
-            <select id="scLevel">
-              <option value="quick">quick — быстро, первая рабочая</option>
-              <option value="standard" selected>standard</option>
-              <option value="force">force — полный перебор</option>
-            </select>
-            <button id="scStart">Старт</button>
-            <button id="scStop">Стоп</button>
-          </div>
-          <div id="scanMsg" class="msg"></div>
-          <div id="scanWorking"></div>
-          <details class="defaults"><summary>Лог поиска</summary><pre id="scanLog" class="out"></pre></details>
+          <div id="zapScan"></div>
         </div>
         <div class="card">
           <h2>Движок zapret</h2>
@@ -344,54 +324,69 @@
       }).join('');
     }).catch(() => { zapList.innerHTML = '<div class="msg bad">ошибка загрузки</div>'; });
 
-    // --- Поиск стратегий ---
-    const scStart = document.getElementById('scStart');
-    const scStop = document.getElementById('scStop');
-    const scanPre = document.getElementById('scanPre');
-    const scanMsg = document.getElementById('scanMsg');
-    const scanWorking = document.getElementById('scanWorking');
-    const scanLog = document.getElementById('scanLog');
-    let scanTimer = null;
-    function renderScan(d) {
-      if (!d.precondition_ok) { scanPre.className = 'msg bad'; scanPre.textContent = '✗ ' + (d.precondition || 'нельзя запустить'); }
-      else { scanPre.className = 'msg'; scanPre.textContent = ''; }
-      scStart.disabled = !d.can_start;
-      scStop.disabled = !d.running;
-      const st = d.status ? ('статус: ' + d.status + (d.running ? ' (идёт…)' : '')) : 'не запускался';
-      scanMsg.className = 'msg'; scanMsg.textContent = st;
-      const ws = d.working || [];
-      scanWorking.innerHTML = ws.length
-        ? '<div class="muted" style="margin-top:10px">Найдено рабочих: ' + ws.length + '</div>' +
-          ws.map(w => `<div class="strat">
-            <div class="params">${esc(w.domain)} → ${esc(w.strategy)}</div>
-            <div class="row"><button data-strategy="${esc(w.strategy)}" onclick="applyFound(this)">Скопировать стратегию</button></div>
-          </div>`).join('')
-        : '<div class="soon">Рабочих стратегий пока нет.</div>';
-      scanLog.textContent = d.log_tail || '';
-      // авто-обновление пока идёт
-      if (d.running && !scanTimer) scanTimer = setInterval(loadScan, 5000);
-      if (!d.running && scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    // --- Поиск стратегий: переиспользуемый виджет (единый фоновый job) ---
+    function scanWidgetHTML(serviceId) {
+      const dom = serviceId ? '' : '<textarea class="sw-domains" rows="2" placeholder="домены через пробел или с новой строки&#10;rutracker.org youtube.com"></textarea>';
+      return `<div class="scanw" data-service="${serviceId||''}">
+        <div class="sw-pre msg"></div>
+        ${dom}
+        <div class="chk">
+          <label title="HTTP (порт 80, без шифрования). Нужно редко — почти весь трафик идёт по HTTPS."><input type="checkbox" class="sw-http"> HTTP</label>
+          <label title="Основная проверка: HTTPS поверх TLS 1.2 на порту 443. Подходит большинству сайтов — оставляйте включённым."><input type="checkbox" class="sw-tls12" checked> HTTPS TLS1.2</label>
+          <label title="HTTPS поверх TLS 1.3 — современный протокол рукопожатия. Включайте, если сайт работает только по TLS 1.3 или хотите проверить оба."><input type="checkbox" class="sw-tls13"> HTTPS TLS1.3</label>
+          <label title="HTTP/3 поверх UDP/443 (QUIC). Нужно для сервисов с QUIC: YouTube, Google, Instagram."><input type="checkbox" class="sw-quic"> QUIC</label>
+          <label title="Проверять стратегии одновременно — заметно быстрее, но сильнее нагружает канал во время поиска."><input type="checkbox" class="sw-parallel" checked> параллельно</label>
+        </div>
+        <div class="row">
+          <select class="sw-level">
+            <option value="quick" title="Быстро: останавливается на первой рабочей стратегии для каждого домена. Занимает минуты.">быстрый</option>
+            <option value="standard" selected title="Стандарт: разумный перебор основных стратегий. Баланс скорости и полноты — рекомендуется.">стандартный</option>
+            <option value="force" title="Глубокий: полный перебор всех комбинаций desync/fooling/ttl/split. Самый тщательный, может идти часами или сутками.">глубокий</option>
+          </select>
+          <button class="sw-start" onclick="swStart(this)">Старт</button>
+          <button class="sw-stop" onclick="swStop(this)">Стоп</button>
+        </div>
+        <div class="sw-msg msg"></div>
+        <div class="sw-working"></div>
+        <details class="defaults"><summary>Лог поиска (только рабочие стратегии)</summary><pre class="sw-log out"></pre></details>
+      </div>`;
     }
-    function loadScan() { fetch('/api/scan').then(r => r.json()).then(renderScan).catch(() => {}); }
-    loadScan();
-    scStart.onclick = () => {
-      const domains = document.getElementById('scanDomains').value.split(/[\s,]+/).filter(Boolean);
-      if (!domains.length) { scanMsg.className = 'msg bad'; scanMsg.textContent = 'укажите домены'; return; }
-      const body = JSON.stringify({
-        domains, http: scHttp.checked, tls12: scTls12.checked, tls13: scTls13.checked,
-        quic: scQuic.checked, parallel: scParallel.checked, scanlevel: document.getElementById('scLevel').value
-      });
-      scanMsg.className = 'msg'; scanMsg.textContent = 'Запускаю…';
-      fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body })
-        .then(async r => { const d = await r.json();
-          if (r.ok) { scanMsg.className = 'msg good'; scanMsg.textContent = '✓ поиск запущен'; loadScan(); }
-          else { scanMsg.className = 'msg bad'; scanMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
-        }).catch(() => { scanMsg.className = 'msg bad'; scanMsg.textContent = '✗ сеть'; });
+    window.swStart = (btn) => {
+      const w = btn.closest('.scanw'); const msg = w.querySelector('.sw-msg');
+      let domains; const ta = w.querySelector('.sw-domains');
+      if (ta) domains = ta.value.split(/[\s,]+/).filter(Boolean);
+      else { const s = svcState.find(x => x.id === w.dataset.service); domains = s ? (s.domains||[]) : []; }
+      if (!domains.length) { msg.className = 'msg bad'; msg.textContent = 'нет доменов'; return; }
+      msg.className = 'msg'; msg.textContent = 'Запускаю…';
+      fetch('/api/scan/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+        domains, http:w.querySelector('.sw-http').checked, tls12:w.querySelector('.sw-tls12').checked,
+        tls13:w.querySelector('.sw-tls13').checked, quic:w.querySelector('.sw-quic').checked,
+        parallel:w.querySelector('.sw-parallel').checked, scanlevel:w.querySelector('.sw-level').value }) })
+        .then(async r => { const d = await r.json(); if (!r.ok) { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); } pollScan(); });
     };
-    scStop.onclick = () => {
-      scanMsg.className = 'msg'; scanMsg.textContent = 'Останавливаю…';
-      fetch('/api/scan/stop', { method:'POST' }).then(() => loadScan());
-    };
+    window.swStop = () => { fetch('/api/scan/stop', { method:'POST' }).then(() => pollScan()); };
+    function pollScan() {
+      fetch('/api/scan').then(r => r.json()).then(d => {
+        const ws = d.working || [];
+        const workHTML = ws.length
+          ? '<div class="muted" style="margin-top:8px">Найдено рабочих: ' + ws.length + '</div>' +
+            ws.map(w => `<div class="strat"><div class="params">${esc(w.domain)} → ${esc(w.strategy)}</div><div class="row"><button data-strategy="${esc(w.strategy)}" onclick="applyFound(this)">Скопировать</button></div></div>`).join('')
+          : '<div class="soon">Рабочих стратегий пока нет.</div>';
+        const status = d.status ? ('статус: ' + d.status + (d.running ? ' (идёт…)' : '')) : 'не запускался';
+        document.querySelectorAll('.scanw').forEach(w => {
+          const pre = w.querySelector('.sw-pre');
+          if (!d.precondition_ok) { pre.className = 'msg bad'; pre.textContent = '✗ ' + (d.precondition || 'нельзя запустить'); }
+          else { pre.className = 'msg'; pre.textContent = ''; }
+          w.querySelector('.sw-start').disabled = !d.can_start;
+          w.querySelector('.sw-stop').disabled = !d.running;
+          w.querySelector('.sw-msg').textContent = status;
+          w.querySelector('.sw-working').innerHTML = workHTML;
+          w.querySelector('.sw-log').textContent = d.log_tail || '';
+        });
+      }).catch(() => {});
+    }
+    document.getElementById('zapScan').innerHTML = scanWidgetHTML('');
+    pollScan(); setInterval(pollScan, 5000);
 
     // --- Движок zapret (версия + обновление) ---
     const zverView = document.getElementById('zverView');
@@ -426,8 +421,8 @@
       document.querySelectorAll('[data-svc]').forEach(card => {
         const i = +card.dataset.svc;
         const s = svcState[i]; if (!s) return;
-        s.name = card.querySelector('.svc-name').value.trim();
-        s.domains = card.querySelector('.svc-domains').value.split(/[\s,]+/).filter(Boolean);
+        const nEl = card.querySelector('.svc-name'); if (nEl) s.name = nEl.value.trim();
+        const dEl = card.querySelector('.svc-domains'); if (dEl) s.domains = dEl.value.split(/[\s,]+/).filter(Boolean);
         // каналы скрыты вне zapret-режима — не затираем сохранённые
         if (card.querySelector('.chans')) {
           s.channels = [...card.querySelectorAll('[data-ch]')].map(ch => ({
@@ -453,12 +448,19 @@
     function cardHTML(s, i) {
       const mode = s.mode || 'vps';
       const isZap = !s.featured || mode === 'zapret';
-      const delBtn = s.featured ? '' : `<button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button>`;
-      const tog = s.featured ? `<div class="row"><div class="mode-tog">
+      // Шапка: featured — имя в <h2> вкладки, поля имени нет; прочие — редактируемое имя + удаление.
+      const head = s.featured ? `<div class="row"><div class="mode-tog">
           <button class="${mode==='vps'?'on':''}" onclick="svcMode(${i},'vps')">VPN</button>
           <button class="${mode==='zapret'?'on':''}" onclick="svcMode(${i},'zapret')">Zapret</button>
           <button class="${mode==='direct'?'on':''}" onclick="svcMode(${i},'direct')">Напрямую</button>
-        </div></div>` : '';
+        </div></div>`
+        : `<div class="row"><input class="svc-name" value="${esc(s.name||'')}" placeholder="Название">
+           <button onclick="svcDel(${i})" title="Удалить сервис" class="del">×</button></div>`;
+      // Домены: featured — только просмотр; прочие — редактируемые.
+      const doms = (s.domains||[]);
+      const domBlock = s.featured
+        ? `<details class="defaults"><summary>Домены сервиса (${doms.length}) — задаются автоматически</summary><ul class="list ro">${doms.map(d=>`<li>${esc(d)}</li>`).join('')}</ul></details>`
+        : `<textarea class="svc-domains" rows="3" placeholder="домены через пробел/с новой строки">${esc(doms.join(' '))}</textarea>`;
       let body;
       if (isZap) {
         body = `<div class="chans">${(s.channels||[]).map((c, j) => chanHTML(c, i, j)).join('')}</div>
@@ -468,11 +470,12 @@
       } else {
         body = '<div class="soon">VPN — трафик идёт через VPS-туннель.</div>';
       }
-      const search = s.featured ? `<div class="row"><button onclick="svcSearch('${s.id}')">🔍 Найти стратегии для ${esc(s.name)}</button></div><div class="msg" id="featMsg_${s.id}"></div>` : '';
+      const search = s.featured
+        ? `<div class="frame" style="margin-top:14px"><div class="frame-t">🔍 Поиск рабочих стратегий для ${esc(s.name)}</div>${scanWidgetHTML(s.id)}</div>`
+        : '';
       return `<div class="strat" data-svc="${i}">
-        <div class="row"><input class="svc-name" value="${esc(s.name||'')}" placeholder="Название">${delBtn}</div>
-        ${tog}
-        <textarea class="svc-domains" rows="3" placeholder="домены через пробел/с новой строки">${esc((s.domains||[]).join(' '))}</textarea>
+        ${head}
+        ${domBlock}
         ${body}
         ${search}
       </div>`;
