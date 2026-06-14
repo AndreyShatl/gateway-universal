@@ -51,6 +51,9 @@ func (s *server) runScript(rel string, args ...string) (string, error) {
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	// Без этого Safari кэширует GET-ответы API и опросы видят устаревшее
+	// состояние (напр. running:true после остановки) — UI «залипает».
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(v)
 }

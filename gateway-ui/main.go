@@ -56,6 +56,7 @@ type server struct {
 	overrides      string // (устар.) оверрайды стратегий
 	servicesFile   string // /etc/gateway/zapret-services.json (динамические сервисы)
 	connsFile      string // /etc/gateway/connections.json (сохранённые VPS-хосты)
+	ver            string // версия сборки (mtime бинаря) — для автоперезагрузки вкладки
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -86,6 +87,7 @@ func main() {
 		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
 		connsFile: *connsFile,
 	}
+	s.ver = buildVersion()
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
 	}
@@ -251,7 +253,18 @@ func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, "dashboard.html", nil)
+	s.render(w, "dashboard.html", map[string]any{"Ver": s.ver})
+}
+
+// buildVersion — метка версии бинаря (mtime исполняемого файла). Меняется при
+// каждом деплое; вкладка сравнивает её с загруженной и перезагружается сама.
+func buildVersion() string {
+	if exe, err := os.Executable(); err == nil {
+		if fi, err := os.Stat(exe); err == nil {
+			return fmt.Sprintf("%d", fi.ModTime().Unix())
+		}
+	}
+	return fmt.Sprintf("%d", time.Now().Unix())
 }
 
 func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -261,6 +274,9 @@ func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// HTML/JS встроены в бинарь — после деплоя страница должна обновляться
+	// сразу, без залипания старого JS в открытой вкладке.
+	w.Header().Set("Cache-Control", "no-store")
 	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
