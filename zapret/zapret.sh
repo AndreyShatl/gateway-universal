@@ -45,7 +45,11 @@ build_proto() {
     local ports ipt
     for ports in "${portsets[@]}"; do
         ipt=${ports//-/:}   # диапазоны: nfqws '-' -> iptables multiport ':'
+        # ! --src-type LOCAL: обрабатываем только форвард-трафик клиентов LAN.
+        # Локально-сгенерированный трафик самого шлюза (src = его IP) исключаем —
+        # desync рвёт собственные соединения (git fetch, проверки exit-IP и т.п.).
         iptables -t mangle -A POSTROUTING -p $proto -m multiport --dports "$ipt" \
+            -m addrtype ! --src-type LOCAL \
             -m connbytes --connbytes-dir=original --connbytes-mode=packets --connbytes 1:6 \
             -j NFQUEUE --queue-num $qnum --queue-bypass
     done
