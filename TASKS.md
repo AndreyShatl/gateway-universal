@@ -142,9 +142,10 @@ activate пишет VPS_* в config.env + render + restart xray + помечае
 текущее (read-only) + список хостов (активировать/удалить) + форма добавления (имя + vless).
 **Приёмка (стенд):** add→list→activate (xray active, active=True)→delete; smoke 9/9.
 
-### T33 · Показ рабочих/добавленных стратегий во вкладках и Zapret · M · todo
-Во вкладках сервисов — найденные рабочие стратегии; в Zapret — все стратегии (пользовательские + прочие).
-**Критерий приёмки:** видно применённые стратегии по сервисам и в общем списке.
+### T33 · Zapret показывает все стратегии КРОМЕ featured · M · done
+handleZapret исключает из «работающих стратегий» сегменты featured-сервисов
+(youtube/discord/instagram): по hostlist-id и по l7 (discord voice). Их стратегии видны в их вкладках.
+**Приёмка (стенд):** discord=zapret → в Zapret остаются general + quic(all), discord (tcp+udp-l7) исключён; smoke 9/9.
 
 ## todo — хвосты / на будущее
 

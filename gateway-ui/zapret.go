@@ -201,6 +201,21 @@ func (s *server) handleZapret(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"running": false, "strategies": []zStrategy{}})
 		return
 	}
+	// featured-сервисы (youtube/discord/instagram) показываются в своих вкладках —
+	// в общем списке Zapret их сегменты не показываем.
+	featured := map[string]bool{}
+	featuredL7 := map[string]bool{}
+	svcs, _ := s.readServices()
+	for _, sv := range svcs {
+		if sv.Featured {
+			featured[sv.ID] = true
+			for _, c := range sv.Channels {
+				if c.L7 != "" {
+					featuredL7[c.L7] = true
+				}
+			}
+		}
+	}
 	var strategies []zStrategy
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -221,10 +236,16 @@ func (s *server) handleZapret(w http.ResponseWriter, r *http.Request) {
 				continue // не сегмент стратегии (напр. начало с --daemon без фильтра)
 			}
 			st.L7 = flagVal(seg, "--filter-l7")
+			if st.L7 != "" && featuredL7[st.L7] {
+				continue // l7-сегмент featured-сервиса (напр. discord voice)
+			}
 			st.Desync = flagVal(seg, "--dpi-desync")
 			st.Repeats = flagVal(seg, "--dpi-desync-repeats")
 			st.Fooling = flagVal(seg, "--dpi-desync-fooling")
 			if hl := flagVal(seg, "--hostlist"); hl != "" {
+				if featured[strings.TrimSuffix(baseName(hl), ".txt")] {
+					continue // featured — в своей вкладке
+				}
 				st.List = baseName(hl)
 				st.Domains = readLines(hl)
 			}
