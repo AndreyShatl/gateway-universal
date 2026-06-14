@@ -167,11 +167,16 @@
           <dl id="connView" class="kv"><dd class="muted">загрузка…</dd></dl>
         </div>
         <div class="card">
-          <h2>Заменить подключение</h2>
-          <div class="muted">Вставьте ссылку <code>vless://…</code> (Reality, gRPC) — как в мобильных VPN-клиентах.
-            UI распарсит её и настроит VPS. Старое подключение будет заменено.</div>
+          <h2>Сохранённые хосты</h2>
+          <div class="muted">Несколько VPS — переключайтесь между ними или удаляйте. Активный применён сейчас.</div>
+          <div id="connList"><div class="soon">загрузка…</div></div>
+        </div>
+        <div class="card">
+          <h2>Добавить хост</h2>
+          <div class="muted">Имя (для себя) + ссылка <code>vless://…</code> (Reality, gRPC), как в мобильных VPN-клиентах.</div>
+          <div class="row"><input id="connName" type="text" placeholder="Название (напр. VPS Амстердам)"></div>
           <textarea id="connLink" rows="3" placeholder="vless://UUID@host:2083?type=grpc&security=reality&pbk=…&sid=…&sni=…"></textarea>
-          <div class="row"><button id="connApply">Применить</button></div>
+          <div class="row"><button id="connAdd">Добавить</button></div>
           <div id="connMsg" class="msg"></div>
         </div>
       </section>
@@ -288,15 +293,47 @@
       }).catch(() => { connView.innerHTML = '<dd class="bad">ошибка загрузки</dd>'; });
     }
     loadConnection();
-    document.getElementById('connApply').onclick = () => {
-      const link = document.getElementById('connLink').value.trim();
-      if (!link) return;
-      connMsg.className = 'msg'; connMsg.textContent = 'Применяю…';
-      fetch('/api/connection', { method:'POST', body:new URLSearchParams({ link }) })
+    // --- Сохранённые хосты (мультихост) ---
+    const connList = document.getElementById('connList');
+    function loadConns() {
+      fetch('/api/connections').then(r => r.json()).then(d => {
+        const cs = d.connections || [];
+        connList.innerHTML = cs.length ? cs.map(c => `
+          <div class="strat">
+            <div class="row" style="align-items:center">
+              <span class="tag ${c.active?'q':''}">${c.active?'активен':'хост'}</span>
+              <b>${esc(c.name)}</b>
+            </div>
+            <div class="params">${esc(c.addr||'')}:${esc(c.port_grpc||'')} · uuid ${esc(c.uuid_grpc||'')}</div>
+            <div class="row">
+              ${c.active?'':`<button onclick="connActivate('${c.id}')">Сделать активным</button>`}
+              <button class="del" onclick="connDelete('${c.id}')" title="Удалить">×</button>
+            </div>
+          </div>`).join('') : '<div class="soon">Нет сохранённых хостов — добавьте ниже.</div>';
+      }).catch(() => { connList.innerHTML = '<div class="msg bad">ошибка загрузки</div>'; });
+    }
+    loadConns();
+    window.connActivate = (id) => {
+      connMsg.className = 'msg'; connMsg.textContent = 'Переключаю + рестарт xray…';
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'activate', id }) })
         .then(async r => { const d = await r.json();
-          if (r.ok) { connMsg.className = 'msg good'; connMsg.textContent = '✓ подключение обновлено (' + (d.addr || '') + ')'; document.getElementById('connLink').value = ''; loadConnection(); }
-          else { connMsg.className = 'msg bad'; connMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
-        }).catch(() => { connMsg.className = 'msg bad'; connMsg.textContent = '✗ сеть'; });
+          if (r.ok) { connMsg.className='msg good'; connMsg.textContent='✓ активен: ' + (d.addr||''); loadConns(); loadConnection(); }
+          else { connMsg.className='msg bad'; connMsg.textContent='✗ ' + (d.error||'ошибка'); }
+        }).catch(() => { connMsg.className='msg bad'; connMsg.textContent='✗ сеть'; });
+    };
+    window.connDelete = (id) => {
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'delete', id }) }).then(() => loadConns());
+    };
+    document.getElementById('connAdd').onclick = () => {
+      const link = document.getElementById('connLink').value.trim();
+      const name = document.getElementById('connName').value.trim();
+      if (!link) { connMsg.className='msg bad'; connMsg.textContent='вставьте ссылку'; return; }
+      connMsg.className = 'msg'; connMsg.textContent = 'Добавляю…';
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'add', name, link }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { connMsg.className='msg good'; connMsg.textContent='✓ хост добавлен'; document.getElementById('connLink').value=''; document.getElementById('connName').value=''; loadConns(); }
+          else { connMsg.className='msg bad'; connMsg.textContent='✗ ' + (d.error||'ошибка'); }
+        }).catch(() => { connMsg.className='msg bad'; connMsg.textContent='✗ сеть'; });
     };
 
     // --- Zapret (read-only) ---

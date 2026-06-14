@@ -135,9 +135,12 @@ HTTP/TLS12/TLS13/QUIC + уровень быстрый/стандартный/г�
 виджет показывает результаты/лог только если job.owner совпадает с владельцем раздела, иначе
 «идёт поиск в другом разделе». Проверено: owner=discord в статусе, smoke 9/9.
 
-### T32 · Подключение: несколько хостов + переключение/удаление · H · todo
-Сохранять список хостов (vless), переключаться, удалять. Хранить /etc/gateway/connections.json.
-**Критерий приёмки:** добавить/переключить/удалить хост из UI → config.env+xray применяются.
+### T32 · Подключение: несколько хостов + переключение/удаление · H · done
+[gateway-ui/connections.go](gateway-ui/connections.go): /api/connections (GET список масок,
+POST add|activate|delete). Хранилище /etc/gateway/connections.json (0600). add парсит vless,
+activate пишет VPS_* в config.env + render + restart xray + помечает active. UI вкладки Подключение:
+текущее (read-only) + список хостов (активировать/удалить) + форма добавления (имя + vless).
+**Приёмка (стенд):** add→list→activate (xray active, active=True)→delete; smoke 9/9.
 
 ### T33 · Показ рабочих/добавленных стратегий во вкладках и Zapret · M · todo
 Во вкладках сервисов — найденные рабочие стратегии; в Zapret — все стратегии (пользовательские + прочие).

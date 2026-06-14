@@ -55,6 +55,7 @@ type server struct {
 	blockcheck     string // /opt/zapret/blockcheck.sh
 	overrides      string // (устар.) оверрайды стратегий
 	servicesFile   string // /etc/gateway/zapret-services.json (динамические сервисы)
+	connsFile      string // /etc/gateway/connections.json (сохранённые VPS-хосты)
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -72,6 +73,7 @@ func main() {
 	blockcheck := flag.String("blockcheck", "/opt/zapret/blockcheck.sh", "путь к blockcheck.sh")
 	overrides := flag.String("zapret-overrides", "/etc/gateway/zapret-overrides.env", "(устар.) файл оверрайдов")
 	servicesFile := flag.String("zapret-services", "/etc/gateway/zapret-services.json", "файл сервисов zapret")
+	connsFile := flag.String("connections", "/etc/gateway/connections.json", "файл сохранённых VPS-хостов")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -82,6 +84,7 @@ func main() {
 		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
 		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
 		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
+		connsFile: *connsFile,
 	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
@@ -101,6 +104,7 @@ func main() {
 	mux.HandleFunc("/api/ping", s.requireAuth(s.handlePing))
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
+	mux.HandleFunc("/api/connections", s.requireAuth(s.handleConnections))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
 	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))
