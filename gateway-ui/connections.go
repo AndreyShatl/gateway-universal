@@ -47,6 +47,7 @@ func (s *server) writeConns(c []conn) error {
 func (s *server) handleConnections(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		s.ensureCurrentConn() // текущий хост из config.env — добавить в список, если его там нет
 		out := []map[string]any{}
 		for _, c := range s.readConns() {
 			out = append(out, map[string]any{
@@ -63,6 +64,8 @@ func (s *server) handleConnections(w http.ResponseWriter, r *http.Request) {
 			s.connAdd(w, r)
 		case "activate":
 			s.connActivate(w, r)
+		case "edit":
+			s.connEdit(w, r)
 		case "delete":
 			s.connDelete(w, r)
 		default:
@@ -124,6 +127,73 @@ func (s *server) connActivate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeConns(conns)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "addr": target.Fields["VPS_ADDR"]})
+}
+
+// ensureCurrentConn: если в списке нет активного, заводит запись из config.env
+// (текущий применённый хост), чтобы им можно было управлять из UI.
+func (s *server) ensureCurrentConn() {
+	addr, _ := readConfigVar(s.configEnv, "VPS_ADDR")
+	if addr == "" {
+		return
+	}
+	conns := s.readConns()
+	for _, c := range conns {
+		if c.Active {
+			return
+		}
+	}
+	f := map[string]string{}
+	for _, k := range []string{"VPS_ADDR", "VPS_PORT_GRPC", "VPS_PORT_VISION", "VPS_UUID_GRPC", "VPS_UUID_VISION", "VPS_PUBKEY", "VPS_SHORT_ID", "VPS_SERVER_NAME", "VPS_FINGERPRINT"} {
+		if v, _ := readConfigVar(s.configEnv, k); v != "" {
+			f[k] = v
+		}
+	}
+	cur := conn{ID: "c" + strconv.FormatInt(time.Now().UnixNano(), 36), Name: "Текущий хост", Active: true, Fields: f}
+	s.writeConns(append([]conn{cur}, conns...))
+}
+
+// connEdit: заменить ссылку/имя существующего хоста (если активен — переприменить).
+func (s *server) connEdit(w http.ResponseWriter, r *http.Request) {
+	fields, err := parseVless(r.FormValue("link"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	if cur, _ := readConfigVar(s.configEnv, "VPS_UUID_VISION"); cur == "" {
+		if u, ok := fields["VPS_UUID_GRPC"]; ok {
+			fields["VPS_UUID_VISION"] = u
+		}
+	}
+	id := r.FormValue("id")
+	conns := s.readConns()
+	var t *conn
+	for i := range conns {
+		if conns[i].ID == id {
+			t = &conns[i]
+		}
+	}
+	if t == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "нет такого подключения"})
+		return
+	}
+	if n := strings.TrimSpace(r.FormValue("name")); n != "" {
+		t.Name = n
+	}
+	t.Fields = fields
+	if err := s.writeConns(conns); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	if t.Active { // активный — переприменить
+		for k, v := range fields {
+			writeConfigVar(s.configEnv, k, v)
+		}
+		if out, err := s.applyXray(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение: " + err.Error(), "output": out})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *server) connDelete(w http.ResponseWriter, r *http.Request) {

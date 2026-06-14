@@ -96,6 +96,13 @@
   .strat .tag.q { background:var(--accent); color:var(--on-accent); }
   .strat .params { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted); }
   .strat .doms summary { cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border);
+             border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .scanrun { display:flex; align-items:center; gap:8px; font-size:13px; margin-top:8px; }
+  .bar { height:5px; background:var(--pill-bg); border-radius:3px; overflow:hidden; margin-top:6px; }
+  .bar > div { height:100%; width:35%; background:var(--accent); border-radius:3px; animation:slide 1.4s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left:-35%; } 100% { margin-left:100%; } }
   .chk { display:flex; flex-wrap:wrap; gap:14px; margin-top:12px; font-size:13px; }
   .chk label { display:flex; align-items:center; gap:6px; cursor:pointer; }
   button:disabled { opacity:.45; cursor:not-allowed; }
@@ -295,6 +302,7 @@
     loadConnection();
     // --- Сохранённые хосты (мультихост) ---
     const connList = document.getElementById('connList');
+    let editConnId = null;
     function loadConns() {
       fetch('/api/connections').then(r => r.json()).then(d => {
         const cs = d.connections || [];
@@ -307,6 +315,7 @@
             <div class="params">${esc(c.addr||'')}:${esc(c.port_grpc||'')} · uuid ${esc(c.uuid_grpc||'')}</div>
             <div class="row">
               ${c.active?'':`<button onclick="connActivate('${c.id}')">Сделать активным</button>`}
+              <button data-id="${c.id}" data-name="${esc(c.name)}" onclick="connEditStart(this)">Изменить</button>
               <button class="del" onclick="connDelete('${c.id}')" title="Удалить">×</button>
             </div>
           </div>`).join('') : '<div class="soon">Нет сохранённых хостов — добавьте ниже.</div>';
@@ -324,15 +333,29 @@
     window.connDelete = (id) => {
       fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'delete', id }) }).then(() => loadConns());
     };
+    window.connEditStart = (btn) => {
+      editConnId = btn.dataset.id;
+      document.getElementById('connName').value = btn.dataset.name || '';
+      const link = document.getElementById('connLink'); link.value = ''; link.placeholder = 'вставьте исправленную ссылку vless://…';
+      document.getElementById('connAdd').textContent = 'Сохранить изменения';
+      connMsg.className = 'msg'; connMsg.textContent = 'Редактирование «' + (btn.dataset.name||'') + '» — вставьте корректную ссылку и сохраните';
+      document.getElementById('connLink').scrollIntoView({ behavior:'smooth', block:'center' });
+    };
     document.getElementById('connAdd').onclick = () => {
       const link = document.getElementById('connLink').value.trim();
       const name = document.getElementById('connName').value.trim();
       if (!link) { connMsg.className='msg bad'; connMsg.textContent='вставьте ссылку'; return; }
-      connMsg.className = 'msg'; connMsg.textContent = 'Добавляю…';
-      fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'add', name, link }) })
+      const action = editConnId ? 'edit' : 'add';
+      const body = editConnId ? { action, id:editConnId, name, link } : { action, name, link };
+      connMsg.className = 'msg'; connMsg.textContent = editConnId ? 'Сохраняю…' : 'Добавляю…';
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams(body) })
         .then(async r => { const d = await r.json();
-          if (r.ok) { connMsg.className='msg good'; connMsg.textContent='✓ хост добавлен'; document.getElementById('connLink').value=''; document.getElementById('connName').value=''; loadConns(); }
-          else { connMsg.className='msg bad'; connMsg.textContent='✗ ' + (d.error||'ошибка'); }
+          if (r.ok) {
+            connMsg.className='msg good'; connMsg.textContent = editConnId ? '✓ хост изменён' : '✓ хост добавлен';
+            editConnId = null; document.getElementById('connAdd').textContent = 'Добавить';
+            document.getElementById('connLink').value=''; document.getElementById('connName').value='';
+            loadConns(); loadConnection();
+          } else { connMsg.className='msg bad'; connMsg.textContent='✗ ' + (d.error||'ошибка'); }
         }).catch(() => { connMsg.className='msg bad'; connMsg.textContent='✗ сеть'; });
     };
 
@@ -384,6 +407,7 @@
           <button class="sw-stop" onclick="swStop(this)">Стоп</button>
         </div>
         <div class="sw-msg msg"></div>
+        <div class="sw-run"></div>
         <div class="sw-working"></div>
         <details class="defaults"><summary>Лог поиска (только рабочие стратегии)</summary><pre class="sw-log out"></pre></details>
       </div>`;
@@ -419,14 +443,22 @@
           else { pre.className = 'msg'; pre.textContent = ''; }
           w.querySelector('.sw-start').disabled = !d.can_start;
           w.querySelector('.sw-stop').disabled = !(d.running && mine);
+          const run = w.querySelector('.sw-run');
           if (mine) {
             w.querySelector('.sw-msg').textContent = d.exists ? status : 'не запускался';
             w.querySelector('.sw-working').innerHTML = workHTML;
             w.querySelector('.sw-log').textContent = d.log_tail || '';
+            if (d.running && d.params) {
+              const p = d.params;
+              const protos = [p.http&&'HTTP', p.tls12&&'TLS1.2', p.tls13&&'TLS1.3', p.quic&&'QUIC'].filter(Boolean).join(', ') || '—';
+              const lvl = ({quick:'быстрый',standard:'стандартный',force:'глубокий'})[p.scanlevel] || p.scanlevel;
+              run.innerHTML = `<div class="scanrun"><span class="spinner"></span><span>Идёт поиск: <b>${esc(protos)}</b> · уровень <b>${esc(lvl)}</b> · доменов ${(p.domains||[]).length}${p.parallel?' · параллельно':''}</span></div><div class="bar"><div></div></div>`;
+            } else run.innerHTML = '';
           } else {
             w.querySelector('.sw-msg').textContent = 'идёт поиск в другом разделе: ' + jobOwner;
             w.querySelector('.sw-working').innerHTML = '';
             w.querySelector('.sw-log').textContent = '';
+            run.innerHTML = '';
           }
         });
       }).catch(() => {});
