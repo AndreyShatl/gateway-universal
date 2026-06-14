@@ -109,6 +109,7 @@ func (s *server) scanStatus(w http.ResponseWriter) {
 		"precondition":    preMsg,
 		"working":         parseWorking(s.logPath()),
 		"log_tail":        tailFile(s.logPath(), 40),
+		"ver":             s.ver,
 	}
 	if ok {
 		resp["status"] = j.Status
