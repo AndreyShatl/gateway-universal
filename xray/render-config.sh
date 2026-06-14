@@ -26,6 +26,7 @@ CONFIG=""
 XRAY_BIN=""
 DOMAINS_DIR="$SCRIPT_DIR/domains"
 USER_DOMAINS_DIR="/etc/gateway/domains"   # домены из UI, вне репо (T9)
+SERVICES="/etc/gateway/zapret-services.json"  # сервисы из UI (режимы vps/zapret/direct)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -35,6 +36,7 @@ while [[ $# -gt 0 ]]; do
         --xray)             XRAY_BIN="$2"; shift 2;;
         --domains-dir)      DOMAINS_DIR="$2"; shift 2;;
         --user-domains-dir) USER_DOMAINS_DIR="$2"; shift 2;;
+        --services)         SERVICES="$2"; shift 2;;
         *) echo "render-config: unknown option: $1" >&2; exit 2;;
     esac
 done
@@ -78,6 +80,37 @@ mkdir -p "$(dirname "$OUT")"
 TMP_OUT="${OUT}.tmp.$$.json"
 trap 'rm -f "$TMP_OUT"' EXIT
 envsubst < "$TEMPLATE" > "$TMP_OUT"
+
+# 3.5) Привязка статических VPS-правил к режиму featured-сервисов.
+#   Если сервис переключён в zapret/direct, его статические IP-правила
+#   (помечены "comment":"svc:<id> …") и DNS-geosite не должны гнать трафик
+#   на VPS — иначе по-сервисный тумблер не действует. Убираем их из конфига.
+if [[ -f "$SERVICES" ]] && command -v jq >/dev/null 2>&1; then
+    svc_geosites() { case "$1" in
+        instagram) echo "geosite:facebook geosite:instagram";;
+        discord)   echo "geosite:discord";;
+        *)         echo "";;
+    esac; }
+    for sid in instagram discord; do
+        mode="$(jq -r --arg id "$sid" '(.[] | select(.id==$id) | .mode) // empty' "$SERVICES" 2>/dev/null || true)"
+        [[ -z "$mode" || "$mode" == "vps" ]] && continue
+        geos="$(svc_geosites "$sid")"
+        if jq --arg id "$sid" --arg geos "$geos" '
+              ($geos | split(" ") | map(select(length>0))) as $g
+              | .routing.rules |= ( map(select(((.comment // "") | startswith("svc:"+$id)) | not))
+                    | map(if has("domain") then .domain |= map(select(. as $d | ($g | index($d)) | not)) else . end)
+                    | map(select((has("domain") and (.domain | length==0)) | not)) )
+              | .dns.servers |= map(if (type=="object" and has("domains"))
+                    then .domains |= map(select(. as $d | ($g | index($d)) | not)) else . end)
+            ' "$TMP_OUT" > "${TMP_OUT}.j" 2>/dev/null; then
+            mv "${TMP_OUT}.j" "$TMP_OUT"
+            echo "  сервис $sid=$mode — статические VPS-правила исключены"
+        else
+            rm -f "${TMP_OUT}.j"
+            echo "render-config: jq-фильтр для $sid не сработал (пропускаю)" >&2
+        fi
+    done
+fi
 
 # 4) Проверка xray (если бинарник дан) — до подмены рабочего конфига
 if [[ -n "$XRAY_BIN" && -x "$XRAY_BIN" ]]; then
