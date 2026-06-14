@@ -9,7 +9,9 @@ import (
 // Статус и управление (T13). Всё через exec существующих средств:
 // systemctl, pgrep, curl, tests/smoke.sh, journalctl. UI ничего не дублирует.
 
-var statusServices = []string{"xray", "zapret", "fix-gateway", "discord-tproxy", "gateway-ui"}
+// В обзоре — только значимые сервисы. fix-gateway/discord-tproxy — фоновая
+// инфраструктура, их статус в обзоре не нужен.
+var statusServices = []string{"xray", "zapret", "gateway-ui"}
 
 // сервисы, которые разрешено рестартить/смотреть из UI
 var manageable = map[string]bool{"xray": true, "zapret": true, "fix-gateway": true, "discord-tproxy": true}
