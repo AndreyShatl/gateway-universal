@@ -1,0 +1,101 @@
+[
+  {
+    "name": "general",
+    "tcp": "--dpi-desync=multisplit --dpi-desync-split-seqovl=568 --dpi-desync-split-pos=1 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_4pda_to.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT)",
+    "tcp": "--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts --dpi-desync-fakedsplit-pattern=0x00 --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_www_google_com.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT2)",
+    "tcp": "--dpi-desync=multisplit --dpi-desync-split-seqovl=652 --dpi-desync-split-pos=2 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_www_google_com.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT3)",
+    "tcp": "--dpi-desync=fake,hostfakesplit --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ya.ru --dpi-desync-hostfakesplit-mod=host=ya.ru,altorder=1 --dpi-desync-fooling=ts --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT4)",
+    "tcp": "--dpi-desync=fake,multisplit --dpi-desync-repeats=6 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=1000 --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_www_google_com.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT5)",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT6)",
+    "tcp": "--dpi-desync=multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_www_google_com.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT7)",
+    "tcp": "--dpi-desync=multisplit --dpi-desync-split-pos=2,sniext+1 --dpi-desync-split-seqovl=679 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_www_google_com.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT8)",
+    "tcp": "--dpi-desync=fake --dpi-desync-fake-tls-mod=none --dpi-desync-repeats=6 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=2 --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT9)",
+    "tcp": "--dpi-desync=hostfakesplit --dpi-desync-repeats=4 --dpi-desync-fooling=ts,md5sig --dpi-desync-hostfakesplit-mod=host=ozon.ru",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT10)",
+    "tcp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fooling=ts --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_4pda_to.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT11)",
+    "tcp": "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=664 --dpi-desync-split-pos=1 --dpi-desync-fooling=ts --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_max_ru.bin --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_max_ru.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=11 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (ALT12)",
+    "tcp": "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=664 --dpi-desync-split-pos=1 --dpi-desync-fooling=ts --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_max_ru.bin --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_max_ru.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=11 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (FAKE TLS AUTO)",
+    "tcp": "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=11 --dpi-desync-fooling=badseq --dpi-desync-fake-tls=0x00000000 --dpi-desync-fake-tls=! --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=11 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (FAKE TLS AUTO ALT)",
+    "tcp": "--dpi-desync=fake,fakedsplit --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=2 --dpi-desync-repeats=8 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=11 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (FAKE TLS AUTO ALT2)",
+    "tcp": "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=10000000 --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_www_google_com.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=11 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (FAKE TLS AUTO ALT3)",
+    "tcp": "--dpi-desync=fake,multisplit --dpi-desync-split-seqovl=681 --dpi-desync-split-pos=1 --dpi-desync-fooling=ts --dpi-desync-repeats=8 --dpi-desync-split-seqovl-pattern=$FAKE/tls_clienthello_www_google_com.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=11 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (SIMPLE FAKE)",
+    "tcp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fooling=ts --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_www_google_com.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (SIMPLE FAKE ALT)",
+    "tcp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=2 --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_www_google_com.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  },
+  {
+    "name": "general (SIMPLE FAKE ALT2)",
+    "tcp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fooling=ts --dpi-desync-fake-tls=$FAKE/stun.bin --dpi-desync-fake-tls=$FAKE/tls_clienthello_max_ru.bin --dpi-desync-fake-http=$FAKE/tls_clienthello_max_ru.bin",
+    "udp": "--dpi-desync=fake --dpi-desync-repeats=6 --dpi-desync-fake-quic=$FAKE/quic_initial_www_google_com.bin"
+  }
+]

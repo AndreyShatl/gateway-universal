@@ -110,6 +110,14 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleStrategies — GET каталог готовых стратегий (пресеты из flowseal),
+// встроен в бинарь. UI показывает их в панели и вставляет в канал сервиса.
+func (s *server) handleStrategies(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(strategiesJSON)
+}
+
 func validateServices(svc []zService) string {
 	seen := map[string]bool{}
 	for _, s := range svc {

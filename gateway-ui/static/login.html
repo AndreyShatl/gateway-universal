@@ -29,6 +29,12 @@
   button { width:100%; padding:10px; border:0; border-radius:8px; background:var(--accent);
            color:#fff; font-weight:600; cursor:pointer; }
   button:hover { background:var(--accent-h); }
+  .pw-wrap { position:relative; }
+  .pw-wrap input { padding-right:42px; }
+  .pw-eye { position:absolute; top:8px; right:6px; width:auto; margin:0; padding:3px 5px;
+            background:none; border:0; border-radius:6px; color:var(--text); opacity:.6;
+            font-size:16px; line-height:1; cursor:pointer; }
+  .pw-eye:hover { background:none; opacity:1; }
   .err { color:var(--bad); font-size:13px; margin-bottom:12px; }
   .theme-toggle { position:fixed; top:16px; right:16px; width:auto; padding:6px 10px;
                   background:none; border:1px solid var(--border); border-radius:8px;
@@ -41,7 +47,10 @@
   <form class="card" method="POST" action="/login">
     <h1>🛡️ gateway-ui</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
-    <input type="password" name="password" placeholder="Пароль" autofocus required>
+    <div class="pw-wrap">
+      <input id="pw" type="password" name="password" placeholder="Пароль" autofocus required>
+      <button id="pwEye" class="pw-eye" type="button" title="Показать пароль" aria-label="Показать пароль">👁️</button>
+    </div>
     <button type="submit">Войти</button>
   </form>
   <script>
@@ -53,6 +62,15 @@
     }
     applyTheme(document.documentElement.dataset.theme || 'dark');
     themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+    // Показать/скрыть пароль — чтобы видеть введённое и не стирать всё при опечатке
+    const pw = document.getElementById('pw'), pwEye = document.getElementById('pwEye');
+    pwEye.onclick = () => {
+      const show = pw.type === 'password';
+      pw.type = show ? 'text' : 'password';
+      pwEye.textContent = show ? '🙈' : '👁️';
+      pwEye.title = show ? 'Скрыть пароль' : 'Показать пароль';
+      pw.focus();
+    };
   </script>
 </body>
 </html>

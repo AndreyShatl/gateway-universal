@@ -35,6 +35,9 @@ import (
 //go:embed static/*.html
 var staticFS embed.FS
 
+//go:embed strategies.json
+var strategiesJSON []byte
+
 const sessionCookie = "gwsess"
 const sessionTTL = 12 * time.Hour
 
@@ -110,6 +113,7 @@ func main() {
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
 	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))
+	mux.HandleFunc("/api/strategies", s.requireAuth(s.handleStrategies))
 	mux.HandleFunc("/api/zapret/version", s.requireAuth(s.handleZapretVersion))
 	mux.HandleFunc("/api/zapret/update", s.requireAuth(s.handleZapretUpdate))
 	mux.HandleFunc("/api/scan", s.requireAuth(s.handleScan))
