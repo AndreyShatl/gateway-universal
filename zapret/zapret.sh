@@ -27,6 +27,7 @@ build_proto() {
         [ -n "$ports" ] || continue
         desync=${desync//\$FAKE_TLS/$FAKE_TLS}
         desync=${desync//\$FAKE_QUIC/$FAKE_QUIC}
+        desync=${desync//\$FAKE/$ZAPRET_DIR/files/fake}  # $FAKE/<file>.bin -> путь к болванке
         [ $first -eq 1 ] || cmd+=(--new)
         first=0
         cmd+=(--filter-$proto=$ports)

@@ -118,6 +118,20 @@
   .side-feat .mode-tog { display:flex; width:100%; }
   .side-feat .mode-tog button { flex:1; padding:5px 0; font-size:12px; }
   @media (max-width:760px){ .side-feat{ display:none; } }
+  /* Готовые стратегии: каналы слева, панель пресетов справа */
+  .zap-wrap { display:flex; gap:12px; align-items:flex-start; }
+  .zap-main { flex:1; min-width:0; }
+  .zap-strats { width:260px; flex-shrink:0; border:1px solid var(--border); border-radius:10px;
+                padding:8px; max-height:420px; overflow-y:auto; background:var(--input-bg); }
+  .zap-strats .t { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:2px 4px 8px; }
+  .st-card { border:1px solid var(--border); border-radius:8px; padding:7px 8px; margin-bottom:7px; }
+  .st-card .nm { font-size:12px; font-weight:600; margin-bottom:2px; }
+  .st-card .ds { font-size:11px; color:var(--muted); margin-bottom:6px; word-break:break-word; }
+  .st-badge { font-size:10px; padding:1px 6px; border-radius:6px; margin-left:6px; font-weight:600;
+              background:var(--border); color:var(--text); }
+  .st-btns { display:flex; gap:4px; }
+  .st-btns button { flex:1; padding:5px 4px; font-size:11px; }
+  @media (max-width:900px){ .zap-wrap{ flex-direction:column; } .zap-strats{ width:100%; max-height:none; } }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -586,8 +600,13 @@
         : `<textarea class="svc-domains" rows="3" placeholder="домены через пробел/с новой строки">${esc(doms.join(' '))}</textarea>`;
       let body;
       if (isZap) {
-        body = `<div class="chans">${(s.channels||[]).map((c, j) => chanHTML(c, i, j)).join('')}</div>
-          <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>`;
+        body = `<div class="zap-wrap">
+          <div class="zap-main">
+            <div class="chans">${(s.channels||[]).map((c, j) => chanHTML(c, i, j)).join('')}</div>
+            <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>
+          </div>
+          ${stratsPanelHTML(i)}
+        </div>`;
       } else if (mode === 'direct') {
         body = '<div class="soon">Напрямую — без VPS и без zapret, обычный трафик через провайдера.</div>';
       } else {
@@ -603,6 +622,38 @@
         ${search}
       </div>`;
     }
+    // --- Готовые стратегии (пресеты flowseal, /api/strategies) ---
+    let STRATS = [];
+    function stratsPanelHTML(i) {
+      if (!STRATS.length) return '<div class="zap-strats"><div class="t">Готовые стратегии</div><div class="soon">загрузка…</div></div>';
+      const cards = STRATS.map((st, k) => {
+        const btns = [];
+        if (st.tcp) btns.push(`<button onclick="applyStrat(${i},${k},'tcp')">→ TCP</button>`);
+        if (st.udp) btns.push(`<button onclick="applyStrat(${i},${k},'udp')">→ UDP</button>`);
+        if (st.tcp && st.udp) btns.push(`<button onclick="applyStrat(${i},${k},'both')">→ TCP+UDP</button>`);
+        return `<div class="st-card">
+          <div class="nm">${esc(st.name)}</div>
+          <div class="st-btns">${btns.join('')}</div>
+        </div>`;
+      }).join('');
+      return `<div class="zap-strats"><div class="t">Готовые стратегии (flowseal)</div>${cards}</div>`;
+    }
+    window.applyStrat = (i, k, target) => {
+      scrapeSvc();
+      const st = STRATS[k]; if (!st) return;
+      const s = svcState[i]; s.channels = s.channels || [];
+      const setCh = (proto, desync, ports) => {
+        let ch = s.channels.find(c => c.proto === proto);
+        if (!ch) { ch = { proto, ports: ports, desync: '' }; s.channels.push(ch); }
+        ch.desync = desync;
+      };
+      const done = [];
+      if ((target === 'tcp' || target === 'both') && st.tcp) { setCh('tcp', st.tcp, '80,443'); done.push('TCP'); }
+      if ((target === 'udp' || target === 'both') && st.udp) { setCh('udp', st.udp, '443'); done.push('UDP'); }
+      renderAll();
+      svcMsg2.className = 'msg good';
+      svcMsg2.textContent = '✓ «' + st.name + '» → ' + done.join('+') + ' — нажми «Сохранить»';
+    };
     function renderFeat() {
       FEATURED.forEach(id => {
         const el = document.getElementById('feat_' + id); if (!el) return;
@@ -630,6 +681,7 @@
       fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderAll(); });
     }
     loadServices();
+    fetch('/api/strategies', { cache:'no-store' }).then(r => r.json()).then(d => { STRATS = d || []; renderAll(); }).catch(() => {});
     window.svcDel = i => { scrapeSvc(); svcState.splice(i, 1); renderAll(); };
     window.svcChDel = (i, j) => { scrapeSvc(); svcState[i].channels.splice(j, 1); renderAll(); };
     window.svcChAdd = i => { scrapeSvc(); (svcState[i].channels = svcState[i].channels || []).push({ proto:'tcp', ports:'80,443', desync:'--dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts' }); renderAll(); };

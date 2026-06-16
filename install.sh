@@ -347,6 +347,14 @@ if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
     [[ -f /etc/gateway/zapret-services.json ]] || cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
     ok "zapret services.json установлен"
 
+    # Доп. fake-болванки для готовых стратегий (flowseal): дополняют штатные
+    # из апстрима zapret. Нужны пресетам из gateway-ui (--dpi-desync-fake-*).
+    if [[ -d "$SCRIPT_DIR/zapret/fake" ]]; then
+        mkdir -p "$ZAPRET_DIR/files/fake"
+        cp -n "$SCRIPT_DIR/zapret/fake/"*.bin "$ZAPRET_DIR/files/fake/" 2>/dev/null || true
+        ok "fake-болванки для пресетов установлены"
+    fi
+
     # systemd unit
     say "Installing zapret.service…"
     cp "$SCRIPT_DIR/systemd/zapret.service" /etc/systemd/system/zapret.service
