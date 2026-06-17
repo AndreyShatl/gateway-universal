@@ -119,18 +119,28 @@
   .side-feat .mode-tog button { flex:1; padding:5px 0; font-size:12px; }
   @media (max-width:760px){ .side-feat{ display:none; } }
   /* Готовые стратегии: каналы слева, панель пресетов справа */
-  .zap-wrap { display:flex; gap:12px; align-items:flex-start; }
+  .zap-wrap { display:flex; gap:14px; align-items:flex-start; }
   .zap-main { flex:1; min-width:0; }
-  .zap-strats { width:260px; flex-shrink:0; border:1px solid var(--border); border-radius:10px;
-                padding:8px; max-height:420px; overflow-y:auto; background:var(--input-bg); }
-  .zap-strats .t { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin:2px 4px 8px; }
-  .st-card { border:1px solid var(--border); border-radius:8px; padding:7px 8px; margin-bottom:7px; }
-  .st-card .nm { font-size:12px; font-weight:600; margin-bottom:2px; }
-  .st-card .ds { font-size:11px; color:var(--muted); margin-bottom:6px; word-break:break-word; }
-  .st-badge { font-size:10px; padding:1px 6px; border-radius:6px; margin-left:6px; font-weight:600;
-              background:var(--border); color:var(--text); }
-  .st-btns { display:flex; gap:4px; }
-  .st-btns button { flex:1; padding:5px 4px; font-size:11px; }
+  .zap-strats { width:280px; flex-shrink:0; border:1px solid var(--border); border-radius:12px;
+                padding:12px; max-height:480px; overflow-y:auto; background:var(--panel); }
+  .zap-strats .t { font-size:12px; font-weight:600; color:var(--text); display:flex; align-items:center;
+                   gap:6px; margin:0 0 2px; }
+  .zap-strats .t .cnt { font-size:11px; font-weight:500; color:var(--muted); }
+  .zap-strats .hint { font-size:11px; color:var(--muted); line-height:1.4; margin:0 0 10px; }
+  .st-card { border:1px solid var(--border); border-radius:10px; padding:9px 10px; margin-bottom:8px;
+             background:var(--input-bg); transition:border-color .15s ease; }
+  .st-card:hover { border-color:var(--accent); }
+  .st-card .nm { font-size:13px; font-weight:600; margin-bottom:8px; }
+  .st-btns { display:flex; gap:5px; }
+  .st-btns button { flex:1; padding:6px 4px; font-size:11px; font-weight:600; border-radius:7px;
+                    background:transparent; color:var(--text); border:1px solid var(--border);
+                    cursor:pointer; transition:all .12s ease; white-space:nowrap; }
+  .st-btns button:hover { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+  /* первый канал выровнять по верху с панелью стратегий (у .strat margin-top:12px) */
+  .zap-main .chans .strat:first-child { margin-top:0; }
+  /* поле стратегии: моноширинное, видно всю строку, тянется по вертикали */
+  .ch-desync { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
+               line-height:1.45; resize:vertical; white-space:pre-wrap; word-break:break-all; overflow:hidden; }
   @media (max-width:900px){ .zap-wrap{ flex-direction:column; } .zap-strats{ width:100%; max-height:none; } }
 
   @media (max-width:760px) {
@@ -571,15 +581,19 @@
         }
       });
     }
-    function chanHTML(c, i, j) {
+    function chanHTML(c, i, j, locked) {
+      // locked (featured-сервис): протокол зафиксирован, канал не удаляется —
+      // чтобы готовые стратегии (→ TCP/UDP) всегда попадали в нужный канал.
+      const sel = `<select class="ch-proto"${locked?' disabled title="протокол канала зафиксирован"':''}><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>`;
+      const del = locked ? '' : `<button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>`;
       return `<div class="strat" data-ch="${j}">
         <div class="row">
-          <select class="ch-proto"><option value="tcp"${c.proto==='tcp'?' selected':''}>tcp</option><option value="udp"${c.proto==='udp'?' selected':''}>udp</option></select>
+          ${sel}
           <input class="ch-ports" value="${esc(c.ports||'')}" placeholder="порты: 80,443 или 50000-50100">
           <input class="ch-l7" value="${esc(c.l7||'')}" placeholder="l7 (опц.)">
-          <button onclick="svcChDel(${i},${j})" class="del" title="Удалить канал">×</button>
+          ${del}
         </div>
-        <textarea class="ch-desync" rows="2" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
+        <textarea class="ch-desync" rows="2" oninput="acGrow(this)" placeholder="--dpi-desync=… можно $FAKE_TLS / $FAKE_QUIC">${esc(c.desync||'')}</textarea>
       </div>`;
     }
     function cardHTML(s, i) {
@@ -602,8 +616,8 @@
       if (isZap) {
         body = `<div class="zap-wrap">
           <div class="zap-main">
-            <div class="chans">${(s.channels||[]).map((c, j) => chanHTML(c, i, j)).join('')}</div>
-            <div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>
+            <div class="chans">${(s.channels||[]).map((c, j) => chanHTML(c, i, j, s.featured)).join('')}</div>
+            ${s.featured ? '' : `<div class="row"><button onclick="svcChAdd(${i})">+ Канал</button></div>`}
           </div>
           ${stratsPanelHTML(i)}
         </div>`;
@@ -628,29 +642,38 @@
       if (!STRATS.length) return '<div class="zap-strats"><div class="t">Готовые стратегии</div><div class="soon">загрузка…</div></div>';
       const cards = STRATS.map((st, k) => {
         const btns = [];
-        if (st.tcp) btns.push(`<button onclick="applyStrat(${i},${k},'tcp')">→ TCP</button>`);
-        if (st.udp) btns.push(`<button onclick="applyStrat(${i},${k},'udp')">→ UDP</button>`);
-        if (st.tcp && st.udp) btns.push(`<button onclick="applyStrat(${i},${k},'both')">→ TCP+UDP</button>`);
+        if (st.tcp) btns.push(`<button onclick="applyStrat(${i},${k},'tcp')" title="Применить к TCP-каналу">→ TCP</button>`);
+        if (st.udp) btns.push(`<button onclick="applyStrat(${i},${k},'udp')" title="Применить к UDP-каналу">→ UDP</button>`);
+        if (st.tcp && st.udp) btns.push(`<button onclick="applyStrat(${i},${k},'both')" title="Применить к обоим каналам">→ оба</button>`);
         return `<div class="st-card">
           <div class="nm">${esc(st.name)}</div>
           <div class="st-btns">${btns.join('')}</div>
         </div>`;
       }).join('');
-      return `<div class="zap-strats"><div class="t">Готовые стратегии (flowseal)</div>${cards}</div>`;
+      return `<div class="zap-strats">
+        <div class="t">📦 Готовые стратегии <span class="cnt">flowseal · ${STRATS.length}</span></div>
+        <div class="hint">Выберите стратегию и нажмите протокол — она подставится в нужный канал. Поле можно отредактировать вручную.</div>
+        ${cards}</div>`;
     }
     window.applyStrat = (i, k, target) => {
       scrapeSvc();
       const st = STRATS[k]; if (!st) return;
       const s = svcState[i]; s.channels = s.channels || [];
+      const card = document.querySelector(`[data-svc="${i}"]`);
+      let needRender = false;
       const setCh = (proto, desync, ports) => {
-        let ch = s.channels.find(c => c.proto === proto);
-        if (!ch) { ch = { proto, ports: ports, desync: '' }; s.channels.push(ch); }
-        ch.desync = desync;
+        const idx = s.channels.findIndex(c => c.proto === proto);
+        if (idx < 0) { s.channels.push({ proto, ports, desync }); needRender = true; return; }
+        s.channels[idx].desync = desync;
+        // обновляем textarea прямо в DOM — без ре-рендера, чтобы не сбивать скролл панели
+        const chEl = card && card.querySelectorAll('[data-ch]')[idx];
+        const ta = chEl && chEl.querySelector('.ch-desync');
+        if (ta) { ta.value = desync; acGrow(ta); } else needRender = true;
       };
       const done = [];
       if ((target === 'tcp' || target === 'both') && st.tcp) { setCh('tcp', st.tcp, '80,443'); done.push('TCP'); }
       if ((target === 'udp' || target === 'both') && st.udp) { setCh('udp', st.udp, '443'); done.push('UDP'); }
-      renderAll();
+      if (needRender) renderAll(); // нужен только если канала ещё не было в DOM
       svcMsg2.className = 'msg good';
       svcMsg2.textContent = '✓ «' + st.name + '» → ' + done.join('+') + ' — нажми «Сохранить»';
     };
@@ -666,7 +689,8 @@
       svcOthers.innerHTML = svcState.map((s, i) => s.featured ? '' : cardHTML(s, i)).filter(Boolean).join('')
         || '<div class="soon">Нет прочих сервисов.</div>';
     }
-    function renderAll() { renderSvc(); renderFeat(); }
+    window.acGrow = (t) => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; };
+    function renderAll() { renderSvc(); renderFeat(); document.querySelectorAll('.ch-desync').forEach(acGrow); }
     function saveServices() {
       scrapeSvc();
       svcMsg2.className = 'msg'; svcMsg2.textContent = 'Сохраняю + рестарт xray/zapret…';
@@ -708,6 +732,10 @@
       if (!found) { name = 'overview'; sections.forEach(s => s.hidden = s.dataset.sec !== name); }
       navItems.forEach(n => n.classList.toggle('active', n.dataset.nav === name));
       try { localStorage.setItem('gw-sec', name); } catch (e) {}
+      // поля стратегий, отрендеренные в скрытой секции, имели scrollHeight=0 —
+      // пересчитываем авто-высоту, когда секция стала видимой
+      const active = [...sections].find(s => s.dataset.sec === name);
+      if (active && window.acGrow) active.querySelectorAll('.ch-desync').forEach(acGrow);
     }
     navItems.forEach(n => n.addEventListener('click', () => show(n.dataset.nav)));
     show((() => { try { return localStorage.getItem('gw-sec'); } catch (e) { return null; } })() || 'overview');
