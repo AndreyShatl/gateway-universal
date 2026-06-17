@@ -142,6 +142,9 @@
   .ch-desync { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
                line-height:1.45; resize:vertical; white-space:pre-wrap; word-break:break-all; overflow:hidden; }
   @media (max-width:900px){ .zap-wrap{ flex-direction:column; } .zap-strats{ width:100%; max-height:none; } }
+  .save-bar { display:flex; align-items:center; gap:12px; margin:10px 0 4px; flex-wrap:wrap; }
+  .save-btn { width:auto; padding:8px 20px; font-weight:600; }
+  .save-bar .svc-msg { margin:0; }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -629,8 +632,13 @@
       const search = s.featured
         ? `<div class="frame" style="margin-top:14px"><div class="frame-t">🔍 Поиск рабочих стратегий для ${esc(s.name)}</div>${scanWidgetHTML(s.id, false)}</div>`
         : '';
+      // Кнопка сохранения прямо в карточке (для featured — во всех режимах).
+      const save = s.featured
+        ? `<div class="save-bar"><button class="save-btn" onclick="saveSvc(${i})">💾 Сохранить</button><span class="svc-msg msg" data-svcmsg="${i}"></span></div>`
+        : '';
       return `<div class="strat" data-svc="${i}">
         ${head}
+        ${save}
         ${domBlock}
         ${body}
         ${search}
@@ -674,8 +682,9 @@
       if ((target === 'tcp' || target === 'both') && st.tcp) { setCh('tcp', st.tcp, '80,443'); done.push('TCP'); }
       if ((target === 'udp' || target === 'both') && st.udp) { setCh('udp', st.udp, '443'); done.push('UDP'); }
       if (needRender) renderAll(); // нужен только если канала ещё не было в DOM
-      svcMsg2.className = 'msg good';
-      svcMsg2.textContent = '✓ «' + st.name + '» → ' + done.join('+') + ' — нажми «Сохранить»';
+      const m = svcMsgEl(i);
+      m.className = 'msg good';
+      m.textContent = '✓ «' + st.name + '» → ' + done.join('+') + ' — нажмите «Сохранить»';
     };
     function renderFeat() {
       FEATURED.forEach(id => {
@@ -691,16 +700,21 @@
     }
     window.acGrow = (t) => { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; };
     function renderAll() { renderSvc(); renderFeat(); document.querySelectorAll('.ch-desync').forEach(acGrow); }
-    function saveServices() {
+    const svcMsgEl = (i) => document.querySelector(`[data-svcmsg="${i}"]`) || svcMsg2;
+    function saveServices(msgEl) {
       scrapeSvc();
-      svcMsg2.className = 'msg'; svcMsg2.textContent = 'Сохраняю + рестарт xray/zapret…';
+      const m = msgEl || svcMsg2;
+      m.className = 'msg'; m.textContent = 'Сохраняю + рестарт xray/zapret…';
       return fetch('/api/zapret/services', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(svcState) })
         .then(async r => { const d = await r.json();
-          if (r.ok) { svcMsg2.className = 'msg good'; svcMsg2.textContent = '✓ применено'; loadServices(); }
-          else { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ ' + (d.error || 'ошибка'); }
-        }).catch(() => { svcMsg2.className = 'msg bad'; svcMsg2.textContent = '✗ сеть'; });
+          if (r.ok) { m.className = 'msg good'; m.textContent = '✓ сохранено и применено'; }
+          else { m.className = 'msg bad'; m.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { m.className = 'msg bad'; m.textContent = '✗ сеть'; });
     }
-    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderAll(); saveServices(); };
+    window.saveSvc = (i) => saveServices(svcMsgEl(i));
+    // переключение режима НЕ применяется мгновенно — нужно нажать «Сохранить»
+    window.svcMode = (i, m) => { scrapeSvc(); svcState[i].mode = m; renderAll();
+      const el = svcMsgEl(i); el.className = 'msg'; el.textContent = 'изменено — нажмите «Сохранить», чтобы применить'; };
     function loadServices() {
       fetch('/api/zapret/services').then(r => r.json()).then(d => { svcState = d.services || []; renderAll(); });
     }
