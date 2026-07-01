@@ -1,72 +1,25 @@
-# Игровые сервисы (31 запись)
-# Способ обхода: VLESS прокси
-# geosites: steam, epicgames
+# Игровые сервисы (через VPS) — только конкретные игры, заблокированные в РФ.
+# Платформы/лаунчеры (Steam, Epic, EA, Riot, Blizzard, Ubisoft, консоли) убраны
+# 2026-07-01: Steam качается напрямую, прочие платформы через VPS не гоним.
+# Способ обхода: VLESS прокси.
 
-# Steam / Valve
-geosite:steam
-steampowered.com
-steamcommunity.com
-steamstatic.com
-steamcontent.com
-steam-chat.com
-valvesoftware.com
-
-# Epic Games
-geosite:epicgames
-epicgames.com
-epicgames.dev
-unrealengine.com
-fortnite.com
-easyanticheat.net
-
-# EA
-ea.com
-origin.com
-
-# Riot Games
-riot.games
-riotgames.com
-leagueoflegends.com
-valorant.com
-playvalorant.com
-
-# Blizzard / Activision
-blizzard.com
-blizzard.net
-battle.net
-activision.com
-callofduty.com
-
-# Other
-ubisoft.com
-ubi.com
-rockstargames.com
-take2games.com
-minecraft.net
-mojang.com
-
-# Консоли
-xbox.com
-xboxlive.com
-playstation.com
-playstation.net
-sonyentertainmentnetwork.com
-nintendo.com
-nintendo.net
-
-# --- доположено при переходе на txt-источник (T6, 2026-06-10) ---
-atoma.cloud
+# Darktide / Warhammer (Fatshark, Games Workshop)
 darktide.com
 fatshark.se
 fatsharkgames.com
+warhammer.com
+gamesworkshop.com
+
+# FBC: Firebreak (Remedy)
 fbcfirebreak.com
 firebreak.firstlook.gg
 firstlook.gg
-gamesworkshop.com
+remedy.helpshift.com
+remedygames.com
+
+# Игровые бэкенды, нужные этим играм
+atoma.cloud
 nakamacloud.io
 playfab.com
 playfabapi.com
-remedy.helpshift.com
-remedygames.com
 unigine.com
-warhammer.com
