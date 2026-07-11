@@ -1,0 +1,96 @@
+# OSINT-сервисы (через VPS) — часто гео-ограничены/режутся из РФ.
+# Способ обхода: VLESS прокси. Только легитимные open-source-intelligence инструменты.
+
+# --- Инфраструктура / хосты / порты (internet scanning) ---
+shodan.io
+censys.io
+censys.com
+fofa.info
+zoomeye.org
+zoomeye.hk
+binaryedge.io
+greynoise.io
+netlas.io
+criminalip.io
+fullhunt.io
+onyphe.io
+leakix.net
+publicwww.com
+hackertarget.com
+spyse.com
+quake.360.net
+
+# --- Домены / DNS / сертификаты / WHOIS ---
+securitytrails.com
+domaintools.com
+whoisxmlapi.com
+whoxy.com
+viewdns.info
+robtex.com
+dnsdumpster.com
+crt.sh
+subdomainfinder.c99.nl
+builtwith.com
+whatcms.org
+dnslytics.com
+
+# --- URL / файлы / threat intel ---
+urlscan.io
+virustotal.com
+abuseipdb.com
+otx.alienvault.com
+pulsedive.com
+maltiverse.com
+threatminer.org
+hybrid-analysis.com
+any.run
+joesecurity.org
+abuse.ch
+threatbook.io
+
+# --- IP / сети / геолокация ---
+ipinfo.io
+bgp.he.net
+wigle.net
+maxmind.com
+
+# --- Утечки / пароли / email ---
+haveibeenpwned.com
+dehashed.com
+intelx.io
+leakcheck.io
+leak-lookup.com
+snusbase.com
+breachdirectory.org
+hunter.io
+emailrep.io
+epieos.com
+osint.industries
+predictasearch.com
+
+# --- Поиск людей / никнеймы / соцсети ---
+maltego.com
+spiderfoot.net
+sociallinks.io
+lampyre.io
+social-searcher.com
+namechk.com
+knowem.com
+whatsmyname.app
+thatsthem.com
+spokeo.com
+beenverified.com
+truecaller.com
+inteltechniques.com
+osintframework.com
+
+# --- Изображения / лица / гео ---
+tineye.com
+pimeyes.com
+geospy.ai
+picarta.ai
+
+# --- Транспорт (гео-OSINT) ---
+marinetraffic.com
+adsbexchange.com
+flightradar24.com
