@@ -1,0 +1,48 @@
+# Сервисы продажи прокси (через VPS) — их сайты и личные кабинеты часто
+# недоступны/режутся из РФ. Способ обхода: VLESS прокси.
+# Пользовательские домены можно добавлять и через UI (/etc/gateway/domains).
+
+# Международные (residential / datacenter / mobile)
+brightdata.com
+oxylabs.io
+smartproxy.com
+decodo.com
+soax.com
+iproyal.com
+webshare.io
+proxy-cheap.com
+proxyempire.io
+netnut.io
+rayobyte.com
+packetstream.io
+infatica.io
+froxy.com
+asocks.com
+geonode.com
+proxyscrape.com
+ipburger.com
+stormproxies.com
+squidproxies.com
+myprivateproxy.net
+proxymesh.com
+nodemaven.com
+lunaproxy.com
+pyproxy.com
+abcproxy.com
+922proxy.com
+ipipgo.com
+thordata.com
+
+# СНГ / RU-ориентированные
+proxy-seller.com
+proxy-seller.io
+proxy-seller.me
+proxy6.net
+proxyline.net
+proxys.io
+youproxy.io
+fineproxy.org
+mobileproxy.space
+ltesocks.io
+proxy-store.com
+advanced.name
