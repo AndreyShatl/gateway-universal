@@ -30,8 +30,13 @@ sed -i "s|^server_names = .*|server_names = ${DNSCRYPT_SERVERS}|" "$TOML"
 
 echo "== socket -> 127.0.0.1:53 + ${GW_IP}:53 =="
 mkdir -p /etc/systemd/system/dnscrypt-proxy.socket.d
+# FreeBind: бинд <LAN-IP>:53 возможен ДО того, как интерфейс получил этот адрес
+# (иначе при загрузке сокет падает — IP ещё не назначен). БЕЗ network-online:
+# сокеты активируются рано (sockets.target), зависимость от позднего таргета
+# ломает их старт при загрузке.
 cat > /etc/systemd/system/dnscrypt-proxy.socket.d/override.conf <<OVR
 [Socket]
+FreeBind=true
 ListenStream=
 ListenDatagram=
 ListenStream=127.0.0.1:53
