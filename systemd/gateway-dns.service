@@ -1,0 +1,13 @@
+[Unit]
+Description=Gateway DNS redirect to local dnscrypt-proxy (encrypted DNS)
+After=network-online.target dnscrypt-proxy.service
+Wants=network-online.target
+Requires=dnscrypt-proxy.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-dns-redirect.sh __LAN__
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
