@@ -14,16 +14,26 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
 	"gateway-detector/prober"
+	"gateway-detector/watcher"
 )
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "probe" {
-		fmt.Fprintln(os.Stderr, "usage: gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]")
-		os.Exit(2)
+	if len(os.Args) < 2 {
+		usage()
+	}
+	switch os.Args[1] {
+	case "probe":
+		// ниже
+	case "watch":
+		runWatch()
+		return
+	default:
+		usage()
 	}
 	fs := flag.NewFlagSet("probe", flag.ExitOnError)
 	port := fs.Int("port", 443, "порт цели")
@@ -39,4 +49,24 @@ func main() {
 	})
 	b, _ := json.MarshalIndent(res, "", "  ")
 	fmt.Println(string(b))
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]")
+	os.Exit(2)
+}
+
+func runWatch() {
+	fs := flag.NewFlagSet("watch", flag.ExitOnError)
+	iface := fs.String("iface", "", "WAN-интерфейс для сниффинга (обязателен)")
+	vps := fs.String("vps", "", "IP VPS — исключить трафик туннеля")
+	apply := fs.Bool("apply", false, "применять (иначе dry-run: только лог)")
+	fs.Parse(os.Args[2:])
+	if *iface == "" {
+		usage()
+	}
+	w := &watcher.Watcher{Iface: *iface, VPSIP: *vps, DryRun: !*apply}
+	if err := w.Run(); err != nil {
+		log.Fatalf("watch: %v", err)
+	}
 }
