@@ -59,6 +59,7 @@ type server struct {
 	overrides      string // (устар.) оверрайды стратегий
 	servicesFile   string // /etc/gateway/zapret-services.json (динамические сервисы)
 	connsFile      string // /etc/gateway/connections.json (сохранённые VPS-хосты)
+	autorouteFile  string // /etc/gateway/autoroute.json (авто-обход: список + тумблер)
 	ver            string // версия сборки (mtime бинаря) — для автоперезагрузки вкладки
 
 	mu       sync.Mutex
@@ -78,6 +79,7 @@ func main() {
 	overrides := flag.String("zapret-overrides", "/etc/gateway/zapret-overrides.env", "(устар.) файл оверрайдов")
 	servicesFile := flag.String("zapret-services", "/etc/gateway/zapret-services.json", "файл сервисов zapret")
 	connsFile := flag.String("connections", "/etc/gateway/connections.json", "файл сохранённых VPS-хостов")
+	autorouteFile := flag.String("autoroute", "/etc/gateway/autoroute.json", "файл авто-обхода (список + тумблер)")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -88,7 +90,7 @@ func main() {
 		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
 		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
 		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
-		connsFile: *connsFile,
+		connsFile: *connsFile, autorouteFile: *autorouteFile,
 	}
 	s.ver = buildVersion()
 	if err := s.loadOrInitPassword(*conf); err != nil {
@@ -110,6 +112,7 @@ func main() {
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/connections", s.requireAuth(s.handleConnections))
+	mux.HandleFunc("/api/autoroute", s.requireAuth(s.handleAutoRoute))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
 	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))
