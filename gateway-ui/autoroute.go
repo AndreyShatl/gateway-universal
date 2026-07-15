@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -8,7 +9,63 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
+
+// applier: применяем авто-обход БЕЗ рестарта xray.
+//   - выделенный inbound autoroute-in :12347 (в шаблоне) всегда идёт в proxy-mux;
+//   - iptables редиректит клиентский tcp 80,443 к dst из ipset gw_autoroute → :12347;
+//   - добавление адреса = ipset add (мгновенно). Домены резолвятся в IP (dnscrypt).
+const (
+	autorouteIPSet = "gw_autoroute"
+	autorouteLAN   = "192.168.0.0/16"
+	autoroutePort  = "12347"
+)
+
+// ensureAutorouteInfra — ipset + iptables-редирект (идемпотентно).
+func (s *server) ensureAutorouteInfra() {
+	runCmd("ipset", "create", autorouteIPSet, "hash:net", "family", "inet", "-exist")
+	match := []string{"-s", autorouteLAN, "-p", "tcp", "-m", "multiport", "--dports", "80,443",
+		"-m", "set", "--match-set", autorouteIPSet, "dst", "-j", "REDIRECT", "--to-ports", autoroutePort}
+	if _, err := runCmd("iptables", append([]string{"-t", "nat", "-C", "PREROUTING"}, match...)...); err != nil {
+		runCmd("iptables", append([]string{"-t", "nat", "-I", "PREROUTING", "1"}, match...)...)
+	}
+}
+
+// syncAutoroute — привести ipset в соответствие со списком (или очистить, если выкл).
+func (s *server) syncAutoroute(a autoRoute) {
+	if !a.Enabled {
+		runCmd("ipset", "flush", autorouteIPSet)
+		return
+	}
+	s.ensureAutorouteInfra()
+	runCmd("ipset", "flush", autorouteIPSet)
+	for _, e := range a.Entries {
+		if strings.HasPrefix(e, "geosite:") {
+			continue // geosite не резолвится в IP — только через xray-роутинг (не наш путь)
+		}
+		if net.ParseIP(e) != nil || strings.Contains(e, "/") {
+			runCmd("ipset", "add", autorouteIPSet, e, "-exist")
+			continue
+		}
+		for _, ip := range resolveV4(e) {
+			runCmd("ipset", "add", autorouteIPSet, ip, "-exist")
+		}
+	}
+}
+
+func resolveV4(host string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	addrs, _ := net.DefaultResolver.LookupHost(ctx, host)
+	var v4 []string
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+			v4 = append(v4, a)
+		}
+	}
+	return v4
+}
 
 // Авто-обход (T41): отдельный список адресов через VPS + тумблер.
 // Пока только визуал/хранилище — детекция недоступности и применение к
@@ -103,6 +160,7 @@ func (s *server) handleAutoRoute(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
+		s.syncAutoroute(a) // применить на лету (ipset), без рестарта xray
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": a.Enabled, "entries": a.Entries})
 
 	default:

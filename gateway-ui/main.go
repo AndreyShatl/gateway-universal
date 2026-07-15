@@ -135,6 +135,9 @@ func main() {
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+	// Восстановить авто-обход после (пере)загрузки: ipset/iptables не persistent,
+	// gateway-ui сам приводит их к сохранённому состоянию autoroute.json.
+	go s.syncAutoroute(s.readAutoRoute())
 	log.Printf("gateway-ui слушает %s", *listen)
 	log.Fatal(srv.ListenAndServe())
 }

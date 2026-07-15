@@ -217,7 +217,7 @@ apt-get update -qq
 APT_PKGS=(
     curl wget ca-certificates gettext-base
     iptables iproute2 iputils-ping dnsutils
-    gawk sed grep procps jq
+    gawk sed grep procps jq ipset
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
     APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)

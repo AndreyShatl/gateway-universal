@@ -124,6 +124,21 @@
       "sniffing": {
         "enabled": false
       }
+    },
+    {
+      "tag": "autoroute-in",
+      "port": 12347,
+      "listen": "0.0.0.0",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"],
+        "routeOnly": true
+      }
     }
   ],
   "outbounds": [
@@ -214,6 +229,14 @@
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "type": "field",
+        "comment": "Авто-обход: трафик, попавший в ipset gw_autoroute (iptables → :12347), всегда через VPS",
+        "inboundTag": [
+          "autoroute-in"
+        ],
+        "outboundTag": "proxy-mux"
+      },
       {
         "type": "field",
         "inboundTag": [
