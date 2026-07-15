@@ -145,6 +145,14 @@
   .save-bar { display:flex; align-items:center; gap:12px; margin:10px 0 4px; flex-wrap:wrap; }
   .save-btn { width:auto; padding:8px 20px; font-weight:600; }
   .save-bar .svc-msg { margin:0; }
+  /* тумблер-переключатель */
+  .switch { position:relative; display:inline-block; width:48px; height:26px; flex-shrink:0; }
+  .switch input { opacity:0; width:0; height:0; }
+  .switch .slider { position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:26px; transition:.2s; }
+  .switch .slider:before { content:""; position:absolute; height:20px; width:20px; left:3px; top:3px;
+                           background:#fff; border-radius:50%; transition:.2s; }
+  .switch input:checked + .slider { background:var(--accent); }
+  .switch input:checked + .slider:before { transform:translateX(22px); }
 
   @media (max-width:760px) {
     .app { flex-direction:column; }
@@ -169,6 +177,7 @@
       <a data-nav="overview">Обзор</a>
       <a data-nav="connection">Подключение</a>
       <a data-nav="domains">Домены</a>
+      <a data-nav="autoroute">Авто-обход</a>
       <div class="nav-grp">Сервисы</div>
       <a data-nav="youtube">▸ YouTube</a>
       <a data-nav="discord">▸ Discord</a>
@@ -228,6 +237,35 @@
             <summary>Списки по умолчанию (<span id="defCount">…</span>) — идут через VPS</summary>
             <ul id="defList" class="list ro"></ul>
           </details>
+        </div>
+      </section>
+
+      <section data-sec="autoroute">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h2 style="margin:0">Авто-обход <span class="st-badge">beta</span></h2>
+            <label class="switch" title="Включить авто-обход">
+              <input type="checkbox" id="arEnabled"><span class="slider"></span>
+            </label>
+          </div>
+          <div class="muted" style="margin-top:8px">Отдельный список адресов, которые идут через VPS — <b>не трогает основной</b>.
+            Когда включено, недоступные сайты/игровые сервера могут добавляться сюда автоматически (логика детекции — следующим этапом),
+            плюс можно добавлять домены и IP вручную «на лету».</div>
+          <div id="arState" class="msg" style="margin-top:8px"></div>
+        </div>
+
+        <div class="card">
+          <h2>Добавить вручную</h2>
+          <div class="muted">Домен (<code>example.com</code>, <code>geosite:тег</code>) или IP/подсеть (<code>1.2.3.4</code>, <code>1.2.3.0/24</code>). Пачкой — по одному в строке или через запятую.</div>
+          <textarea id="arInput" rows="2" placeholder="blocked-game.com&#10;185.60.216.0/22"></textarea>
+          <div class="row"><button id="arAdd">Добавить</button></div>
+          <div id="arMsg" class="msg"></div>
+        </div>
+
+        <div class="card">
+          <h2>Список авто-обхода (<span id="arCount">0</span>)</h2>
+          <div class="muted">Домены и IP, добавленные сюда (вручную или автоматически). Можно удалять.</div>
+          <ul id="arList" class="list"></ul>
         </div>
       </section>
 
@@ -824,6 +862,48 @@
       for (const d of list) { const li = document.createElement('li'); li.textContent = d; defList.append(li); }
     }
     fetch('/api/domains').then(r => r.json()).then(d => { renderDomains(d.domains); renderDefaults(d.defaults); });
+
+    // --- Авто-обход (отдельный список + тумблер) ---
+    const arEnabled = document.getElementById('arEnabled');
+    const arState = document.getElementById('arState');
+    const arInput = document.getElementById('arInput');
+    const arMsg = document.getElementById('arMsg');
+    const arList = document.getElementById('arList');
+    const arCount = document.getElementById('arCount');
+    const isIP = v => /^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v);
+    function renderAutoroute(d) {
+      arEnabled.checked = !!d.enabled;
+      arState.className = 'msg ' + (d.enabled ? 'good' : '');
+      arState.textContent = d.enabled ? '✓ включено — список применяется к VPS-роутингу' : 'выключено — список не применяется';
+      const entries = d.entries || [];
+      arCount.textContent = entries.length;
+      arList.innerHTML = '';
+      for (const e of entries) {
+        const li = document.createElement('li');
+        const badge = isIP(e) ? 'IP' : 'домен';
+        li.innerHTML = `<span><span class="st-badge">${badge}</span> ${esc(e)}</span>`;
+        const del = document.createElement('button');
+        del.className = 'del'; del.textContent = '×'; del.title = 'Удалить';
+        del.onclick = () => arPost({ action:'remove', value:e });
+        li.append(del);
+        arList.append(li);
+      }
+      if (!entries.length) arList.innerHTML = '<li class="muted">пусто</li>';
+    }
+    function arPost(params) {
+      return fetch('/api/autoroute', { method:'POST', body:new URLSearchParams(params) })
+        .then(async r => { const d = await r.json();
+          if (!r.ok) { arMsg.className='msg bad'; arMsg.textContent='✗ '+(d.error||'ошибка'); return; }
+          renderAutoroute(d);
+        }).catch(() => { arMsg.className='msg bad'; arMsg.textContent='✗ сеть'; });
+    }
+    arEnabled.onchange = () => arPost({ action:'enable', on: arEnabled.checked });
+    document.getElementById('arAdd').onclick = () => {
+      const v = arInput.value.trim(); if (!v) return;
+      arMsg.className='msg'; arMsg.textContent='Добавляю…';
+      arPost({ action:'add', value:v }).then(() => { arInput.value=''; if (arMsg.textContent==='Добавляю…'){arMsg.className='msg good';arMsg.textContent='✓ добавлено';} });
+    };
+    fetch('/api/autoroute').then(r => r.json()).then(renderAutoroute).catch(() => {});
 
     // --- Обзор: статус + exit IP + smoke ---
     const svcEl = document.getElementById('svc');
