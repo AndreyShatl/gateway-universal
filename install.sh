@@ -565,8 +565,12 @@ if [[ -d "$SCRIPT_DIR/detector" ]] && command -v go >/dev/null 2>&1; then
     apt-get install -y -qq libpcap-dev >/dev/null 2>&1 || true
     if ( cd "$SCRIPT_DIR/detector" && CGO_ENABLED=1 go build -o /opt/gateway-detector . ) 2>/dev/null; then
         cp "$SCRIPT_DIR/systemd/gateway-detector.service" /etc/systemd/system/gateway-detector.service
+        # ночная перепроверка списка авто-обхода (снятие разблокированных)
+        cp "$SCRIPT_DIR/systemd/gateway-recheck.service" /etc/systemd/system/gateway-recheck.service
+        cp "$SCRIPT_DIR/systemd/gateway-recheck.timer" /etc/systemd/system/gateway-recheck.timer
         systemctl daemon-reload
-        ok "gateway-detector установлен (управляется тумблером в UI)"
+        systemctl enable --now gateway-recheck.timer >/dev/null 2>&1 || true
+        ok "gateway-detector установлен (управляется тумблером в UI); ночная перепроверка в 04:00"
     else
         warn "сборка gateway-detector не удалась (нужен gcc + libpcap-dev) — авто-детект недоступен"
     fi

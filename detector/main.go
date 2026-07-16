@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"gateway-detector/applier"
@@ -35,6 +36,9 @@ func main() {
 		// ниже
 	case "watch":
 		runWatch()
+		return
+	case "recheck":
+		runRecheck()
 		return
 	default:
 		usage()
@@ -56,7 +60,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]")
+	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]")
 	os.Exit(2)
 }
 
@@ -94,7 +98,7 @@ func runWatch() {
 		switch res.Verdict {
 		case prober.Blocked:
 			if *apply {
-				if applier.Apply(target, c.Signal) {
+				if applier.Apply(target, c.Signal, port) {
 					log.Printf("✅ добавлен в авто-обход: %s (dst=%s)", target, c.DstIP)
 				} else {
 					log.Printf("… %s подтверждён, но уже в списке / тумблер выкл", target)
@@ -110,6 +114,113 @@ func runWatch() {
 	if err := w.Run(); err != nil {
 		log.Fatalf("watch: %v", err)
 	}
+}
+
+// runRecheck — ночная перепроверка списка авто-обхода: пробим каждую запись
+// напрямую vs через VPS. Если напрямую снова работает (блок снят) ДВА прогона
+// подряд — убираем из списка. Пул воркеров: большой список — минуты, не часы.
+func runRecheck() {
+	fs := flag.NewFlagSet("recheck", flag.ExitOnError)
+	socks := fs.String("socks", "127.0.0.1:1080", "VPS-socks5 для перепроверки")
+	workers := fs.Int("workers", 30, "число параллельных проб")
+	timeout := fs.Duration("timeout", 6*time.Second, "таймаут на фазу пробы")
+	apply := fs.Bool("apply", false, "реально удалять (иначе тень: только лог)")
+	fs.Parse(os.Args[2:])
+
+	s, err := applier.Load()
+	if err != nil {
+		log.Fatalf("recheck: чтение списка: %v", err)
+	}
+	if !s.Enabled {
+		log.Printf("recheck: авто-обход выключен — пропускаю")
+		return
+	}
+	// пробуем только то, что можно проверить: домен или одиночный IP (не geosite/CIDR)
+	var todo []applier.Entry
+	for _, e := range s.Entries {
+		if strings.HasPrefix(e.Addr, "geosite:") || strings.Contains(e.Addr, "/") {
+			continue
+		}
+		todo = append(todo, e)
+	}
+	log.Printf("recheck: записей всего=%d, проверяю=%d, воркеров=%d, apply=%v", len(s.Entries), len(todo), *workers, *apply)
+	start := time.Now()
+
+	type res struct {
+		addr string
+		ok   bool // прямая проба прошла (блок снят)
+	}
+	jobs := make(chan applier.Entry)
+	out := make(chan res)
+	var wg sync.WaitGroup
+	for i := 0; i < *workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for e := range jobs {
+				port := e.DPort
+				if port == 0 {
+					port = 443
+				}
+				sni := ""
+				if net.ParseIP(e.Addr) == nil {
+					sni = e.Addr // домен -> TLS по имени
+				}
+				r := prober.Probe(e.Addr, port, sni, prober.Config{
+					SocksAddr: *socks, Timeout: *timeout, TLS: sni != "" || port == 443,
+				})
+				out <- res{addr: e.Addr, ok: r.Verdict == prober.OK}
+			}
+		}()
+	}
+	go func() {
+		for _, e := range todo {
+			jobs <- e
+		}
+		close(jobs)
+	}()
+	go func() { wg.Wait(); close(out) }()
+
+	// текущие счётчики clean по addr
+	cur := map[string]int{}
+	for _, e := range s.Entries {
+		cur[e.Addr] = e.Clean
+	}
+	remove := map[string]bool{}
+	clean := map[string]int{}
+	var okCnt, stillCnt int
+	for r := range out {
+		if r.ok {
+			okCnt++
+			c := cur[r.addr] + 1
+			if c >= 2 {
+				remove[r.addr] = true
+				log.Printf("🗑  %s — разблокирован (чисто 2 раза подряд)%s", r.addr, dryTag(*apply))
+			} else {
+				clean[r.addr] = c
+				log.Printf("🟢 %s — сейчас работает напрямую (1/2, оставляю)", r.addr)
+			}
+		} else {
+			stillCnt++
+			if cur[r.addr] > 0 {
+				clean[r.addr] = 0 // блок вернулся — сброс серии
+			}
+		}
+	}
+
+	if *apply {
+		kept := applier.UpdateClean(remove, clean)
+		applier.Sync(kept) // ресинк ipset под оставшийся список
+	}
+	log.Printf("recheck: готово за %s — снято=%d, ещё блок=%d, помечено-к-снятию=%d",
+		time.Since(start).Truncate(time.Second), len(remove), stillCnt, okCnt-len(remove))
+}
+
+func dryTag(apply bool) string {
+	if apply {
+		return ""
+	}
+	return " [тень]"
 }
 
 func short(s string) string {
