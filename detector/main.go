@@ -94,7 +94,7 @@ func runWatch() {
 		switch res.Verdict {
 		case prober.Blocked:
 			if *apply {
-				if applier.Apply(target) {
+				if applier.Apply(target, c.Signal) {
 					log.Printf("✅ добавлен в авто-обход: %s (dst=%s)", target, c.DstIP)
 				} else {
 					log.Printf("… %s подтверждён, но уже в списке / тумблер выкл", target)

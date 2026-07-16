@@ -25,8 +25,35 @@ const (
 )
 
 type store struct {
-	Enabled bool     `json:"enabled"`
-	Entries []string `json:"entries"`
+	Enabled bool    `json:"enabled"`
+	Entries []entry `json:"entries"`
+}
+
+// entry — адрес + метаданные (когда/чем добавлен). Совместимо со схемой gateway-ui.
+type entry struct {
+	Addr   string `json:"addr"`
+	Added  string `json:"added,omitempty"`
+	Source string `json:"source,omitempty"`
+}
+
+// UnmarshalJSON — принимает и объект, и старую строку (миграция формата).
+func (e *entry) UnmarshalJSON(b []byte) error {
+	b = []byte(strings.TrimSpace(string(b)))
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		e.Addr, e.Source = s, "legacy"
+		return nil
+	}
+	type raw entry
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	*e = entry(r)
+	return nil
 }
 
 // EnsureInfra — ipset + iptables-редирект (идемпотентно). Дублирует то, что делает
@@ -50,9 +77,9 @@ func ensureRule(table string, spec []string) {
 	}
 }
 
-// Apply — добавить цель (домен или IP) в авто-обход. Возвращает true, если реально
-// добавлено (не было раньше и авто-обход включён).
-func Apply(target string) bool {
+// Apply — добавить цель (домен или IP) в авто-обход. source — чем поймано
+// (имя сигнала). Возвращает true, если реально добавлено (не было раньше и вкл).
+func Apply(target, source string) bool {
 	f, err := os.OpenFile(File, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return false
@@ -68,11 +95,15 @@ func Apply(target string) bool {
 		return false // тумблер выключен — не трогаем
 	}
 	for _, e := range s.Entries {
-		if e == target {
+		if e.Addr == target {
 			return false // уже есть
 		}
 	}
-	s.Entries = append(s.Entries, target)
+	s.Entries = append(s.Entries, entry{
+		Addr:   target,
+		Added:  time.Now().UTC().Format(time.RFC3339),
+		Source: source,
+	})
 	b, _ := json.MarshalIndent(s, "", "  ")
 	tmp := File + ".tmp"
 	if os.WriteFile(tmp, b, 0o644) == nil {
