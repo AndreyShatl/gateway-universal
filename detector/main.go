@@ -84,9 +84,13 @@ func runWatch() {
 		if target == "" {
 			target = c.DstIP // без SNI (syn-timeout) — проверяем по IP
 		}
+		port := c.Port
+		if port == 0 {
+			port = 443
+		}
 		// с SNI — TLS-рукопожатие (DPI режет по имени); без SNI — только TCP-коннект
-		// (блок по IP: SYN дропается, до TLS дело не доходит).
-		res := prober.Probe(target, 443, c.SNI, prober.Config{SocksAddr: *socks, Timeout: 6 * time.Second, TLS: c.SNI != ""})
+		// (блок по IP: SYN дропается, до TLS дело не доходит) на реальном порту.
+		res := prober.Probe(target, port, c.SNI, prober.Config{SocksAddr: *socks, Timeout: 6 * time.Second, TLS: c.SNI != ""})
 		switch res.Verdict {
 		case prober.Blocked:
 			if *apply {
