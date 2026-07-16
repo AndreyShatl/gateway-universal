@@ -127,14 +127,20 @@ func runRecheck() {
 	apply := fs.Bool("apply", false, "реально удалять (иначе тень: только лог)")
 	fs.Parse(os.Args[2:])
 
+	cfg := readRecheckCfg()
+	if !cfg.Enabled {
+		log.Printf("recheck: перепроверка выключена в настройках — пропускаю")
+		return
+	}
+	if cfg.Workers > 0 {
+		*workers = cfg.Workers
+	}
 	s, err := applier.Load()
 	if err != nil {
 		log.Fatalf("recheck: чтение списка: %v", err)
 	}
-	if !s.Enabled {
-		log.Printf("recheck: авто-обход выключен — пропускаю")
-		return
-	}
+	// работаем независимо от тумблера авто-обхода: список чистим всегда,
+	// ipset пересобираем только если авто-обход включён (иначе он и так пуст).
 	// пробуем только то, что можно проверить: домен или одиночный IP (не geosite/CIDR)
 	var todo []applier.Entry
 	for _, e := range s.Entries {
@@ -210,10 +216,54 @@ func runRecheck() {
 
 	if *apply {
 		kept := applier.UpdateClean(remove, clean)
-		applier.Sync(kept) // ресинк ipset под оставшийся список
+		if s.Enabled {
+			applier.Sync(kept) // ресинк ipset только когда авто-обход включён
+		}
 	}
+	dur := time.Since(start)
 	log.Printf("recheck: готово за %s — снято=%d, ещё блок=%d, помечено-к-снятию=%d",
-		time.Since(start).Truncate(time.Second), len(remove), stillCnt, okCnt-len(remove))
+		dur.Truncate(time.Second), len(remove), stillCnt, okCnt-len(remove))
+	if *apply {
+		writeRecheckStats(len(todo), len(remove), okCnt-len(remove), int(dur.Seconds()))
+	}
+}
+
+const recheckFile = "/etc/gateway/recheck.json"
+
+type recheckCfg struct {
+	Enabled bool   `json:"enabled"`
+	Time    string `json:"time"`
+	Days    string `json:"days"`
+	Workers int    `json:"workers"`
+	// stats:
+	LastRun      string `json:"last_run,omitempty"`
+	LastChecked  int    `json:"last_checked,omitempty"`
+	LastRemoved  int    `json:"last_removed,omitempty"`
+	LastPending  int    `json:"last_pending,omitempty"`
+	LastDuration int    `json:"last_duration_sec,omitempty"`
+}
+
+// readRecheckCfg — конфиг перепроверки (дефолт: включена). Отсутствие файла =
+// включена (обратная совместимость с уже стоящим таймером).
+func readRecheckCfg() recheckCfg {
+	c := recheckCfg{Enabled: true, Workers: 30}
+	if data, err := os.ReadFile(recheckFile); err == nil {
+		json.Unmarshal(data, &c)
+	}
+	return c
+}
+
+// writeRecheckStats — обновить поля статистики, сохранив конфиг (read-modify-write).
+func writeRecheckStats(checked, removed, pending, durSec int) {
+	c := readRecheckCfg()
+	c.LastRun = time.Now().UTC().Format(time.RFC3339)
+	c.LastChecked, c.LastRemoved, c.LastPending, c.LastDuration = checked, removed, pending, durSec
+	if b, err := json.MarshalIndent(c, "", "  "); err == nil {
+		tmp := recheckFile + ".tmp"
+		if os.WriteFile(tmp, b, 0o644) == nil {
+			os.Rename(tmp, recheckFile)
+		}
+	}
 }
 
 func dryTag(apply bool) string {

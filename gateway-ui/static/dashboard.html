@@ -62,6 +62,10 @@
   .row button { padding:9px 16px; border:0; border-radius:8px; background:var(--accent);
                 color:var(--on-accent); font-weight:600; cursor:pointer; }
   .row button:hover { background:var(--accent-h); }
+  .subtab { padding:7px 16px; border:0; border-radius:8px; background:var(--input-bg);
+            color:var(--muted); font-weight:600; cursor:pointer; font-size:13px; }
+  .subtab.active { background:var(--accent); color:var(--on-accent); }
+  button.secondary { background:var(--input-bg) !important; color:var(--muted) !important; }
   .msg { font-size:13px; margin-top:8px; min-height:16px; }
   .msg.good { color:var(--good-tx); } .msg.bad { color:var(--bad-tx); }
   .list { list-style:none; padding:0; margin:12px 0 0; max-height:280px; overflow:auto; }
@@ -241,6 +245,12 @@
       </section>
 
       <section data-sec="autoroute">
+        <div class="row" id="arSubnav" style="gap:6px; margin-bottom:12px">
+          <button class="subtab active" data-sub="list">Список</button>
+          <button class="subtab" data-sub="recheck">Перепроверка</button>
+        </div>
+
+        <div data-subpane="list">
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:center">
             <h2 style="margin:0">Авто-обход <span class="st-badge">beta</span></h2>
@@ -284,6 +294,50 @@
           </div>
           <ul id="arList" class="list"></ul>
         </div>
+        </div><!-- /subpane list -->
+
+        <div data-subpane="recheck" hidden>
+          <div class="card">
+            <div class="row" style="justify-content:space-between; align-items:center">
+              <h2 style="margin:0">Перепроверка списка</h2>
+              <label class="switch" title="Включить перепроверку">
+                <input type="checkbox" id="rcEnabled"><span class="slider"></span>
+              </label>
+            </div>
+            <div class="muted" style="margin-top:8px">Раз в заданное время пробит весь список <b>напрямую и через VPS</b>. Если адрес снова работает напрямую <b>два прогона подряд</b> — убирает из списка. Работает <b>независимо</b> от тумблера авто-обхода: даже если обход выключен, список чистится и сохраняется.</div>
+            <div id="rcState" class="msg" style="margin-top:8px"></div>
+          </div>
+
+          <div class="card">
+            <h2>Расписание</h2>
+            <div class="row" style="gap:14px; flex-wrap:wrap; align-items:flex-end">
+              <label>Время<br><input type="time" id="rcTime" value="04:00"></label>
+              <label>Как часто<br>
+                <select id="rcDays">
+                  <option value="daily">каждый день</option>
+                  <option value="Mon,Tue,Wed,Thu,Fri">по будням</option>
+                  <option value="Sat,Sun">по выходным</option>
+                  <option value="Mon">пн</option><option value="Tue">вт</option>
+                  <option value="Wed">ср</option><option value="Thu">чт</option>
+                  <option value="Fri">пт</option><option value="Sat">сб</option><option value="Sun">вс</option>
+                </select>
+              </label>
+              <label>Воркеров<br><input type="number" id="rcWorkers" min="1" max="200" value="30" style="width:80px"></label>
+            </div>
+            <div class="muted" style="margin-top:8px">Больше воркеров — быстрее большой список (30 хватает; 1000 адресов ≈ 2–4 мин).</div>
+            <div class="row" style="margin-top:10px; gap:8px">
+              <button id="rcSave">Сохранить</button>
+              <button id="rcRun" class="secondary">Запустить сейчас</button>
+            </div>
+            <div id="rcMsg" class="msg"></div>
+            <div id="rcNext" class="muted" style="margin-top:6px"></div>
+          </div>
+
+          <div class="card">
+            <h2>Последний прогон</h2>
+            <div id="rcStats" class="muted">ещё не запускалась</div>
+          </div>
+        </div><!-- /subpane recheck -->
       </section>
 
       <section data-sec="youtube"><div class="card"><div id="feat_youtube"><div class="soon">загрузка…</div></div></div></section>
@@ -951,6 +1005,64 @@
       arPost({ action:'add', value:v }).then(() => { arInput.value=''; if (arMsg.textContent==='Добавляю…'){arMsg.className='msg good';arMsg.textContent='✓ добавлено';} });
     };
     fetch('/api/autoroute').then(r => r.json()).then(renderAutoroute).catch(() => {});
+
+    // --- под-вкладки Авто-обхода: Список / Перепроверка ---
+    document.querySelectorAll('#arSubnav .subtab').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('#arSubnav .subtab').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('[data-subpane]').forEach(p => p.hidden = p.getAttribute('data-subpane') !== btn.dataset.sub);
+        if (btn.dataset.sub === 'recheck') loadRecheck();
+      };
+    });
+
+    // --- Перепроверка (расписание + запуск) ---
+    const rcEnabled = document.getElementById('rcEnabled');
+    const rcState = document.getElementById('rcState');
+    const rcTime = document.getElementById('rcTime');
+    const rcDays = document.getElementById('rcDays');
+    const rcWorkers = document.getElementById('rcWorkers');
+    const rcMsg = document.getElementById('rcMsg');
+    const rcNext = document.getElementById('rcNext');
+    const rcStats = document.getElementById('rcStats');
+    function renderRecheck(d) {
+      const c = d.cfg || {};
+      rcEnabled.checked = !!c.enabled;
+      rcState.className = 'msg ' + (c.enabled ? 'good' : '');
+      rcState.textContent = c.enabled ? '✓ включена — список чистится по расписанию' : 'выключена — список остаётся, но не проверяется';
+      if (c.time) rcTime.value = c.time;
+      if (c.days) rcDays.value = c.days;
+      if (c.workers) rcWorkers.value = c.workers;
+      rcNext.textContent = (c.enabled && d.next && d.next !== '0' && d.next.length > 5) ? 'Следующий запуск: ' + d.next : '';
+      if (c.last_run) {
+        rcStats.innerHTML = `Запущена <b>${relTime(c.last_run)}</b> · проверено ${c.last_checked||0}` +
+          ` · снято ${c.last_removed||0}` + (c.last_pending ? ` · помечено ${c.last_pending}` : '') +
+          ` · за ${c.last_duration_sec||0}с`;
+      } else {
+        rcStats.textContent = 'ещё не запускалась';
+      }
+    }
+    function loadRecheck() {
+      fetch('/api/recheck').then(r => r.json()).then(renderRecheck).catch(() => {});
+    }
+    function rcPost(params) {
+      rcMsg.className = 'msg'; rcMsg.textContent = '…';
+      return fetch('/api/recheck', { method:'POST', body:new URLSearchParams(params) })
+        .then(async r => { const d = await r.json();
+          if (!r.ok) { rcMsg.className='msg bad'; rcMsg.textContent='✗ '+(d.error||'ошибка'); return; }
+          renderRecheck(d); rcMsg.className='msg good'; rcMsg.textContent='✓ сохранено';
+        }).catch(() => { rcMsg.className='msg bad'; rcMsg.textContent='✗ сеть'; });
+    }
+    rcEnabled.onchange = () => saveRecheck();
+    document.getElementById('rcSave').onclick = () => saveRecheck();
+    function saveRecheck() {
+      rcPost({ action:'save', enabled: rcEnabled.checked, time: rcTime.value, days: rcDays.value, workers: rcWorkers.value });
+    }
+    document.getElementById('rcRun').onclick = () => {
+      rcMsg.className='msg'; rcMsg.textContent='Запускаю… (обновите через минуту)';
+      fetch('/api/recheck', { method:'POST', body:new URLSearchParams({ action:'run' }) })
+        .then(() => { rcMsg.className='msg good'; rcMsg.textContent='✓ запущена — статистика обновится по завершении'; })
+        .catch(() => { rcMsg.className='msg bad'; rcMsg.textContent='✗ сеть'; });
+    };
 
     // --- Обзор: статус + exit IP + smoke ---
     const svcEl = document.getElementById('svc');
