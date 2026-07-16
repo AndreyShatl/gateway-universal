@@ -32,13 +32,16 @@ func (s *server) ensureAutorouteInfra() {
 	}
 }
 
-// syncAutoroute — привести ipset в соответствие со списком (или очистить, если выкл).
+// syncAutoroute — привести ipset в соответствие со списком + запустить/остановить
+// детектор по тумблеру (вызывается на каждое изменение и при старте gateway-ui).
 func (s *server) syncAutoroute(a autoRoute) {
 	if !a.Enabled {
+		runCmd("systemctl", "stop", "gateway-detector.service")
 		runCmd("ipset", "flush", autorouteIPSet)
 		return
 	}
 	s.ensureAutorouteInfra()
+	runCmd("systemctl", "start", "gateway-detector.service")
 	runCmd("ipset", "flush", autorouteIPSet)
 	for _, e := range a.Entries {
 		if strings.HasPrefix(e, "geosite:") {

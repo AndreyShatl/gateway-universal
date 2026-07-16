@@ -1,0 +1,14 @@
+[Unit]
+Description=Gateway auto-route detector (pcap → prober → applier)
+After=network-online.target xray.service dnscrypt-proxy.service
+Wants=network-online.target
+
+[Service]
+# Запускается/останавливается gateway-ui по тумблеру «Авто-обход».
+# Пассивный pcap-детект блоков + перепроверка через VPS + применение (ipset).
+ExecStart=/opt/gateway-detector watch --apply --config-env /root/gateway-universal/config.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

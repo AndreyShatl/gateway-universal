@@ -217,7 +217,7 @@ apt-get update -qq
 APT_PKGS=(
     curl wget ca-certificates gettext-base
     iptables iproute2 iputils-ping dnsutils
-    gawk sed grep procps jq ipset
+    gawk sed grep procps jq ipset libpcap0.8
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
     APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)
@@ -552,6 +552,23 @@ if [[ "$INSTALL_WEB_UI" == "yes" ]]; then
             warn "gateway-ui не стартовал — см. логи"
         fi
         [[ -n "$UI_GEN_PW" ]] && warn "Пароль веб-интерфейса (сохрани!): ${C_BLD}${UI_GEN_PW}${C_OFF}"
+    fi
+fi
+
+# ==========================================================================
+#                    AUTO-ROUTE DETECTOR (gateway-detector)
+# ==========================================================================
+# Пассивный детектор блокировок (pcap → prober → applier). Запускается/останав-
+# ливается gateway-ui по тумблеру «Авто-обход» (здесь только ставим бинарь+юнит).
+if [[ -d "$SCRIPT_DIR/detector" ]] && command -v go >/dev/null 2>&1; then
+    say "Building gateway-detector…"
+    apt-get install -y -qq libpcap-dev >/dev/null 2>&1 || true
+    if ( cd "$SCRIPT_DIR/detector" && CGO_ENABLED=1 go build -o /opt/gateway-detector . ) 2>/dev/null; then
+        cp "$SCRIPT_DIR/systemd/gateway-detector.service" /etc/systemd/system/gateway-detector.service
+        systemctl daemon-reload
+        ok "gateway-detector установлен (управляется тумблером в UI)"
+    else
+        warn "сборка gateway-detector не удалась (нужен gcc + libpcap-dev) — авто-детект недоступен"
     fi
 fi
 
