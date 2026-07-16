@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	IPSet = "gw_autoroute"
-	LAN   = "192.168.0.0/16"
-	Port  = "12347"
-	File  = "/etc/gateway/autoroute.json"
+	IPSet   = "gw_autoroute"
+	LAN     = "192.168.0.0/16"
+	Port    = "12347"        // dokodemo autoroute-in (TCP REDIRECT)
+	UDPPort = "12346"        // существующий tproxy-udp inbound -> proxy-mux
+	Mark    = "0x1/0xffffffff"
+	File    = "/etc/gateway/autoroute.json"
 )
 
 type store struct {
@@ -31,11 +33,20 @@ type store struct {
 // gateway-ui: детектор может добавлять до того, как gateway-ui это создал.
 func EnsureInfra() {
 	run("ipset", "create", IPSet, "hash:net", "family", "inet", "-exist")
-	// все TCP-порты (не только 80,443) — для игровых серверов, блокируемых по IP.
-	match := []string{"-s", LAN, "-p", "tcp",
-		"-m", "set", "--match-set", IPSet, "dst", "-j", "REDIRECT", "--to-ports", Port}
-	if run("iptables", append([]string{"-t", "nat", "-C", "PREROUTING"}, match...)...) != nil {
-		run("iptables", append([]string{"-t", "nat", "-I", "PREROUTING", "1"}, match...)...)
+	// TCP: все порты (не только 80,443) -> REDIRECT на dokodemo autoroute-in.
+	ensureRule("nat", []string{"-s", LAN, "-p", "tcp",
+		"-m", "set", "--match-set", IPSet, "dst", "-j", "REDIRECT", "--to-ports", Port})
+	// UDP: TPROXY на существующий tproxy-udp :12346 (-> proxy-mux). Маршрут
+	// fwmark 0x1 -> table 100 -> lo уже настроен основным tproxy-потоком.
+	ensureRule("mangle", []string{"-s", LAN, "-p", "udp",
+		"-m", "set", "--match-set", IPSet, "dst",
+		"-j", "TPROXY", "--on-port", UDPPort, "--on-ip", "0.0.0.0", "--tproxy-mark", Mark})
+}
+
+// ensureRule — идемпотентно вставить правило в начало PREROUTING (проверка -C).
+func ensureRule(table string, spec []string) {
+	if run("iptables", append([]string{"-t", table, "-C", "PREROUTING"}, spec...)...) != nil {
+		run("iptables", append([]string{"-t", table, "-I", "PREROUTING", "1"}, spec...)...)
 	}
 }
 

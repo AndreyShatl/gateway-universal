@@ -17,20 +17,30 @@ import (
 //   - iptables редиректит клиентский tcp 80,443 к dst из ipset gw_autoroute → :12347;
 //   - добавление адреса = ipset add (мгновенно). Домены резолвятся в IP (dnscrypt).
 const (
-	autorouteIPSet = "gw_autoroute"
-	autorouteLAN   = "192.168.0.0/16"
-	autoroutePort  = "12347"
+	autorouteIPSet   = "gw_autoroute"
+	autorouteLAN     = "192.168.0.0/16"
+	autoroutePort    = "12347"          // dokodemo autoroute-in (TCP REDIRECT)
+	autorouteUDPPort = "12346"          // существующий tproxy-udp inbound -> proxy-mux
+	autorouteMark    = "0x1/0xffffffff"
 )
 
-// ensureAutorouteInfra — ipset + iptables-редирект (идемпотентно).
+// ensureAutorouteInfra — ipset + iptables (TCP REDIRECT + UDP TPROXY), идемпотентно.
 func (s *server) ensureAutorouteInfra() {
 	runCmd("ipset", "create", autorouteIPSet, "hash:net", "family", "inet", "-exist")
-	// все TCP-порты (не только 80,443): игровые серверы блокируются по IP на своих
+	// TCP: все порты (не только 80,443) — игровые серверы блокируются по IP на своих
 	// портах; dokodemo autoroute-in с followRedirect форвардит любой порт на VPS.
-	match := []string{"-s", autorouteLAN, "-p", "tcp",
-		"-m", "set", "--match-set", autorouteIPSet, "dst", "-j", "REDIRECT", "--to-ports", autoroutePort}
-	if _, err := runCmd("iptables", append([]string{"-t", "nat", "-C", "PREROUTING"}, match...)...); err != nil {
-		runCmd("iptables", append([]string{"-t", "nat", "-I", "PREROUTING", "1"}, match...)...)
+	s.ensureAutorouteRule("nat", []string{"-s", autorouteLAN, "-p", "tcp",
+		"-m", "set", "--match-set", autorouteIPSet, "dst", "-j", "REDIRECT", "--to-ports", autoroutePort})
+	// UDP: TPROXY на существующий tproxy-udp :12346 (-> proxy-mux). Маршрут
+	// fwmark 0x1 -> table 100 -> lo уже настроен основным tproxy-потоком.
+	s.ensureAutorouteRule("mangle", []string{"-s", autorouteLAN, "-p", "udp",
+		"-m", "set", "--match-set", autorouteIPSet, "dst",
+		"-j", "TPROXY", "--on-port", autorouteUDPPort, "--on-ip", "0.0.0.0", "--tproxy-mark", autorouteMark})
+}
+
+func (s *server) ensureAutorouteRule(table string, spec []string) {
+	if _, err := runCmd("iptables", append([]string{"-t", table, "-C", "PREROUTING"}, spec...)...); err != nil {
+		runCmd("iptables", append([]string{"-t", table, "-I", "PREROUTING", "1"}, spec...)...)
 	}
 }
 
