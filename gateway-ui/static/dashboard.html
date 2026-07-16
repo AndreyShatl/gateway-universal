@@ -66,6 +66,8 @@
             color:var(--muted); font-weight:600; cursor:pointer; font-size:13px; }
   .subtab.active { background:var(--accent); color:var(--on-accent); }
   button.secondary { background:var(--input-bg) !important; color:var(--muted) !important; }
+  @keyframes arflash { from { background:var(--good-tx); } to { background:transparent; } }
+  .list li.just-added { animation: arflash 3s ease-out; }
   .msg { font-size:13px; margin-top:8px; min-height:16px; }
   .msg.good { color:var(--good-tx); } .msg.bad { color:var(--bad-tx); }
   .list { list-style:none; padding:0; margin:12px 0 0; max-height:280px; overflow:auto; }
@@ -273,8 +275,14 @@
         </div>
 
         <div class="card">
-          <h2>Список авто-обхода (<span id="arCount">0</span>)</h2>
-          <div class="muted">Домены и IP, добавленные сюда (вручную или автоматически). Можно удалять.</div>
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h2 style="margin:0">Список авто-обхода (<span id="arCount">0</span>)</h2>
+            <div class="row" style="gap:8px; align-items:center">
+              <span id="arNew" class="st-badge" style="display:none; background:var(--good-tx); color:#fff"></span>
+              <button id="arRefresh" class="secondary" title="Обновить список" style="padding:6px 12px">↻ Обновить</button>
+            </div>
+          </div>
+          <div class="muted">Домены и IP, добавленные сюда (вручную или автоматически). Обновляется само каждые 15 c. Можно удалять.</div>
           <div class="row" style="gap:8px; margin:8px 0; flex-wrap:wrap; align-items:center">
             <input id="arFilter" type="search" placeholder="🔎 фильтр по имени…" style="flex:1; min-width:160px">
             <select id="arSrcFilter" title="Источник">
@@ -946,6 +954,8 @@
     const arSrcFilter = document.getElementById('arSrcFilter');
     const arSort = document.getElementById('arSort');
     let arEntries = [];
+    let arSeen = null;            // множество известных addr (null = ещё не загружали)
+    let arNewSet = new Set();     // addr, подсветить как новые в этом рендере
     const srcLabel = { manual:'вручную', 'syn-timeout':'syn', 'quic-no-response':'quic',
       'rst-after-clienthello':'rst', 'no-response-after-clienthello':'no-resp', legacy:'старое' };
     function relTime(iso) {
@@ -976,6 +986,7 @@
       arList.innerHTML = '';
       for (const e of list) {
         const li = document.createElement('li');
+        if (arNewSet.has(e.addr)) li.className = 'just-added';
         const badge = isIP(e.addr) ? 'IP' : 'домен';
         const src = e.source ? `<span class="st-badge" title="источник">${esc(srcLabel[e.source]||e.source)}</span>` : '';
         const when = e.added ? `<span class="muted" style="font-size:.85em" title="${esc(e.added)}">· ${relTime(e.added)}</span>` : '';
@@ -1004,7 +1015,33 @@
       arMsg.className='msg'; arMsg.textContent='Добавляю…';
       arPost({ action:'add', value:v }).then(() => { arInput.value=''; if (arMsg.textContent==='Добавляю…'){arMsg.className='msg good';arMsg.textContent='✓ добавлено';} });
     };
-    fetch('/api/autoroute').then(r => r.json()).then(renderAutoroute).catch(() => {});
+    const arNew = document.getElementById('arNew');
+    function loadAutoroute() {
+      return fetch('/api/autoroute').then(r => {
+        const ct = r.headers.get('content-type') || '';
+        if (r.redirected || !ct.includes('json')) throw 'auth';
+        return r.json();
+      }).then(d => {
+        const addrs = (d.entries || []).map(e => typeof e === 'string' ? e : e.addr);
+        arNewSet = new Set();
+        if (arSeen) for (const a of addrs) if (!arSeen.has(a)) arNewSet.add(a);
+        arSeen = new Set(addrs);
+        if (arNewSet.size) {
+          arNew.textContent = '+' + arNewSet.size + ' новое';
+          arNew.style.display = '';
+          clearTimeout(arNew._t); arNew._t = setTimeout(() => { arNew.style.display = 'none'; }, 8000);
+        }
+        renderAutoroute(d);
+      }).catch(e => {
+        if (e === 'auth') { arState.className = 'msg bad'; arState.textContent = 'сессия истекла — обновите страницу и войдите'; }
+      });
+    }
+    document.getElementById('arRefresh').onclick = loadAutoroute;
+    loadAutoroute();
+    // авто-обновление списка, только когда вкладка видима и список открыт
+    setInterval(() => {
+      if (document.visibilityState === 'visible' && arList.offsetParent) loadAutoroute();
+    }, 15000);
 
     // --- под-вкладки Авто-обхода: Список / Перепроверка ---
     document.querySelectorAll('#arSubnav .subtab').forEach(btn => {

@@ -18,6 +18,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
@@ -40,6 +41,7 @@ var strategiesJSON []byte
 
 const sessionCookie = "gwsess"
 const sessionTTL = 12 * time.Hour
+const sessionsFile = "/etc/gateway/ui-sessions.json" // сессии переживают рестарт UI
 
 type server struct {
 	// Пароль. Новый формат — bcrypt-хеш в pwHash (legacy=false).
@@ -94,6 +96,7 @@ func main() {
 		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
 		connsFile: *connsFile, autorouteFile: *autorouteFile, recheckFile: *recheckFile,
 	}
+	s.loadSessions() // восстановить входы, чтобы рестарт UI не разлогинивал
 	s.ver = buildVersion()
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
@@ -202,6 +205,7 @@ func (s *server) newSession() string {
 	s.mu.Lock()
 	s.sessions[tok] = time.Now().Add(sessionTTL)
 	s.mu.Unlock()
+	s.persistSessions()
 	return tok
 }
 
@@ -216,7 +220,44 @@ func (s *server) validSession(tok string) bool {
 		delete(s.sessions, tok)
 		return false
 	}
+	s.sessions[tok] = time.Now().Add(sessionTTL) // продлеваем активную сессию (sliding)
 	return true
+}
+
+// loadSessions — восстановить сессии с диска при старте (переживают рестарт UI).
+func (s *server) loadSessions() {
+	data, err := os.ReadFile(sessionsFile)
+	if err != nil {
+		return
+	}
+	m := map[string]time.Time{}
+	if json.Unmarshal(data, &m) != nil {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	for tok, exp := range m {
+		if exp.After(now) {
+			s.sessions[tok] = exp
+		}
+	}
+	s.mu.Unlock()
+}
+
+// persistSessions — сохранить сессии на диск (снимок под локом, запись атомарно).
+func (s *server) persistSessions() {
+	s.mu.Lock()
+	m := make(map[string]time.Time, len(s.sessions))
+	for k, v := range s.sessions {
+		m[k] = v
+	}
+	s.mu.Unlock()
+	if b, err := json.Marshal(m); err == nil {
+		tmp := sessionsFile + ".tmp"
+		if os.WriteFile(tmp, b, 0o600) == nil {
+			os.Rename(tmp, sessionsFile)
+		}
+	}
 }
 
 func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -256,6 +297,7 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
+		s.persistSessions()
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
