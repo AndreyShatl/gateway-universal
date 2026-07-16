@@ -15,9 +15,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
+	"gateway-detector/applier"
 	"gateway-detector/prober"
 	"gateway-detector/watcher"
 )
@@ -58,15 +62,100 @@ func usage() {
 
 func runWatch() {
 	fs := flag.NewFlagSet("watch", flag.ExitOnError)
-	iface := fs.String("iface", "", "WAN-интерфейс для сниффинга (обязателен)")
-	vps := fs.String("vps", "", "IP VPS — исключить трафик туннеля")
-	apply := fs.Bool("apply", false, "применять (иначе dry-run: только лог)")
+	iface := fs.String("iface", "", "WAN-интерфейс (авто, если пусто)")
+	vps := fs.String("vps", "", "IP VPS — исключить туннель (авто из --config-env, если пусто)")
+	configEnv := fs.String("config-env", "/root/gateway-universal/config.env", "config.env для VPS_ADDR")
+	socks := fs.String("socks", "127.0.0.1:1080", "VPS-socks5 для перепроверки")
+	apply := fs.Bool("apply", false, "применять (иначе тень: только лог, что БЫ добавил)")
 	fs.Parse(os.Args[2:])
 	if *iface == "" {
-		usage()
+		*iface = detectIface()
 	}
-	w := &watcher.Watcher{Iface: *iface, VPSIP: *vps, DryRun: !*apply}
+	if *vps == "" {
+		*vps = resolveHost(configVar(*configEnv, "VPS_ADDR"))
+	}
+	if *iface == "" {
+		log.Fatal("не удалось определить WAN-интерфейс, задайте --iface")
+	}
+	log.Printf("detector: iface=%s vps=%s apply=%v", *iface, *vps, *apply)
+	// watcher -> prober (подтверждение) -> [тень: лог | apply: применить]
+	handler := func(c watcher.Candidate) {
+		target := c.SNI
+		if target == "" {
+			target = c.DstIP // без SNI — по IP
+		}
+		res := prober.Probe(target, 443, c.SNI, prober.Config{SocksAddr: *socks, Timeout: 6 * time.Second, TLS: true})
+		switch res.Verdict {
+		case prober.Blocked:
+			if *apply {
+				if applier.Apply(target) {
+					log.Printf("✅ добавлен в авто-обход: %s (dst=%s)", target, c.DstIP)
+				} else {
+					log.Printf("… %s подтверждён, но уже в списке / тумблер выкл", target)
+				}
+			} else {
+				log.Printf("🟡 БЫ добавил: %-30s (блок подтверждён; direct=%s)", target, short(res.Direct))
+			}
+		default:
+			log.Printf("⚪ %-30s кандидат, но prober=%s — НЕ добавляю (direct=%s vps=%s)", target, res.Verdict, short(res.Direct), short(res.ViaVPS))
+		}
+	}
+	w := &watcher.Watcher{Iface: *iface, VPSIP: *vps, OnCandidate: handler}
 	if err := w.Run(); err != nil {
 		log.Fatalf("watch: %v", err)
 	}
+}
+
+func short(s string) string {
+	if len(s) > 40 {
+		return s[:40]
+	}
+	return s
+}
+
+func detectIface() string {
+	out, err := exec.Command("ip", "route", "get", "1.1.1.1").Output()
+	if err != nil {
+		return ""
+	}
+	f := strings.Fields(string(out))
+	for i, w := range f {
+		if w == "dev" && i+1 < len(f) {
+			return f[i+1]
+		}
+	}
+	return ""
+}
+
+func configVar(path, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, ln := range strings.Split(string(data), "\n") {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, key+"=") {
+			v := strings.TrimPrefix(ln, key+"=")
+			v = strings.Trim(strings.Fields(v)[0], `"`)
+			return v
+		}
+	}
+	return ""
+}
+
+func resolveHost(h string) string {
+	if h == "" {
+		return ""
+	}
+	if net.ParseIP(h) != nil {
+		return h
+	}
+	if ips, err := net.LookupHost(h); err == nil {
+		for _, ip := range ips {
+			if p := net.ParseIP(ip); p != nil && p.To4() != nil {
+				return ip
+			}
+		}
+	}
+	return ""
 }
