@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 )
+
+var debugQUIC = os.Getenv("DEBUG_QUIC") != ""
 
 type Candidate struct {
 	SNI     string
@@ -34,6 +37,16 @@ type Watcher struct {
 
 	mu    sync.Mutex
 	flows map[string]*flowState
+	quic  map[string]*quicState
+}
+
+// quicState — QUIC-соединение (HTTP/3): Initial ушёл, ждём ответ сервера.
+type quicState struct {
+	sni     string
+	dstIP   string
+	sentAt  time.Time
+	gotResp bool
+	emitted bool
 }
 
 type flowState struct {
@@ -54,7 +67,7 @@ func (w *Watcher) Run() error {
 	defer handle.Close()
 	// ловим SYN/SYN-ACK (для сигнала syn-timeout), RST и пакеты, начинающиеся с
 	// TLS-записи (0x16) — не смотрим полезную нагрузку соединений.
-	bpf := "tcp and port 443 and (tcp[tcpflags] & (tcp-syn|tcp-rst) != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)"
+	bpf := "((tcp and port 443 and (tcp[tcpflags] & (tcp-syn|tcp-rst) != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)) or (udp and port 443))"
 	if w.VPSIP != "" {
 		bpf += " and not host " + w.VPSIP
 	}
@@ -62,6 +75,7 @@ func (w *Watcher) Run() error {
 		return fmt.Errorf("bpf: %w", err)
 	}
 	w.flows = map[string]*flowState{}
+	w.quic = map[string]*quicState{}
 	go w.cleaner()
 
 	log.Printf("watcher: слушаю %s (dry-run=%v), фильтр: %s", w.Iface, w.DryRun, bpf)
@@ -74,8 +88,15 @@ func (w *Watcher) Run() error {
 
 func (w *Watcher) handle(pkt gopacket.Packet) {
 	ipl := pkt.Layer(layers.LayerTypeIPv4)
+	if ipl == nil {
+		return
+	}
+	if udpl := pkt.Layer(layers.LayerTypeUDP); udpl != nil {
+		w.handleUDP(ipl.(*layers.IPv4), udpl.(*layers.UDP))
+		return
+	}
 	tcpl := pkt.Layer(layers.LayerTypeTCP)
-	if ipl == nil || tcpl == nil {
+	if tcpl == nil {
 		return
 	}
 	ip := ipl.(*layers.IPv4)
@@ -144,6 +165,41 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 	}
 }
 
+// handleUDP — QUIC (HTTP/3) на :443. Ловим клиентский Initial (расшифровываем SNI)
+// и следим, ответил ли сервер. Молчание сервера >3с после Initial = блок HTTP/3.
+func (w *Watcher) handleUDP(ip *layers.IPv4, udp *layers.UDP) {
+	if udp.SrcPort != 443 && udp.DstPort != 443 {
+		return
+	}
+	pl := udp.Payload
+	// клиентский Initial — исходящий (dst:443) и это разбираемый QUIC Initial
+	if udp.DstPort == 443 && len(pl) >= 1200 && isQUICClientInitial(pl) {
+		if isPrivate(ip.DstIP) {
+			return
+		}
+		key := flowKey(ip.SrcIP, uint16(udp.SrcPort), ip.DstIP, uint16(udp.DstPort))
+		sni := parseQUICInitialSNI(pl)
+		if debugQUIC {
+			log.Printf("🔧 quic-initial dst=%s len=%d sni=%q", ip.DstIP, len(pl), sni)
+		}
+		w.mu.Lock()
+		if w.quic[key] == nil {
+			w.quic[key] = &quicState{sni: sni, dstIP: ip.DstIP.String(), sentAt: time.Now()}
+		}
+		w.mu.Unlock()
+		return
+	}
+	// ответ сервера (src:443) — соединение живо, снимаем подозрение
+	if udp.SrcPort == 443 {
+		key := flowKey(ip.DstIP, uint16(udp.DstPort), ip.SrcIP, uint16(udp.SrcPort))
+		w.mu.Lock()
+		if q := w.quic[key]; q != nil && q.dstIP == ip.SrcIP.String() {
+			q.gotResp = true
+		}
+		w.mu.Unlock()
+	}
+}
+
 func (w *Watcher) emit(c Candidate) {
 	if w.DryRun || w.OnCandidate == nil {
 		s := c.SNI
@@ -181,6 +237,22 @@ func (w *Watcher) cleaner() {
 			}
 			if since(f) > 30*time.Second {
 				delete(w.flows, k)
+			}
+		}
+		// QUIC (HTTP/3): Initial ушёл, сервер молчит >3с = блок. Эмитим только при
+		// известном SNI (маршрут по IP для CDN с общими адресами опасен).
+		for k, q := range w.quic {
+			age := time.Since(q.sentAt)
+			if !q.gotResp && !q.emitted && age > 3*time.Second && age < 12*time.Second {
+				q.emitted = true
+				if q.sni != "" {
+					out = append(out, Candidate{SNI: q.sni, DstIP: q.dstIP, Signal: "quic-no-response", Seen: time.Now()})
+				} else {
+					log.Printf("🟣 QUIC-блок без SNI на %s — пропускаю (нельзя маршрутить по IP CDN)", q.dstIP)
+				}
+			}
+			if age > 30*time.Second {
+				delete(w.quic, k)
 			}
 		}
 		w.mu.Unlock()
