@@ -1,0 +1,10 @@
+[Unit]
+Description=Gateway auto-route nightly recheck (снятие разблокированных из списка)
+After=network-online.target xray.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Перепроверяет весь список авто-обхода напрямую vs через VPS; убирает адреса,
+# которые снова работают напрямую ДВА прогона подряд. Пул воркеров -> минуты.
+ExecStart=/opt/gateway-detector recheck --apply --socks 127.0.0.1:1080 --workers 30

@@ -18,26 +18,29 @@ import (
 const (
 	IPSet   = "gw_autoroute"
 	LAN     = "192.168.0.0/16"
-	Port    = "12347"        // dokodemo autoroute-in (TCP REDIRECT)
-	UDPPort = "12346"        // существующий tproxy-udp inbound -> proxy-mux
+	Port    = "12347" // dokodemo autoroute-in (TCP REDIRECT)
+	UDPPort = "12346" // существующий tproxy-udp inbound -> proxy-mux
 	Mark    = "0x1/0xffffffff"
 	File    = "/etc/gateway/autoroute.json"
 )
 
-type store struct {
+// Store — содержимое autoroute.json.
+type Store struct {
 	Enabled bool    `json:"enabled"`
-	Entries []entry `json:"entries"`
+	Entries []Entry `json:"entries"`
 }
 
-// entry — адрес + метаданные (когда/чем добавлен). Совместимо со схемой gateway-ui.
-type entry struct {
+// Entry — адрес + метаданные. Совместимо со схемой gateway-ui (поля round-trip).
+type Entry struct {
 	Addr   string `json:"addr"`
 	Added  string `json:"added,omitempty"`
 	Source string `json:"source,omitempty"`
+	DPort  int    `json:"port,omitempty"`  // порт блокировки (для точной перепроверки)
+	Clean  int    `json:"clean,omitempty"` // подряд чистых ночных проверок (2 -> удаление)
 }
 
 // UnmarshalJSON — принимает и объект, и старую строку (миграция формата).
-func (e *entry) UnmarshalJSON(b []byte) error {
+func (e *Entry) UnmarshalJSON(b []byte) error {
 	b = []byte(strings.TrimSpace(string(b)))
 	if len(b) > 0 && b[0] == '"' {
 		var s string
@@ -47,70 +50,111 @@ func (e *entry) UnmarshalJSON(b []byte) error {
 		e.Addr, e.Source = s, "legacy"
 		return nil
 	}
-	type raw entry
+	type raw Entry
 	var r raw
 	if err := json.Unmarshal(b, &r); err != nil {
 		return err
 	}
-	*e = entry(r)
+	*e = Entry(r)
 	return nil
 }
 
-// EnsureInfra — ipset + iptables-редирект (идемпотентно). Дублирует то, что делает
-// gateway-ui: детектор может добавлять до того, как gateway-ui это создал.
+// withLock — выполнить fn, держа эксклюзивный flock на autoroute.json.
+func withLock(fn func(*Store)) error {
+	f, err := os.OpenFile(File, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+
+	var s Store
+	data, _ := os.ReadFile(File)
+	json.Unmarshal(data, &s)
+	fn(&s)
+	return nil
+}
+
+// Load — прочитать autoroute.json (без блокировки, для перепроверки-снимка).
+func Load() (Store, error) {
+	var s Store
+	data, err := os.ReadFile(File)
+	if err != nil {
+		return s, err
+	}
+	return s, json.Unmarshal(data, &s)
+}
+
+// save — атомарная запись (вызывающий держит flock).
+func save(s *Store) {
+	b, _ := json.MarshalIndent(s, "", "  ")
+	tmp := File + ".tmp"
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		os.Rename(tmp, File)
+	}
+}
+
+// EnsureInfra — ipset + iptables (TCP REDIRECT + UDP TPROXY), идемпотентно.
 func EnsureInfra() {
 	run("ipset", "create", IPSet, "hash:net", "family", "inet", "-exist")
-	// TCP: все порты (не только 80,443) -> REDIRECT на dokodemo autoroute-in.
 	ensureRule("nat", []string{"-s", LAN, "-p", "tcp",
 		"-m", "set", "--match-set", IPSet, "dst", "-j", "REDIRECT", "--to-ports", Port})
-	// UDP: TPROXY на существующий tproxy-udp :12346 (-> proxy-mux). Маршрут
-	// fwmark 0x1 -> table 100 -> lo уже настроен основным tproxy-потоком.
 	ensureRule("mangle", []string{"-s", LAN, "-p", "udp",
 		"-m", "set", "--match-set", IPSet, "dst",
 		"-j", "TPROXY", "--on-port", UDPPort, "--on-ip", "0.0.0.0", "--tproxy-mark", Mark})
 }
 
-// ensureRule — идемпотентно вставить правило в начало PREROUTING (проверка -C).
 func ensureRule(table string, spec []string) {
 	if run("iptables", append([]string{"-t", table, "-C", "PREROUTING"}, spec...)...) != nil {
 		run("iptables", append([]string{"-t", table, "-I", "PREROUTING", "1"}, spec...)...)
 	}
 }
 
-// Apply — добавить цель (домен или IP) в авто-обход. source — чем поймано
-// (имя сигнала). Возвращает true, если реально добавлено (не было раньше и вкл).
-func Apply(target, source string) bool {
-	f, err := os.OpenFile(File, os.O_RDWR|os.O_CREATE, 0o644)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
-	var s store
-	data, _ := os.ReadFile(File)
-	json.Unmarshal(data, &s)
-	if !s.Enabled {
-		return false // тумблер выключен — не трогаем
-	}
-	for _, e := range s.Entries {
-		if e.Addr == target {
-			return false // уже есть
+// Sync — привести ipset в соответствие со списком (flush + перезаполнение).
+func Sync(entries []Entry) {
+	EnsureInfra()
+	run("ipset", "flush", IPSet)
+	for _, e := range entries {
+		addr := e.Addr
+		if strings.HasPrefix(addr, "geosite:") {
+			continue
+		}
+		if net.ParseIP(addr) != nil || strings.Contains(addr, "/") {
+			run("ipset", "add", IPSet, addr, "-exist")
+			continue
+		}
+		for _, ip := range resolveV4(addr) {
+			run("ipset", "add", IPSet, ip, "-exist")
 		}
 	}
-	s.Entries = append(s.Entries, entry{
-		Addr:   target,
-		Added:  time.Now().UTC().Format(time.RFC3339),
-		Source: source,
-	})
-	b, _ := json.MarshalIndent(s, "", "  ")
-	tmp := File + ".tmp"
-	if os.WriteFile(tmp, b, 0o644) == nil {
-		os.Rename(tmp, File)
-	}
+}
 
-	// применить в ipset
+// Apply — добавить цель в авто-обход. source — чем поймано, port — порт блокировки.
+// Возвращает true, если реально добавлено (не было раньше и авто-обход включён).
+func Apply(target, source string, port int) bool {
+	added := false
+	withLock(func(s *Store) {
+		if !s.Enabled {
+			return
+		}
+		for _, e := range s.Entries {
+			if e.Addr == target {
+				return
+			}
+		}
+		s.Entries = append(s.Entries, Entry{
+			Addr:   target,
+			Added:  time.Now().UTC().Format(time.RFC3339),
+			Source: source,
+			DPort:  port,
+		})
+		save(s)
+		added = true
+	})
+	if !added {
+		return false
+	}
 	EnsureInfra()
 	if net.ParseIP(target) != nil || strings.Contains(target, "/") {
 		run("ipset", "add", IPSet, target, "-exist")
@@ -120,6 +164,30 @@ func Apply(target, source string) bool {
 		}
 	}
 	return true
+}
+
+// UpdateClean — под блокировкой применить результаты перепроверки к текущему файлу
+// (мерж по addr, чтобы не затереть параллельные добавления ночью). remove — набор
+// addr на удаление; clean — новые значения счётчика для оставшихся. Возвращает
+// оставшиеся записи (для ресинка ipset).
+func UpdateClean(remove map[string]bool, clean map[string]int) []Entry {
+	var kept []Entry
+	withLock(func(s *Store) {
+		out := s.Entries[:0:0]
+		for _, e := range s.Entries {
+			if remove[e.Addr] {
+				continue
+			}
+			if v, ok := clean[e.Addr]; ok {
+				e.Clean = v
+			}
+			out = append(out, e)
+		}
+		s.Entries = out
+		save(s)
+		kept = out
+	})
+	return kept
 }
 
 func run(name string, args ...string) error {

@@ -97,6 +97,8 @@ type entry struct {
 	Addr   string `json:"addr"`
 	Added  string `json:"added,omitempty"`  // RFC3339
 	Source string `json:"source,omitempty"` // manual | rst-after-clienthello | syn-timeout | quic-no-response | legacy
+	Port   int    `json:"port,omitempty"`   // порт блокировки (для ночной перепроверки)
+	Clean  int    `json:"clean,omitempty"`  // подряд чистых перепроверок (round-trip, пишет детектор)
 }
 
 // UnmarshalJSON — принимает и новый объект, и старую строку (миграция формата).
