@@ -31,7 +31,8 @@ type store struct {
 // gateway-ui: детектор может добавлять до того, как gateway-ui это создал.
 func EnsureInfra() {
 	run("ipset", "create", IPSet, "hash:net", "family", "inet", "-exist")
-	match := []string{"-s", LAN, "-p", "tcp", "-m", "multiport", "--dports", "80,443",
+	// все TCP-порты (не только 80,443) — для игровых серверов, блокируемых по IP.
+	match := []string{"-s", LAN, "-p", "tcp",
 		"-m", "set", "--match-set", IPSet, "dst", "-j", "REDIRECT", "--to-ports", Port}
 	if run("iptables", append([]string{"-t", "nat", "-C", "PREROUTING"}, match...)...) != nil {
 		run("iptables", append([]string{"-t", "nat", "-I", "PREROUTING", "1"}, match...)...)

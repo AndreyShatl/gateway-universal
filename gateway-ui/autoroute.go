@@ -25,7 +25,9 @@ const (
 // ensureAutorouteInfra — ipset + iptables-редирект (идемпотентно).
 func (s *server) ensureAutorouteInfra() {
 	runCmd("ipset", "create", autorouteIPSet, "hash:net", "family", "inet", "-exist")
-	match := []string{"-s", autorouteLAN, "-p", "tcp", "-m", "multiport", "--dports", "80,443",
+	// все TCP-порты (не только 80,443): игровые серверы блокируются по IP на своих
+	// портах; dokodemo autoroute-in с followRedirect форвардит любой порт на VPS.
+	match := []string{"-s", autorouteLAN, "-p", "tcp",
 		"-m", "set", "--match-set", autorouteIPSet, "dst", "-j", "REDIRECT", "--to-ports", autoroutePort}
 	if _, err := runCmd("iptables", append([]string{"-t", "nat", "-C", "PREROUTING"}, match...)...); err != nil {
 		runCmd("iptables", append([]string{"-t", "nat", "-I", "PREROUTING", "1"}, match...)...)

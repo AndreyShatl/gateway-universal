@@ -23,10 +23,11 @@ import (
 var debugQUIC = os.Getenv("DEBUG_QUIC") != ""
 
 type Candidate struct {
-	SNI     string
-	DstIP   string
-	Signal  string
-	Seen    time.Time
+	SNI    string
+	DstIP  string
+	Port   int // порт назначения (для syn-timeout на не-443, напр. игровые серверы)
+	Signal string
+	Seen   time.Time
 }
 
 type Watcher struct {
@@ -52,6 +53,7 @@ type quicState struct {
 type flowState struct {
 	sni       string
 	dstIP     string
+	dstPort   uint16
 	synAt     time.Time // время исходящего SYN (для сигнала syn-timeout)
 	gotSynAck bool      // сервер прислал SYN-ACK -> соединение установилось
 	chAt      time.Time
@@ -67,7 +69,9 @@ func (w *Watcher) Run() error {
 	defer handle.Close()
 	// ловим SYN/SYN-ACK (для сигнала syn-timeout), RST и пакеты, начинающиеся с
 	// TLS-записи (0x16) — не смотрим полезную нагрузку соединений.
-	bpf := "((tcp and port 443 and (tcp[tcpflags] & (tcp-syn|tcp-rst) != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)) or (udp and port 443))"
+	// SYN/SYN-ACK ловим на ВСЕХ портах (блок игровых серверов по IP — не только 443);
+	// RST и TLS-record — только на 443 (веб-сигналы); QUIC — udp/443.
+	bpf := "((tcp and tcp[tcpflags] & tcp-syn != 0) or (tcp and port 443 and (tcp[tcpflags] & tcp-rst != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)) or (udp and port 443))"
 	if w.VPSIP != "" {
 		bpf += " and not host " + w.VPSIP
 	}
@@ -111,7 +115,7 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 		}
 		w.mu.Lock()
 		if w.flows[key] == nil {
-			w.flows[key] = &flowState{dstIP: ip.DstIP.String(), synAt: time.Now()}
+			w.flows[key] = &flowState{dstIP: ip.DstIP.String(), dstPort: uint16(tcp.DstPort), synAt: time.Now()}
 		}
 		w.mu.Unlock()
 		return
@@ -232,7 +236,7 @@ func (w *Watcher) cleaner() {
 				age := time.Since(f.synAt)
 				if age > 3*time.Second && age < 12*time.Second {
 					f.emitted = true
-					out = append(out, Candidate{DstIP: f.dstIP, Signal: "syn-timeout", Seen: time.Now()})
+					out = append(out, Candidate{DstIP: f.dstIP, Port: int(f.dstPort), Signal: "syn-timeout", Seen: time.Now()})
 				}
 			}
 			if since(f) > 30*time.Second {
