@@ -37,11 +37,13 @@ type Watcher struct {
 }
 
 type flowState struct {
-	sni     string
-	dstIP   string
-	chAt    time.Time
-	sawData bool
-	emitted bool
+	sni       string
+	dstIP     string
+	synAt     time.Time // время исходящего SYN (для сигнала syn-timeout)
+	gotSynAck bool      // сервер прислал SYN-ACK -> соединение установилось
+	chAt      time.Time
+	sawData   bool
+	emitted   bool
 }
 
 func (w *Watcher) Run() error {
@@ -50,9 +52,9 @@ func (w *Watcher) Run() error {
 		return fmt.Errorf("pcap open %s: %w", w.Iface, err)
 	}
 	defer handle.Close()
-	// ловим только RST-пакеты и пакеты, начинающиеся с TLS-записи (0x16) — резко
-	// снижает объём (не смотрим полезную нагрузку соединений).
-	bpf := "tcp and port 443 and (tcp[tcpflags] & tcp-rst != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)"
+	// ловим SYN/SYN-ACK (для сигнала syn-timeout), RST и пакеты, начинающиеся с
+	// TLS-записи (0x16) — не смотрим полезную нагрузку соединений.
+	bpf := "tcp and port 443 and (tcp[tcpflags] & (tcp-syn|tcp-rst) != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)"
 	if w.VPSIP != "" {
 		bpf += " and not host " + w.VPSIP
 	}
@@ -80,6 +82,29 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 	tcp := tcpl.(*layers.TCP)
 	key := flowKey(ip.SrcIP, uint16(tcp.SrcPort), ip.DstIP, uint16(tcp.DstPort))
 
+	// SYN без ACK — исходящая попытка соединения (инициатор). Заводим flow, чтобы
+	// поймать «SYN ушёл, SYN-ACK не пришёл» = блок по IP (SYN дропается).
+	if tcp.SYN && !tcp.ACK {
+		if isPrivate(ip.DstIP) {
+			return
+		}
+		w.mu.Lock()
+		if w.flows[key] == nil {
+			w.flows[key] = &flowState{dstIP: ip.DstIP.String(), synAt: time.Now()}
+		}
+		w.mu.Unlock()
+		return
+	}
+	// SYN-ACK — сервер ответил, соединение устанавливается: снимаем подозрение.
+	if tcp.SYN && tcp.ACK {
+		w.mu.Lock()
+		if f := w.flows[key]; f != nil {
+			f.gotSynAck = true
+		}
+		w.mu.Unlock()
+		return
+	}
+
 	if tcp.RST {
 		w.mu.Lock()
 		f := w.flows[key]
@@ -101,7 +126,14 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 			return
 		}
 		w.mu.Lock()
-		w.flows[key] = &flowState{sni: parseSNI(pl), dstIP: ip.DstIP.String(), chAt: time.Now()}
+		f := w.flows[key]
+		if f == nil {
+			f = &flowState{dstIP: ip.DstIP.String()}
+			w.flows[key] = f
+		}
+		f.sni = parseSNI(pl)
+		f.chAt = time.Now()
+		f.gotSynAck = true // ClientHello ушёл -> соединение установлено
 		w.mu.Unlock()
 	} else if len(pl) > 0 {
 		w.mu.Lock()
@@ -131,12 +163,23 @@ func (w *Watcher) cleaner() {
 		var out []Candidate
 		w.mu.Lock()
 		for k, f := range w.flows {
-			age := time.Since(f.chAt)
-			if !f.sawData && !f.emitted && age > 3*time.Second && age < 12*time.Second {
-				f.emitted = true
-				out = append(out, Candidate{SNI: f.sni, DstIP: f.dstIP, Signal: "no-response-after-clienthello", Seen: time.Now()})
+			// сигнал 1: ClientHello ушёл, сервер молчит >3с (DROP-блок по SNI)
+			if !f.chAt.IsZero() {
+				age := time.Since(f.chAt)
+				if !f.sawData && !f.emitted && age > 3*time.Second && age < 12*time.Second {
+					f.emitted = true
+					out = append(out, Candidate{SNI: f.sni, DstIP: f.dstIP, Signal: "no-response-after-clienthello", Seen: time.Now()})
+				}
 			}
-			if age > 30*time.Second {
+			// сигнал 2: SYN ушёл, SYN-ACK так и не пришёл >3с (блок по IP, SYN дропается)
+			if !f.synAt.IsZero() && !f.gotSynAck && !f.emitted {
+				age := time.Since(f.synAt)
+				if age > 3*time.Second && age < 12*time.Second {
+					f.emitted = true
+					out = append(out, Candidate{DstIP: f.dstIP, Signal: "syn-timeout", Seen: time.Now()})
+				}
+			}
+			if since(f) > 30*time.Second {
 				delete(w.flows, k)
 			}
 		}
@@ -145,6 +188,15 @@ func (w *Watcher) cleaner() {
 			w.emit(c)
 		}
 	}
+}
+
+// since — возраст flow по самой поздней известной метке (SYN или ClientHello).
+func since(f *flowState) time.Duration {
+	t := f.synAt
+	if f.chAt.After(t) {
+		t = f.chAt
+	}
+	return time.Since(t)
 }
 
 func flowKey(a net.IP, ap uint16, b net.IP, bp uint16) string {
