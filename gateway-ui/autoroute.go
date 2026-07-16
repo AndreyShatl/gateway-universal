@@ -56,14 +56,15 @@ func (s *server) syncAutoroute(a autoRoute) {
 	runCmd("systemctl", "start", "gateway-detector.service")
 	runCmd("ipset", "flush", autorouteIPSet)
 	for _, e := range a.Entries {
-		if strings.HasPrefix(e, "geosite:") {
+		addr := e.Addr
+		if strings.HasPrefix(addr, "geosite:") {
 			continue // geosite не резолвится в IP — только через xray-роутинг (не наш путь)
 		}
-		if net.ParseIP(e) != nil || strings.Contains(e, "/") {
-			runCmd("ipset", "add", autorouteIPSet, e, "-exist")
+		if net.ParseIP(addr) != nil || strings.Contains(addr, "/") {
+			runCmd("ipset", "add", autorouteIPSet, addr, "-exist")
 			continue
 		}
-		for _, ip := range resolveV4(e) {
+		for _, ip := range resolveV4(addr) {
 			runCmd("ipset", "add", autorouteIPSet, ip, "-exist")
 		}
 	}
@@ -87,8 +88,35 @@ func resolveV4(host string) []string {
 // роутингу придут отдельным этапом. Хранилище — /etc/gateway/autoroute.json.
 
 type autoRoute struct {
-	Enabled bool     `json:"enabled"`
-	Entries []string `json:"entries"`
+	Enabled bool    `json:"enabled"`
+	Entries []entry `json:"entries"`
+}
+
+// entry — адрес в авто-обходе + метаданные (когда и чем добавлен).
+type entry struct {
+	Addr   string `json:"addr"`
+	Added  string `json:"added,omitempty"`  // RFC3339
+	Source string `json:"source,omitempty"` // manual | rst-after-clienthello | syn-timeout | quic-no-response | legacy
+}
+
+// UnmarshalJSON — принимает и новый объект, и старую строку (миграция формата).
+func (e *entry) UnmarshalJSON(b []byte) error {
+	b = []byte(strings.TrimSpace(string(b)))
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		e.Addr, e.Source = s, "legacy"
+		return nil
+	}
+	type raw entry
+	var r raw
+	if err := json.Unmarshal(b, &r); err != nil {
+		return err
+	}
+	*e = entry(r)
+	return nil
 }
 
 var domainRe = regexp.MustCompile(`^(geosite:[a-z0-9_-]+|([a-z0-9_-]+\.)+[a-z]{2,})$`)
@@ -99,7 +127,7 @@ func (s *server) readAutoRoute() autoRoute {
 		json.Unmarshal(data, &a)
 	}
 	if a.Entries == nil {
-		a.Entries = []string{}
+		a.Entries = []entry{}
 	}
 	return a
 }
@@ -148,21 +176,22 @@ func (s *server) handleAutoRoute(w http.ResponseWriter, r *http.Request) {
 		case "add":
 			seen := map[string]bool{}
 			for _, e := range a.Entries {
-				seen[e] = true
+				seen[e.Addr] = true
 			}
+			now := time.Now().UTC().Format(time.RFC3339)
 			for _, raw := range strings.FieldsFunc(r.FormValue("value"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\r' || c == '\t' }) {
 				v := strings.ToLower(strings.TrimSpace(raw))
 				if !validAddr(v) || seen[v] {
 					continue
 				}
 				seen[v] = true
-				a.Entries = append(a.Entries, v)
+				a.Entries = append(a.Entries, entry{Addr: v, Added: now, Source: "manual"})
 			}
 		case "remove":
 			v := strings.ToLower(strings.TrimSpace(r.FormValue("value")))
 			kept := a.Entries[:0:0]
 			for _, e := range a.Entries {
-				if e != v {
+				if e.Addr != v {
 					kept = append(kept, e)
 				}
 			}
