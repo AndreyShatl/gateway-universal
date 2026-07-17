@@ -7,4 +7,4 @@ Wants=network-online.target
 Type=oneshot
 # Перепроверяет весь список авто-обхода напрямую vs через VPS; убирает адреса,
 # которые снова работают напрямую ДВА прогона подряд. Пул воркеров -> минуты.
-ExecStart=/opt/gateway-detector recheck --apply --socks 127.0.0.1:1080
+ExecStart=/opt/gateway-detector recheck --apply --socks 127.0.0.1:1081
