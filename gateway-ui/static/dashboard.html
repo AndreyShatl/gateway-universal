@@ -395,7 +395,8 @@
           <div class="muted" style="margin-top:6px">Демоны nfqws, очереди трафика и сервисы. Обновляется каждые 3 c. Только просмотр.</div>
         </div>
         <div class="card">
-          <h2>Демоны nfqws (<span id="monDCount">0</span>)</h2>
+          <h2>Профили nfqws (<span id="monDCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Один демон несёт несколько профилей (по сервису). Кликни стратегию, чтобы развернуть.</div>
           <div style="overflow-x:auto"><table id="monDaemons" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
         </div>
         <div class="card">
@@ -904,18 +905,27 @@
       const tr = rows.map(r => '<tr>' + r.map(c => `<td style="padding:5px 8px; border-bottom:1px solid var(--border,#2222)">${c}</td>`).join('') + '</tr>').join('');
       el.innerHTML = th + tr;
     }
+    const svcBadge = m => m === 'vps'
+      ? '<span class="st-badge">VPS</span>'
+      : '<span class="st-badge" style="background:var(--good-tx);color:#fff">zapret</span>';
+    function stratCell(s) {
+      if (!s) return '—';
+      const short = s.length > 46 ? esc(s.slice(0, 46)) + '…' : esc(s);
+      return `<details><summary style="cursor:pointer; list-style:none"><code style="font-size:.85em">${short}</code></summary><code style="font-size:.85em; white-space:normal; word-break:break-word">${esc(s)}</code></details>`;
+    }
     function renderMonitor(d) {
-      const ds = d.daemons || [];
-      document.getElementById('monDCount').textContent = ds.length;
-      tbl(document.getElementById('monDaemons'), ['PID', 'Очередь', 'Proto', 'Фильтр', 'Стратегия', 'Hostlist'],
-        ds.map(x => [x.pid, x.qnum, x.proto || '—', esc(x.filter || '—'), `<code style="font-size:.85em">${esc(x.strategy || '—')}</code>`, esc(x.hostlist || '—')]));
+      const ps = (d.profiles || []).sort((a, b) => a.qnum - b.qnum || (a.service||'').localeCompare(b.service||''));
+      document.getElementById('monDCount').textContent = ps.length;
+      tbl(document.getElementById('monDaemons'), ['Очередь', 'Сервис', 'Proto', 'Порты', 'Стратегия'],
+        ps.map(x => [x.qnum, `<b>${esc(x.service||'—')}</b>` + (x.l7?` <span class="muted" style="font-size:.8em">${esc(x.l7)}</span>`:''), x.proto || '—', esc(x.ports || '—'), stratCell(x.strategy)]));
       const qs = (d.queues || []).sort((a, b) => a.qnum - b.qnum);
       tbl(document.getElementById('monQueues'), ['Очередь', 'Пакетов', 'В очереди', 'Дропов', 'User-drop'],
-        qs.map(x => [x.qnum, x.packets.toLocaleString(), x.queued, x.dropped ? `<span style="color:var(--bad-tx)">${x.dropped}</span>` : 0, x.user_dropped || 0]));
+        qs.map(x => [x.qnum, (x.packets||0).toLocaleString(), x.queued, x.dropped ? `<span style="color:var(--bad-tx)">${x.dropped}</span>` : 0, x.user_dropped || 0]));
       const sv = (d.services || []);
       document.getElementById('monSCount').textContent = sv.length;
-      tbl(document.getElementById('monServices'), ['Сервис', 'Режим', 'Доменов'],
-        sv.map(x => [esc(x.name || x.id), x.mode === 'vps' ? '<span class="st-badge">VPS</span>' : '<span class="st-badge" style="background:var(--good-tx);color:#fff">zapret</span>', x.domains]));
+      tbl(document.getElementById('monServices'), ['Сервис', 'Режим', 'Доменов', 'Каналы (очереди)'],
+        sv.map(x => [esc(x.name || x.id), svcBadge(x.mode), x.domains,
+          (x.channels && x.channels.length) ? x.channels.map(c => `<code style="font-size:.82em">${esc(c)}</code>`).join('<br>') : '<span class="muted">— (через VPS)</span>']));
       document.getElementById('monUpd').textContent = 'обновлено ' + new Date().toLocaleTimeString();
     }
     function loadMonitor() {

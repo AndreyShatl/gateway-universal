@@ -14,13 +14,16 @@ import (
 // Монитор zapret (read-only): демоны nfqws (профиль/стратегия), счётчики NFQUEUE
 // (пакеты/дропы), статус сервисов из zapret-services.json. Не трогает боевой путь.
 
-type nfqDaemon struct {
+// nfqProfile — один профиль nfqws (один сервис на очереди). У демона их может
+// быть много (мультипрофиль через --new) — раскладываем по строкам.
+type nfqProfile struct {
 	PID      int    `json:"pid"`
 	Qnum     int    `json:"qnum"`
-	Proto    string `json:"proto"`    // tcp | udp
-	Filter   string `json:"filter"`   // порты/фильтр
-	Strategy string `json:"strategy"` // --dpi-desync… кратко
-	Hostlist string `json:"hostlist"`
+	Service  string `json:"service"` // из hostlist (basename) или "весь трафик"
+	Proto    string `json:"proto"`   // tcp | udp
+	Ports    string `json:"ports"`
+	L7       string `json:"l7,omitempty"`
+	Strategy string `json:"strategy"` // --dpi-desync… очищено
 }
 
 type queueStat struct {
@@ -32,32 +35,35 @@ type queueStat struct {
 }
 
 type svcInfo struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Mode    string `json:"mode"` // zapret | vps
-	Domains int    `json:"domains"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Mode     string   `json:"mode"` // zapret | vps
+	Domains  int      `json:"domains"`
+	Channels []string `json:"channels"` // напр. ["tcp:443","udp:50000-50100 (discord,stun)"]
 }
 
 var (
-	reQnum   = regexp.MustCompile(`--qnum=(\d+)`)
+	reQnum    = regexp.MustCompile(`--qnum=(\d+)`)
 	reFilterT = regexp.MustCompile(`--filter-tcp=(\S+)`)
 	reFilterU = regexp.MustCompile(`--filter-udp=(\S+)`)
-	reDesync = regexp.MustCompile(`--dpi-desync=(\S+)`)
-	reHost   = regexp.MustCompile(`--hostlist=(\S+)`)
+	reL7      = regexp.MustCompile(`--filter-l7=(\S+)`)
+	reHost    = regexp.MustCompile(`--hostlist=(\S+)`)
+	reFakePath = regexp.MustCompile(`\s--dpi-desync-fake-\S+=\S+`)
 )
 
 func (s *server) handleMonitor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"daemons":  nfqDaemons(),
+		"profiles": nfqProfiles(),
 		"queues":   queueStats(),
 		"services": svcList(s),
 	})
 }
 
-// nfqDaemons — распарсить `pgrep -a nfqws`.
-func nfqDaemons() []nfqDaemon {
+// nfqProfiles — распарсить `pgrep -a nfqws`, разложив мультипрофиль (--new) по
+// сервисам: одна строка = один профиль (сервис на очереди со своей стратегией).
+func nfqProfiles() []nfqProfile {
 	out, _ := exec.Command("pgrep", "-a", "nfqws").Output()
-	var ds []nfqDaemon
+	var ps []nfqProfile
 	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if ln == "" {
 			continue
@@ -68,34 +74,39 @@ func nfqDaemons() []nfqDaemon {
 		if len(fields) > 1 {
 			cmd = fields[1]
 		}
-		d := nfqDaemon{PID: pid}
+		qnum := 0
 		if m := reQnum.FindStringSubmatch(cmd); m != nil {
-			d.Qnum, _ = strconv.Atoi(m[1])
+			qnum, _ = strconv.Atoi(m[1])
 		}
-		if m := reFilterT.FindStringSubmatch(cmd); m != nil {
-			d.Proto, d.Filter = "tcp", m[1]
+		// профили разделены " --new "
+		for _, seg := range strings.Split(cmd, "--new") {
+			p := nfqProfile{PID: pid, Qnum: qnum, Service: "весь трафик"}
+			if m := reFilterT.FindStringSubmatch(seg); m != nil {
+				p.Proto, p.Ports = "tcp", m[1]
+			}
+			if m := reFilterU.FindStringSubmatch(seg); m != nil {
+				p.Proto, p.Ports = "udp", m[1]
+			}
+			if p.Proto == "" {
+				continue // не профиль (напр. хвост)
+			}
+			if m := reL7.FindStringSubmatch(seg); m != nil {
+				p.L7 = m[1]
+			}
+			if m := reHost.FindStringSubmatch(seg); m != nil {
+				parts := strings.Split(m[1], "/")
+				p.Service = strings.TrimSuffix(parts[len(parts)-1], ".txt")
+			}
+			if i := strings.Index(seg, "--dpi-desync="); i >= 0 {
+				st := reFakePath.ReplaceAllString(seg[i:], "")
+				st = strings.ReplaceAll(st, "--dpi-desync=", "")
+				st = strings.ReplaceAll(st, "--dpi-desync-", "")
+				p.Strategy = strings.Join(strings.Fields(st), " ")
+			}
+			ps = append(ps, p)
 		}
-		if m := reFilterU.FindStringSubmatch(cmd); m != nil {
-			d.Proto, d.Filter = "udp", m[1]
-		}
-		// стратегия = всё от --dpi-desync до конца (кратко), без путей fake-файлов
-		if i := strings.Index(cmd, "--dpi-desync="); i >= 0 {
-			st := cmd[i:]
-			st = regexp.MustCompile(`\s--dpi-desync-fake-\S+=\S+`).ReplaceAllString(st, "")
-			st = strings.ReplaceAll(st, "--dpi-desync=", "")
-			st = strings.ReplaceAll(st, "--dpi-desync-", "")
-			d.Strategy = strings.TrimSpace(st)
-		}
-		if m := reDesync.FindStringSubmatch(cmd); m != nil && d.Strategy == "" {
-			d.Strategy = m[1]
-		}
-		if m := reHost.FindStringSubmatch(cmd); m != nil {
-			parts := strings.Split(m[1], "/")
-			d.Hostlist = parts[len(parts)-1]
-		}
-		ds = append(ds, d)
 	}
-	return ds
+	return ps
 }
 
 // queueStats — /proc/net/netfilter/nfnetlink_queue + счётчики пакетов из iptables.
@@ -159,10 +170,15 @@ func svcList(s *server) []svcInfo {
 		return nil
 	}
 	var raw []struct {
-		ID      string   `json:"id"`
-		Name    string   `json:"name"`
-		Mode    string   `json:"mode"`
-		Domains []string `json:"domains"`
+		ID       string   `json:"id"`
+		Name     string   `json:"name"`
+		Mode     string   `json:"mode"`
+		Domains  []string `json:"domains"`
+		Channels []struct {
+			Proto string `json:"proto"`
+			Ports string `json:"ports"`
+			L7    string `json:"l7"`
+		} `json:"channels"`
 	}
 	json.Unmarshal(data, &raw)
 	var out []svcInfo
@@ -171,7 +187,15 @@ func svcList(s *server) []svcInfo {
 		if mode == "" {
 			mode = "zapret"
 		}
-		out = append(out, svcInfo{ID: r.ID, Name: r.Name, Mode: mode, Domains: len(r.Domains)})
+		var chans []string
+		for _, c := range r.Channels {
+			s := c.Proto + ":" + c.Ports
+			if c.L7 != "" {
+				s += " (" + c.L7 + ")"
+			}
+			chans = append(chans, s)
+		}
+		out = append(out, svcInfo{ID: r.ID, Name: r.Name, Mode: mode, Domains: len(r.Domains), Channels: chans})
 	}
 	return out
 }
