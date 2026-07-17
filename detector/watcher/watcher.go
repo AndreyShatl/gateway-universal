@@ -36,10 +36,21 @@ type Watcher struct {
 	DryRun      bool
 	OnCandidate func(Candidate)
 
-	mu    sync.Mutex
-	flows map[string]*flowState
-	quic  map[string]*quicState
+	mu       sync.Mutex
+	flows    map[string]*flowState
+	quic     map[string]*quicState
+	synFails map[string]*synFail // dst -> счётчик неудачных SYN (порог, чтобы не шуметь)
 }
+
+// synFail — сколько раз к данному dst SYN ушёл без SYN-ACK. Флагуем блок только
+// после synThreshold попыток (одноразовые сбои happy-eyeballs/спекулятивные — мимо).
+type synFail struct {
+	count   int
+	lastAt  time.Time
+	emitted bool
+}
+
+const synThreshold = 5
 
 // quicState — QUIC-соединение (HTTP/3): Initial ушёл, ждём ответ сервера.
 type quicState struct {
@@ -80,6 +91,7 @@ func (w *Watcher) Run() error {
 	}
 	w.flows = map[string]*flowState{}
 	w.quic = map[string]*quicState{}
+	w.synFails = map[string]*synFail{}
 	go w.cleaner()
 
 	log.Printf("watcher: слушаю %s (dry-run=%v), фильтр: %s", w.Iface, w.DryRun, bpf)
@@ -231,12 +243,25 @@ func (w *Watcher) cleaner() {
 					out = append(out, Candidate{SNI: f.sni, DstIP: f.dstIP, Signal: "no-response-after-clienthello", Seen: time.Now()})
 				}
 			}
-			// сигнал 2: SYN ушёл, SYN-ACK так и не пришёл >3с (блок по IP, SYN дропается)
+			// сигнал 2: SYN ушёл, SYN-ACK так и не пришёл >3с. Одна неудача — не блок
+			// (happy-eyeballs, спекулятивные коннекты). Флагуем только после
+			// synThreshold попыток к одному dst:port за окно.
 			if !f.synAt.IsZero() && !f.gotSynAck && !f.emitted {
 				age := time.Since(f.synAt)
 				if age > 3*time.Second && age < 12*time.Second {
 					f.emitted = true
-					out = append(out, Candidate{DstIP: f.dstIP, Port: int(f.dstPort), Signal: "syn-timeout", Seen: time.Now()})
+					key := fmt.Sprintf("%s:%d", f.dstIP, f.dstPort)
+					sf := w.synFails[key]
+					if sf == nil {
+						sf = &synFail{}
+						w.synFails[key] = sf
+					}
+					sf.count++
+					sf.lastAt = time.Now()
+					if sf.count >= synThreshold && !sf.emitted {
+						sf.emitted = true
+						out = append(out, Candidate{DstIP: f.dstIP, Port: int(f.dstPort), Signal: "syn-timeout", Seen: time.Now()})
+					}
 				}
 			}
 			if since(f) > 30*time.Second {
@@ -257,6 +282,12 @@ func (w *Watcher) cleaner() {
 			}
 			if age > 30*time.Second {
 				delete(w.quic, k)
+			}
+		}
+		// сброс счётчиков SYN без активности >15 мин (окно накопления попыток)
+		for k, sf := range w.synFails {
+			if time.Since(sf.lastAt) > 15*time.Minute {
+				delete(w.synFails, k)
 			}
 		}
 		w.mu.Unlock()
