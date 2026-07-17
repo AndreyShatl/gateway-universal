@@ -7,7 +7,7 @@
 //
 // Пока: CLI-обёртка над prober для проверки/отладки механизма.
 //
-//	gateway-detector probe <target> [--port 443] [--sni name] [--socks 127.0.0.1:1080] [--no-tls]
+//	gateway-detector probe <target> [--port 443] [--sni name] [--socks 127.0.0.1:1081] [--no-tls]
 package main
 
 import (
@@ -46,7 +46,7 @@ func main() {
 	fs := flag.NewFlagSet("probe", flag.ExitOnError)
 	port := fs.Int("port", 443, "порт цели")
 	sni := fs.String("sni", "", "SNI для TLS (по умолчанию = target)")
-	socks := fs.String("socks", "127.0.0.1:1080", "адрес VPS-socks5")
+	socks := fs.String("socks", "127.0.0.1:1081", "адрес VPS-socks5")
 	noTLS := fs.Bool("no-tls", false, "не делать TLS-рукопожатие (просто TCP-connect)")
 	timeout := fs.Duration("timeout", 5*time.Second, "таймаут на фазу")
 	fs.Parse(os.Args[3:])
@@ -69,7 +69,7 @@ func runWatch() {
 	iface := fs.String("iface", "", "WAN-интерфейс (авто, если пусто)")
 	vps := fs.String("vps", "", "IP VPS — исключить туннель (авто из --config-env, если пусто)")
 	configEnv := fs.String("config-env", "/root/gateway-universal/config.env", "config.env для VPS_ADDR")
-	socks := fs.String("socks", "127.0.0.1:1080", "VPS-socks5 для перепроверки")
+	socks := fs.String("socks", "127.0.0.1:1081", "VPS-socks5 для перепроверки")
 	apply := fs.Bool("apply", false, "применять (иначе тень: только лог, что БЫ добавил)")
 	fs.Parse(os.Args[2:])
 	if *iface == "" {
@@ -121,7 +121,7 @@ func runWatch() {
 // подряд — убираем из списка. Пул воркеров: большой список — минуты, не часы.
 func runRecheck() {
 	fs := flag.NewFlagSet("recheck", flag.ExitOnError)
-	socks := fs.String("socks", "127.0.0.1:1080", "VPS-socks5 для перепроверки")
+	socks := fs.String("socks", "127.0.0.1:1081", "VPS-socks5 для перепроверки")
 	workers := fs.Int("workers", 30, "число параллельных проб")
 	timeout := fs.Duration("timeout", 6*time.Second, "таймаут на фазу пробы")
 	apply := fs.Bool("apply", false, "реально удалять (иначе тень: только лог)")

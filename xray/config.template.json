@@ -87,6 +87,23 @@
       }
     },
     {
+      "tag": "socks-vps",
+      "port": 1081,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ]
+      }
+    },
+    {
       "tag": "http-in",
       "port": 8080,
       "listen": "0.0.0.0",
@@ -229,6 +246,14 @@
   "routing": {
     "domainStrategy": "IPIfNonMatch",
     "rules": [
+      {
+        "type": "field",
+        "comment": "Проверка авто-обхода: socks-vps (:1081) ВСЕГДА через VPS — для честной VPS-пробы детектора/перепроверки",
+        "inboundTag": [
+          "socks-vps"
+        ],
+        "outboundTag": "proxy-mux"
+      },
       {
         "type": "field",
         "comment": "Авто-обход: трафик, попавший в ipset gw_autoroute (iptables → :12347), всегда через VPS",
