@@ -84,6 +84,14 @@ func runWatch() {
 	log.Printf("detector: iface=%s vps=%s apply=%v", *iface, *vps, *apply)
 	// watcher -> prober (подтверждение) -> [тень: лог | apply: применить]
 	handler := func(c watcher.Candidate) {
+		// UDP-«без ответа»: НЕ авто-добавляем. Молчание UDP неоднозначно — многие
+		// сервисы (напр. latency-пинги AWS GameLift) не отвечают by design, а не
+		// из-за блока, и маршрут через VPS их не оживляет. Поэтому только логируем
+		// кандидата — можно добавить вручную, если это реально нужный адрес.
+		if c.Signal == "udp-no-reply" {
+			log.Printf("🔵 UDP без ответа: %s:%d (кандидат, не добавляю — UDP-молчание неоднозначно)", c.DstIP, c.Port)
+			return
+		}
 		target := c.SNI
 		if target == "" {
 			target = c.DstIP // без SNI (syn-timeout) — проверяем по IP
@@ -216,8 +224,8 @@ func runRecheck() {
 
 	if *apply {
 		kept := applier.UpdateClean(remove, clean)
-		if s.Enabled {
-			applier.Sync(kept) // ресинк ipset только когда авто-обход включён
+		if s.RouteOn() {
+			applier.Sync(kept) // ресинк ipset только когда применение включено
 		}
 	}
 	dur := time.Since(start)

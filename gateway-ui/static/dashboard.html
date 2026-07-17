@@ -254,16 +254,19 @@
 
         <div data-subpane="list">
         <div class="card">
-          <div class="row" style="justify-content:space-between; align-items:center">
-            <h2 style="margin:0">Авто-обход <span class="st-badge">beta</span></h2>
-            <label class="switch" title="Включить авто-обход">
-              <input type="checkbox" id="arEnabled"><span class="slider"></span>
+          <h2 style="margin:0 0 4px">Авто-обход <span class="st-badge">beta</span></h2>
+          <div class="muted" style="margin-bottom:10px">Отдельный список адресов через VPS — <b>не трогает основной</b>. Два независимых тумблера:</div>
+          <div class="row" style="gap:22px; flex-wrap:wrap">
+            <label class="row" style="gap:8px; align-items:center; cursor:pointer">
+              <span class="switch"><input type="checkbox" id="arDetect"><span class="slider"></span></span>
+              <span><b>Пополнять</b><br><span class="muted" style="font-size:.85em">детектор ловит блоки и добавляет в список</span></span>
+            </label>
+            <label class="row" style="gap:8px; align-items:center; cursor:pointer">
+              <span class="switch"><input type="checkbox" id="arRoute"><span class="slider"></span></span>
+              <span><b>Применять</b><br><span class="muted" style="font-size:.85em">список реально заворачивается через VPS</span></span>
             </label>
           </div>
-          <div class="muted" style="margin-top:8px">Отдельный список адресов, которые идут через VPS — <b>не трогает основной</b>.
-            Когда включено, недоступные сайты/игровые сервера могут добавляться сюда автоматически (логика детекции — следующим этапом),
-            плюс можно добавлять домены и IP вручную «на лету».</div>
-          <div id="arState" class="msg" style="margin-top:8px"></div>
+          <div id="arState" class="msg" style="margin-top:10px"></div>
         </div>
 
         <div class="card">
@@ -943,7 +946,8 @@
     fetch('/api/domains').then(r => r.json()).then(d => { renderDomains(d.domains); renderDefaults(d.defaults); });
 
     // --- Авто-обход (отдельный список + тумблер) ---
-    const arEnabled = document.getElementById('arEnabled');
+    const arDetect = document.getElementById('arDetect');
+    const arRoute = document.getElementById('arRoute');
     const arState = document.getElementById('arState');
     const arInput = document.getElementById('arInput');
     const arMsg = document.getElementById('arMsg');
@@ -969,9 +973,15 @@
     }
     function renderAutoroute(d) {
       if (d) {
-        arEnabled.checked = !!d.enabled;
-        arState.className = 'msg ' + (d.enabled ? 'good' : '');
-        arState.textContent = d.enabled ? '✓ включено — список применяется к VPS-роутингу' : 'выключено — список не применяется';
+        arDetect.checked = !!d.detect;
+        arRoute.checked = !!d.route;
+        const on = d.detect || d.route;
+        arState.className = 'msg ' + (on ? 'good' : '');
+        arState.textContent =
+          d.detect && d.route ? '✓ пополняется и применяется' :
+          d.detect ? '◐ пополняется, но НЕ применяется (только собираем список)' :
+          d.route ? '◐ применяется, но НЕ пополняется (список зафиксирован)' :
+          'выключено — список сохранён, но не активен';
         arEntries = (d.entries || []).map(e => typeof e === 'string' ? { addr:e } : e);
       }
       const q = arFilter.value.trim().toLowerCase();
@@ -1009,7 +1019,9 @@
           renderAutoroute(d);
         }).catch(() => { arMsg.className='msg bad'; arMsg.textContent='✗ сеть'; });
     }
-    arEnabled.onchange = () => arPost({ action:'enable', on: arEnabled.checked });
+    const arSetMode = () => arPost({ action:'mode', detect: arDetect.checked, route: arRoute.checked });
+    arDetect.onchange = arSetMode;
+    arRoute.onchange = arSetMode;
     document.getElementById('arAdd').onclick = () => {
       const v = arInput.value.trim(); if (!v) return;
       arMsg.className='msg'; arMsg.textContent='Добавляю…';

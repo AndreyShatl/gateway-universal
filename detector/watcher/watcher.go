@@ -39,7 +39,8 @@ type Watcher struct {
 	mu       sync.Mutex
 	flows    map[string]*flowState
 	quic     map[string]*quicState
-	synFails map[string]*synFail // dst -> счётчик неудачных SYN (порог, чтобы не шуметь)
+	udp      map[string]*udpState // dst:port -> счётчик UDP без ответа (не 443/53)
+	synFails map[string]*synFail  // dst -> счётчик неудачных SYN (порог, чтобы не шуметь)
 }
 
 // synFail — сколько раз к данному dst SYN ушёл без SYN-ACK. Флагуем блок только
@@ -60,6 +61,19 @@ type quicState struct {
 	gotResp bool
 	emitted bool
 }
+
+// udpState — общий UDP (не 443/53): шлём пакеты, считаем ответы. Много ушло, ноль
+// пришло = блок по IP (игровые сессии, напр. AWS GameLift). Флагуем по порогу.
+type udpState struct {
+	dstIP   string
+	dstPort uint16
+	sent    int
+	recv    int
+	firstAt time.Time
+	emitted bool
+}
+
+const udpThreshold = 8 // пакетов ушло без единого ответа -> кандидат
 
 type flowState struct {
 	sni       string
@@ -82,7 +96,7 @@ func (w *Watcher) Run() error {
 	// TLS-записи (0x16) — не смотрим полезную нагрузку соединений.
 	// SYN/SYN-ACK ловим на ВСЕХ портах (блок игровых серверов по IP — не только 443);
 	// RST и TLS-record — только на 443 (веб-сигналы); QUIC — udp/443.
-	bpf := "((tcp and tcp[tcpflags] & tcp-syn != 0) or (tcp and port 443 and (tcp[tcpflags] & tcp-rst != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)) or (udp and port 443))"
+	bpf := "((tcp and tcp[tcpflags] & tcp-syn != 0) or (tcp and port 443 and (tcp[tcpflags] & tcp-rst != 0 or tcp[((tcp[12]&0xf0)>>2)] = 0x16)) or (udp and not port 53))"
 	if w.VPSIP != "" {
 		bpf += " and not host " + w.VPSIP
 	}
@@ -91,6 +105,7 @@ func (w *Watcher) Run() error {
 	}
 	w.flows = map[string]*flowState{}
 	w.quic = map[string]*quicState{}
+	w.udp = map[string]*udpState{}
 	w.synFails = map[string]*synFail{}
 	go w.cleaner()
 
@@ -184,33 +199,56 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 // handleUDP — QUIC (HTTP/3) на :443. Ловим клиентский Initial (расшифровываем SNI)
 // и следим, ответил ли сервер. Молчание сервера >3с после Initial = блок HTTP/3.
 func (w *Watcher) handleUDP(ip *layers.IPv4, udp *layers.UDP) {
-	if udp.SrcPort != 443 && udp.DstPort != 443 {
-		return
-	}
-	pl := udp.Payload
-	// клиентский Initial — исходящий (dst:443) и это разбираемый QUIC Initial
-	if udp.DstPort == 443 && len(pl) >= 1200 && isQUICClientInitial(pl) {
-		if isPrivate(ip.DstIP) {
+	// --- QUIC (HTTP/3) на 443 ---
+	if udp.DstPort == 443 || udp.SrcPort == 443 {
+		pl := udp.Payload
+		if udp.DstPort == 443 && len(pl) >= 1200 && isQUICClientInitial(pl) {
+			if isPrivate(ip.DstIP) {
+				return
+			}
+			key := flowKey(ip.SrcIP, uint16(udp.SrcPort), ip.DstIP, uint16(udp.DstPort))
+			sni := parseQUICInitialSNI(pl)
+			if debugQUIC {
+				log.Printf("🔧 quic-initial dst=%s len=%d sni=%q", ip.DstIP, len(pl), sni)
+			}
+			w.mu.Lock()
+			if w.quic[key] == nil {
+				w.quic[key] = &quicState{sni: sni, dstIP: ip.DstIP.String(), sentAt: time.Now()}
+			}
+			w.mu.Unlock()
 			return
 		}
-		key := flowKey(ip.SrcIP, uint16(udp.SrcPort), ip.DstIP, uint16(udp.DstPort))
-		sni := parseQUICInitialSNI(pl)
-		if debugQUIC {
-			log.Printf("🔧 quic-initial dst=%s len=%d sni=%q", ip.DstIP, len(pl), sni)
+		if udp.SrcPort == 443 {
+			key := flowKey(ip.DstIP, uint16(udp.DstPort), ip.SrcIP, uint16(udp.SrcPort))
+			w.mu.Lock()
+			if q := w.quic[key]; q != nil && q.dstIP == ip.SrcIP.String() {
+				q.gotResp = true
+			}
+			w.mu.Unlock()
 		}
-		w.mu.Lock()
-		if w.quic[key] == nil {
-			w.quic[key] = &quicState{sni: sni, dstIP: ip.DstIP.String(), sentAt: time.Now()}
-		}
-		w.mu.Unlock()
 		return
 	}
-	// ответ сервера (src:443) — соединение живо, снимаем подозрение
-	if udp.SrcPort == 443 {
-		key := flowKey(ip.DstIP, uint16(udp.DstPort), ip.SrcIP, uint16(udp.SrcPort))
+
+	// --- общий UDP (не 443/53): «шлём, ответа нет» = блок по IP (игровые сессии) ---
+	// внешний адрес должен быть обычным публичным unicast (не multicast/broadcast —
+	// они не отвечают by design и дали бы ложные срабатывания).
+	out := isPrivate(ip.SrcIP) && pubUnicast(ip.DstIP) // исходящий к публичному
+	in := pubUnicast(ip.SrcIP) && isPrivate(ip.DstIP)  // входящий от публичного
+	if out {
+		key := fmt.Sprintf("%s:%d", ip.DstIP, uint16(udp.DstPort))
 		w.mu.Lock()
-		if q := w.quic[key]; q != nil && q.dstIP == ip.SrcIP.String() {
-			q.gotResp = true
+		u := w.udp[key]
+		if u == nil {
+			u = &udpState{dstIP: ip.DstIP.String(), dstPort: uint16(udp.DstPort), firstAt: time.Now()}
+			w.udp[key] = u
+		}
+		u.sent++
+		w.mu.Unlock()
+	} else if in {
+		key := fmt.Sprintf("%s:%d", ip.SrcIP, uint16(udp.SrcPort))
+		w.mu.Lock()
+		if u := w.udp[key]; u != nil {
+			u.recv++
 		}
 		w.mu.Unlock()
 	}
@@ -290,6 +328,17 @@ func (w *Watcher) cleaner() {
 				delete(w.synFails, k)
 			}
 		}
+		// UDP (не 443/53): много ушло, ноль пришло >3с = блок по IP (игровые сессии)
+		for k, u := range w.udp {
+			age := time.Since(u.firstAt)
+			if u.recv == 0 && u.sent >= udpThreshold && !u.emitted && age > 3*time.Second && age < 30*time.Second {
+				u.emitted = true
+				out = append(out, Candidate{DstIP: u.dstIP, Port: int(u.dstPort), Signal: "udp-no-reply", Seen: time.Now()})
+			}
+			if age > 60*time.Second {
+				delete(w.udp, k)
+			}
+		}
 		w.mu.Unlock()
 		for _, c := range out {
 			w.emit(c)
@@ -316,6 +365,12 @@ func flowKey(a net.IP, ap uint16, b net.IP, bp uint16) string {
 
 func isPrivate(ip net.IP) bool {
 	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
+// pubUnicast — обычный публичный unicast (не приватный, не multicast/broadcast/
+// loopback). Для udp-no-reply, чтобы не ловить multicast (он не отвечает by design).
+func pubUnicast(ip net.IP) bool {
+	return ip.IsGlobalUnicast() && !ip.IsPrivate()
 }
 
 // parseSNI — извлечь server_name из TLS ClientHello (payload TLS-записи).
