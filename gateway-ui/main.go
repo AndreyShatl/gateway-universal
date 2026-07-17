@@ -119,6 +119,7 @@ func main() {
 	mux.HandleFunc("/api/connections", s.requireAuth(s.handleConnections))
 	mux.HandleFunc("/api/autoroute", s.requireAuth(s.handleAutoRoute))
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
+	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
 	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))

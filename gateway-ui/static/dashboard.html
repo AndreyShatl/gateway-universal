@@ -190,6 +190,7 @@
       <a data-nav="instagram">▸ Instagram</a>
       <a data-nav="zapret">▸ Zapret (прочие)</a>
       <div class="nav-grp">Система</div>
+      <a data-nav="monitor">Мониторинг</a>
       <a data-nav="network">Сеть</a>
       <a data-nav="services">Управление</a>
     </nav>
@@ -382,6 +383,28 @@
           <div id="svcOthers"></div>
           <div class="row"><button id="svcAdd">+ Сервис</button><button id="svcSave">Сохранить всё</button></div>
           <div id="svcMsg2" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="monitor">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h2 style="margin:0">Мониторинг zapret</h2>
+            <span class="muted" style="font-size:.85em" id="monUpd"></span>
+          </div>
+          <div class="muted" style="margin-top:6px">Демоны nfqws, очереди трафика и сервисы. Обновляется каждые 3 c. Только просмотр.</div>
+        </div>
+        <div class="card">
+          <h2>Демоны nfqws (<span id="monDCount">0</span>)</h2>
+          <div style="overflow-x:auto"><table id="monDaemons" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Очереди NFQUEUE</h2>
+          <div style="overflow-x:auto"><table id="monQueues" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Сервисы (<span id="monSCount">0</span>)</h2>
+          <div style="overflow-x:auto"><table id="monServices" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
         </div>
       </section>
 
@@ -873,6 +896,33 @@
     }
     navItems.forEach(n => n.addEventListener('click', () => show(n.dataset.nav)));
     show((() => { try { return localStorage.getItem('gw-sec'); } catch (e) { return null; } })() || 'overview');
+
+    // --- Мониторинг zapret (read-only, авто-обновление 3с) ---
+    const monSec = document.querySelector('section[data-sec="monitor"]');
+    function tbl(el, headers, rows) {
+      const th = '<tr>' + headers.map(h => `<th style="text-align:left; padding:5px 8px; border-bottom:1px solid var(--border,#333); opacity:.7">${h}</th>`).join('') + '</tr>';
+      const tr = rows.map(r => '<tr>' + r.map(c => `<td style="padding:5px 8px; border-bottom:1px solid var(--border,#2222)">${c}</td>`).join('') + '</tr>').join('');
+      el.innerHTML = th + tr;
+    }
+    function renderMonitor(d) {
+      const ds = d.daemons || [];
+      document.getElementById('monDCount').textContent = ds.length;
+      tbl(document.getElementById('monDaemons'), ['PID', 'Очередь', 'Proto', 'Фильтр', 'Стратегия', 'Hostlist'],
+        ds.map(x => [x.pid, x.qnum, x.proto || '—', esc(x.filter || '—'), `<code style="font-size:.85em">${esc(x.strategy || '—')}</code>`, esc(x.hostlist || '—')]));
+      const qs = (d.queues || []).sort((a, b) => a.qnum - b.qnum);
+      tbl(document.getElementById('monQueues'), ['Очередь', 'Пакетов', 'В очереди', 'Дропов', 'User-drop'],
+        qs.map(x => [x.qnum, x.packets.toLocaleString(), x.queued, x.dropped ? `<span style="color:var(--bad-tx)">${x.dropped}</span>` : 0, x.user_dropped || 0]));
+      const sv = (d.services || []);
+      document.getElementById('monSCount').textContent = sv.length;
+      tbl(document.getElementById('monServices'), ['Сервис', 'Режим', 'Доменов'],
+        sv.map(x => [esc(x.name || x.id), x.mode === 'vps' ? '<span class="st-badge">VPS</span>' : '<span class="st-badge" style="background:var(--good-tx);color:#fff">zapret</span>', x.domains]));
+      document.getElementById('monUpd').textContent = 'обновлено ' + new Date().toLocaleTimeString();
+    }
+    function loadMonitor() {
+      fetch('/api/monitor').then(r => r.json()).then(renderMonitor).catch(() => {});
+    }
+    setInterval(() => { if (document.visibilityState === 'visible' && monSec && !monSec.hidden) loadMonitor(); }, 3000);
+    document.querySelector('.sidebar a[data-nav="monitor"]').addEventListener('click', loadMonitor);
 
     // --- Обзор: ping ---
     fetch('/api/ping').then(r => r.json()).then(d => {
