@@ -905,9 +905,7 @@
       const tr = rows.map(r => '<tr>' + r.map(c => `<td style="padding:5px 8px; border-bottom:1px solid var(--border,#2222)">${c}</td>`).join('') + '</tr>').join('');
       el.innerHTML = th + tr;
     }
-    const svcBadge = m => m === 'vps'
-      ? '<span class="st-badge">VPS</span>'
-      : '<span class="st-badge" style="background:var(--good-tx);color:#fff">zapret</span>';
+    const svcBadge = m => `<span class="st-badge">${m === 'vps' ? 'VPS' : 'zapret'}</span>`;
     function stratCell(s) {
       if (!s) return '—';
       const short = s.length > 46 ? esc(s.slice(0, 46)) + '…' : esc(s);
