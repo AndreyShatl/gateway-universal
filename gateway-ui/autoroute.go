@@ -47,13 +47,18 @@ func (s *server) ensureAutorouteRule(table string, spec []string) {
 // syncAutoroute — привести ipset в соответствие со списком + запустить/остановить
 // детектор по тумблеру (вызывается на каждое изменение и при старте gateway-ui).
 func (s *server) syncAutoroute(a autoRoute) {
-	if !a.Enabled {
+	// детектор (пополнение) — независимо от маршрута
+	if a.detect() {
+		runCmd("systemctl", "start", "gateway-detector.service")
+	} else {
 		runCmd("systemctl", "stop", "gateway-detector.service")
-		runCmd("ipset", "flush", autorouteIPSet)
+	}
+	// маршрут (применение) — независимо от детектора
+	if !a.route() {
+		runCmd("ipset", "flush", autorouteIPSet) // список остаётся в файле, но не применяется
 		return
 	}
 	s.ensureAutorouteInfra()
-	runCmd("systemctl", "start", "gateway-detector.service")
 	runCmd("ipset", "flush", autorouteIPSet)
 	for _, e := range a.Entries {
 		addr := e.Addr
@@ -88,8 +93,24 @@ func resolveV4(host string) []string {
 // роутингу придут отдельным этапом. Хранилище — /etc/gateway/autoroute.json.
 
 type autoRoute struct {
-	Enabled bool    `json:"enabled"`
+	Enabled bool    `json:"enabled"`          // legacy: означает «оба» (для старых читателей)
+	Detect  *bool   `json:"detect,omitempty"` // пополнять список (детектор)
+	Route   *bool   `json:"route,omitempty"`  // применять список к маршруту (ipset)
 	Entries []entry `json:"entries"`
+}
+
+// detect/route — с миграцией: если новые поля не заданы, берём из legacy Enabled.
+func (a autoRoute) detect() bool {
+	if a.Detect != nil {
+		return *a.Detect
+	}
+	return a.Enabled
+}
+func (a autoRoute) route() bool {
+	if a.Route != nil {
+		return *a.Route
+	}
+	return a.Enabled
 }
 
 // entry — адрес в авто-обходе + метаданные (когда и чем добавлен).
@@ -135,6 +156,9 @@ func (s *server) readAutoRoute() autoRoute {
 }
 
 func (s *server) writeAutoRoute(a autoRoute) error {
+	// нормализуем legacy Enabled = detect||route (для applier детектора и совместимости)
+	d, r := a.detect(), a.route()
+	a.Detect, a.Route, a.Enabled = &d, &r, d || r
 	if err := os.MkdirAll(filepath.Dir(s.autorouteFile), 0o755); err != nil {
 		return err
 	}
@@ -168,13 +192,17 @@ func (s *server) handleAutoRoute(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		a := s.readAutoRoute()
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": a.Enabled, "entries": a.Entries})
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": a.Enabled, "detect": a.detect(), "route": a.route(), "entries": a.Entries})
 
 	case http.MethodPost:
 		a := s.readAutoRoute()
 		switch r.FormValue("action") {
-		case "enable":
-			a.Enabled = r.FormValue("on") == "true"
+		case "enable": // legacy: единый тумблер = оба
+			on := r.FormValue("on") == "true"
+			a.Detect, a.Route = &on, &on
+		case "mode": // независимые тумблеры detect/route
+			d, rt := r.FormValue("detect") == "true", r.FormValue("route") == "true"
+			a.Detect, a.Route = &d, &rt
 		case "add":
 			seen := map[string]bool{}
 			for _, e := range a.Entries {
@@ -199,15 +227,16 @@ func (s *server) handleAutoRoute(w http.ResponseWriter, r *http.Request) {
 			}
 			a.Entries = kept
 		default:
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "action: enable|add|remove"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "action: enable|mode|add|remove"})
 			return
 		}
 		if err := s.writeAutoRoute(a); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 			return
 		}
+		a = s.readAutoRoute()
 		s.syncAutoroute(a) // применить на лету (ipset), без рестарта xray
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": a.Enabled, "entries": a.Entries})
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": a.Enabled, "detect": a.detect(), "route": a.route(), "entries": a.Entries})
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

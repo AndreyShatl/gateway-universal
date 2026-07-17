@@ -27,7 +27,22 @@ const (
 // Store — содержимое autoroute.json.
 type Store struct {
 	Enabled bool    `json:"enabled"`
+	Detect  *bool   `json:"detect,omitempty"`
+	Route   *bool   `json:"route,omitempty"`
 	Entries []Entry `json:"entries"`
+}
+
+func (s Store) DetectOn() bool {
+	if s.Detect != nil {
+		return *s.Detect
+	}
+	return s.Enabled
+}
+func (s Store) RouteOn() bool {
+	if s.Route != nil {
+		return *s.Route
+	}
+	return s.Enabled
 }
 
 // Entry — адрес + метаданные. Совместимо со схемой gateway-ui (поля round-trip).
@@ -134,10 +149,12 @@ func Sync(entries []Entry) {
 // Возвращает true, если реально добавлено (не было раньше и авто-обход включён).
 func Apply(target, source string, port int) bool {
 	added := false
+	route := false
 	withLock(func(s *Store) {
-		if !s.Enabled {
-			return
+		if !s.DetectOn() {
+			return // пополнение выключено — не добавляем
 		}
+		route = s.RouteOn()
 		for _, e := range s.Entries {
 			if e.Addr == target {
 				return
@@ -154,6 +171,9 @@ func Apply(target, source string, port int) bool {
 	})
 	if !added {
 		return false
+	}
+	if !route {
+		return true // добавили в список, но применение выключено — в ipset не пишем
 	}
 	EnsureInfra()
 	if net.ParseIP(target) != nil || strings.Contains(target, "/") {
