@@ -144,7 +144,8 @@ do_restore() {
 
 case "${1:-}" in
   zapret) shift; d=$1; shift; ar_del "$d"; do_zapret "$d" "$@" ;;  # zapret => убрать из VPS
-  vps)    shift; ar_add "$1"; echo "🔵 vps: $1 добавлен в автообход" ;;
+  vps)    shift; do_remove "$1" >/dev/null 2>&1; ar_add "$1"; echo "🔵 vps: $1 в автообходе" ;; # vps => убрать сущность
+  remove-entity) shift; do_remove "$1" ;;  # только сущность, не трогать VPS
   remove) shift; do_remove "$1"; ar_del "$1" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
   restore) do_restore ;;

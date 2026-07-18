@@ -50,7 +50,9 @@ while true; do
         || log "⚠ $domain → zapret ошибка применения"
       ;;
     DIRECT*)
-      log "⚪ $domain работает напрямую — пропуск" ;;
+      # разблокировали (или не был заблокирован) — убрать из обхода целиком (GC)
+      bash "$APPLY" remove "$domain" >/dev/null 2>&1
+      log "⚪ $domain работает напрямую — убран из обхода (GC)" ;;
     VPS*|*)
       bash "$APPLY" vps "$domain" >/dev/null 2>&1 \
         && log "🔵 $domain → VPS (fallback, zapret не пробил)" \

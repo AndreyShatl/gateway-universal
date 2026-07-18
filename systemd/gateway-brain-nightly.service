@@ -1,0 +1,10 @@
+[Unit]
+Description=Gateway brain nightly pass (переоценка: solve -> zapret/VPS/GC)
+After=network-online.target xray.service zapret.service gateway-brain-worker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Кладёт все управляемые домены (zapret-сущности + VPS-автообход) в очередь
+# воркера на переоценку. Воркер сам раскладывает и чистит разблокированные.
+ExecStart=/opt/gateway-brain/brain-nightly.sh
