@@ -79,6 +79,40 @@ do_zapret() {
   echo "✅ zapret-сущность: $d -> очередь $q, ipset $ipset"
 }
 
+# --- управление VPS-автообходом (gw_autoroute + autoroute.json) ---
+AR_JSON=/etc/gateway/autoroute.json; AR_IPSET=gw_autoroute
+ar_add() { # <domain> — добавить в VPS
+  local d=$1
+  python3 - "$d" <<'PY'
+import json,os,sys,time,fcntl
+d=sys.argv[1]; f="/etc/gateway/autoroute.json"
+fh=open(f,"a+"); fcntl.flock(fh,fcntl.LOCK_EX); fh.seek(0)
+try: data=json.load(fh)
+except: data={"enabled":True,"detect":True,"route":True,"entries":[]}
+ents=data.get("entries",[])
+if not any((e.get("addr") if isinstance(e,dict) else e)==d for e in ents):
+    ents.append({"addr":d,"added":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),"source":"brain"})
+    data["entries"]=ents
+    fh.seek(0); fh.truncate(); json.dump(data,fh,ensure_ascii=False,indent=1)
+PY
+  ipset create $AR_IPSET hash:net family inet -exist
+  for ip in $(getent ahostsv4 "$d" | awk '{print $1}' | sort -u); do ipset add $AR_IPSET $ip -exist; done
+}
+ar_del() { # <domain> — убрать из VPS
+  local d=$1
+  python3 - "$d" <<'PY'
+import json,os,sys,fcntl
+d=sys.argv[1]; f="/etc/gateway/autoroute.json"
+if not os.path.exists(f): sys.exit()
+fh=open(f,"r+"); fcntl.flock(fh,fcntl.LOCK_EX)
+try: data=json.load(fh)
+except: sys.exit()
+data["entries"]=[e for e in data.get("entries",[]) if (e.get("addr") if isinstance(e,dict) else e)!=d]
+fh.seek(0); fh.truncate(); json.dump(data,fh,ensure_ascii=False,indent=1)
+PY
+  for ip in $(getent ahostsv4 "$d" | awk '{print $1}' | sort -u); do ipset del $AR_IPSET $ip 2>/dev/null; done
+}
+
 do_remove() {
   local d=$1 ipset=brain_$(san "$d")
   local q; q=$(python3 -c "import json,os;f='$STATE';print(next((x['queue'] for x in (json.load(open(f)) if os.path.exists(f) else []) if x.get('domain')=='$d'),''))" 2>/dev/null)
@@ -90,9 +124,9 @@ do_remove() {
 }
 
 case "${1:-}" in
-  zapret) shift; d=$1; shift; do_zapret "$d" "$@" ;;
-  vps)    shift; curl -s -X POST "http://127.0.0.1:8088/api/autoroute" >/dev/null 2>&1; echo "vps: добавь через autoroute API/UI: $1" ;;
-  remove) shift; do_remove "$1" ;;
+  zapret) shift; d=$1; shift; ar_del "$d"; do_zapret "$d" "$@" ;;  # zapret => убрать из VPS
+  vps)    shift; ar_add "$1"; echo "🔵 vps: $1 добавлен в автообход" ;;
+  remove) shift; do_remove "$1"; ar_del "$1" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
   restore)
     python3 -c "import json,os;f='$STATE';[print(x['domain'],x['queue'],x['strategy']) for x in (json.load(open(f)) if os.path.exists(f) else [])]" 2>/dev/null | \

@@ -1,0 +1,14 @@
+[Unit]
+Description=Gateway brain worker (очередь: solve -> zapret/VPS)
+After=network-online.target xray.service zapret.service
+Wants=network-online.target
+
+[Service]
+# Воркер очереди «мозга»: домены из /etc/gateway/brain-queue -> перебор пресетов
+# (solve) -> применение (brain-apply): zapret-сущность или VPS-fallback.
+ExecStart=/opt/gateway-brain/brain-worker.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
