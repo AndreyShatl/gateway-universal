@@ -114,7 +114,8 @@ PY
 }
 
 do_remove() {
-  local d=$1 ipset=brain_$(san "$d")
+  local d=$1
+  local ipset=brain_$(san "$d")
   local q; q=$(python3 -c "import json,os;f='$STATE';print(next((x['queue'] for x in (json.load(open(f)) if os.path.exists(f) else []) if x.get('domain')=='$d'),''))" 2>/dev/null)
   systemctl stop brain-nfqws-$(san "$d") 2>/dev/null; systemctl reset-failed brain-nfqws-$(san "$d") 2>/dev/null
   [ -n "$q" ] && svc_rules -D $ipset "$q"
