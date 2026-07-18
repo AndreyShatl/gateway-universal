@@ -59,9 +59,29 @@ func (s *server) handleMonitor(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// brainQueues — карта очередь->домен из состояния мозга (сущности без hostlist
+// скоупятся ipset'ом, их имя монитору иначе не видно).
+func brainQueues() map[int]string {
+	m := map[int]string{}
+	data, err := os.ReadFile("/etc/gateway/brain-services.json")
+	if err != nil {
+		return m
+	}
+	var raw []struct {
+		Domain string `json:"domain"`
+		Queue  int    `json:"queue"`
+	}
+	json.Unmarshal(data, &raw)
+	for _, x := range raw {
+		m[x.Queue] = x.Domain
+	}
+	return m
+}
+
 // nfqProfiles — распарсить `pgrep -a nfqws`, разложив мультипрофиль (--new) по
 // сервисам: одна строка = один профиль (сервис на очереди со своей стратегией).
 func nfqProfiles() []nfqProfile {
+	brain := brainQueues()
 	out, _ := exec.Command("pgrep", "-a", "nfqws").Output()
 	var ps []nfqProfile
 	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -102,6 +122,10 @@ func nfqProfiles() []nfqProfile {
 				st = strings.ReplaceAll(st, "--dpi-desync=", "")
 				st = strings.ReplaceAll(st, "--dpi-desync-", "")
 				p.Strategy = strings.Join(strings.Fields(st), " ")
+			}
+			// сущность мозга (скоуп по ipset, без hostlist) — имя из состояния
+			if d, ok := brain[qnum]; ok {
+				p.Service = d + " ⚙"
 			}
 			ps = append(ps, p)
 		}
