@@ -395,8 +395,8 @@
           <div class="muted" style="margin-top:6px">Демоны nfqws, очереди трафика и сервисы. Обновляется каждые 3 c. Только просмотр.</div>
         </div>
         <div class="card">
-          <h2>Профили nfqws (<span id="monDCount">0</span>)</h2>
-          <div class="muted" style="margin-bottom:6px">Один демон несёт несколько профилей (по сервису). Кликни стратегию, чтобы развернуть.</div>
+          <h2>Активные zapret-профили (<span id="monDCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Строка = сервис, внутри его каналы (TCP/UDP на своих очередях со своей стратегией). ⚙ = авто-сущность мозга. Кликни стратегию, чтобы развернуть.</div>
           <div style="overflow-x:auto"><table id="monDaemons" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
         </div>
         <div class="card">
@@ -912,10 +912,18 @@
       return `<details><summary style="cursor:pointer; list-style:none"><code style="font-size:.85em">${short}</code></summary><code style="font-size:.85em; white-space:normal; word-break:break-word">${esc(s)}</code></details>`;
     }
     function renderMonitor(d) {
-      const ps = (d.profiles || []).sort((a, b) => a.qnum - b.qnum || (a.service||'').localeCompare(b.service||''));
-      document.getElementById('monDCount').textContent = ps.length;
-      tbl(document.getElementById('monDaemons'), ['Очередь', 'Сервис', 'Proto', 'Порты', 'Стратегия'],
-        ps.map(x => [x.qnum, `<b>${esc(x.service||'—')}</b>` + (x.l7?` <span class="muted" style="font-size:.8em">${esc(x.l7)}</span>`:''), x.proto || '—', esc(x.ports || '—'), stratCell(x.strategy)]));
+      // группируем профили по сервису: строка = сервис, внутри его каналы (proto·очередь·стратегия)
+      const bySvc = {};
+      for (const p of (d.profiles || [])) { (bySvc[p.service||'—'] ||= []).push(p); }
+      const svcNames = Object.keys(bySvc).sort();
+      document.getElementById('monDCount').textContent = svcNames.length;
+      tbl(document.getElementById('monDaemons'), ['Сервис', 'Каналы (протокол · очередь · стратегия)'],
+        svcNames.map(name => {
+          const chans = bySvc[name].sort((a,b)=>a.qnum-b.qnum).map(p =>
+            `<div style="margin:2px 0"><span class="st-badge">${p.proto}</span> <span class="muted">очередь ${p.qnum}${p.l7?' · '+esc(p.l7):''}</span> ${stratCell(p.strategy)}</div>`
+          ).join('');
+          return [`<b>${esc(name)}</b>`, chans];
+        }));
       const qs = (d.queues || []).sort((a, b) => a.qnum - b.qnum);
       tbl(document.getElementById('monQueues'), ['Очередь', 'Пакетов', 'В очереди', 'Дропов', 'User-drop'],
         qs.map(x => [x.qnum, (x.packets||0).toLocaleString(), x.queued, x.dropped ? `<span style="color:var(--bad-tx)">${x.dropped}</span>` : 0, x.user_dropped || 0]));
