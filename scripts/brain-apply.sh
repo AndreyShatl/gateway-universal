@@ -20,8 +20,10 @@ jqget() { python3 -c "import json,sys;d=json.load(open('$STATE')) if __import__(
 
 alloc_queue() {
   local used q
+  # занятые очереди: из iptables И из состояния (иначе коллизии при быстром подряд)
   used=$(iptables -t mangle -S POSTROUTING 2>/dev/null | grep -oE 'queue-num [0-9]+' | awk '{print $2}')
-  for q in $(seq $QBASE $((QBASE+50))); do echo "$used" | grep -qx "$q" || { echo "$q"; return; }; done
+  used="$used $(python3 -c "import json,os;f='$STATE';print(' '.join(str(x['queue']) for x in (json.load(open(f)) if os.path.exists(f) else [])))" 2>/dev/null)"
+  for q in $(seq $QBASE $((QBASE+50))); do echo "$used" | tr ' ' '\n' | grep -qx "$q" || { echo "$q"; return; }; done
 }
 
 # правила сервиса:

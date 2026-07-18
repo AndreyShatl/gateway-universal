@@ -18,8 +18,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"gateway-detector/applier"
@@ -92,6 +94,24 @@ func runWatch() {
 			log.Printf("🔵 UDP без ответа: %s:%d (кандидат, не добавляю — UDP-молчание неоднозначно)", c.DstIP, c.Port)
 			return
 		}
+		// уже обрабатывается — не пере-обрабатываем (иначе петля: свой трафик
+		// стенда zapret не десинхронизирует, прямая проба всегда «блок»). НО держим
+		// ipset свежим наблюдаемым IP клиента: Cloudflare/DoH отдают клиенту другие
+		// IP, чем резолвит стенд — без этого сущность/VPS не ловят реальный трафик.
+		if c.SNI != "" {
+			ip := c.DstIP
+			if isBrainEntity(c.SNI) {
+				addToSet("brain_"+sanitizeDomain(c.SNI), ip) // сущность: и NFQUEUE, и RETURN по этому ipset
+				return
+			}
+			if inAutoroute(c.SNI) {
+				addToSet(applier.IPSet, ip) // VPS
+				return
+			}
+			if inZapretHostlist(c.SNI) {
+				return // hostlist-сервис фильтрует по SNI — IP не важен
+			}
+		}
 		target := c.SNI
 		if target == "" {
 			target = c.DstIP // без SNI (syn-timeout) — проверяем по IP
@@ -107,9 +127,15 @@ func runWatch() {
 		case prober.Blocked:
 			if *apply {
 				if applier.Apply(target, c.Signal, port) {
-					log.Printf("✅ добавлен в авто-обход: %s (dst=%s)", target, c.DstIP)
+					log.Printf("✅ мгновенно в VPS: %s (dst=%s)", target, c.DstIP)
 				} else {
 					log.Printf("… %s подтверждён, но уже в списке / тумблер выкл", target)
+				}
+				addToSet(applier.IPSet, c.DstIP) // + реальный IP клиента (мультиIP CDN)
+				// домен (по SNI) — в очередь «мозга»: воркер попробует перевести на
+				// zapret (низкий пинг). Блоки по чистому IP zapret не пробьёт — остаются VPS.
+				if c.SNI != "" && enqueueBrain(c.SNI) {
+					log.Printf("→ %s в очередь мозга (проверка zapret)", c.SNI)
 				}
 			} else {
 				log.Printf("🟡 БЫ добавил: %-30s (блок подтверждён; direct=%s)", target, short(res.Direct))
@@ -279,6 +305,127 @@ func dryTag(apply bool) string {
 		return ""
 	}
 	return " [тень]"
+}
+
+const brainQueueFile = "/etc/gateway/brain-queue"
+const brainQueueLock = "/etc/gateway/brain-queue.lock"
+
+// enqueueBrain — положить домен в очередь воркера «мозга» (dedup: не в очереди и
+// не уже zapret-сущность). Под тем же flock, что worker.pop, чтобы не гонки.
+func enqueueBrain(domain string) bool {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" || strings.HasPrefix(domain, "geosite:") || isBrainEntity(domain) || inBrainQueue(domain) {
+		return false
+	}
+	lf, err := os.OpenFile(brainQueueLock, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return false
+	}
+	defer lf.Close()
+	syscall.Flock(int(lf.Fd()), syscall.LOCK_EX)
+	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	if inBrainQueue(domain) { // повторная проверка под локом
+		return false
+	}
+	f, err := os.OpenFile(brainQueueFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	f.WriteString(domain + "\n")
+	return true
+}
+
+func inBrainQueue(domain string) bool {
+	data, err := os.ReadFile(brainQueueFile)
+	if err != nil {
+		return false
+	}
+	for _, ln := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(ln) == domain {
+			return true
+		}
+	}
+	return false
+}
+
+// addToSet — добавить IP в ipset (идемпотентно). Держим наборы свежими реальным
+// IP клиента (Cloudflare/DoH отдают ему другие IP, чем резолвит стенд).
+func addToSet(set, ip string) {
+	if net.ParseIP(ip) != nil {
+		exec.Command("ipset", "add", set, ip, "-exist").Run()
+	}
+}
+
+// sanitizeDomain — как san() в brain-apply.sh: не-[a-z0-9] -> _, срезать хвост _.
+func sanitizeDomain(d string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(d) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return strings.TrimRight(b.String(), "_")
+}
+
+func inAutoroute(domain string) bool {
+	data, err := os.ReadFile("/etc/gateway/autoroute.json")
+	if err != nil {
+		return false
+	}
+	var ar struct {
+		Entries []struct {
+			Addr string `json:"addr"`
+		} `json:"entries"`
+	}
+	json.Unmarshal(data, &ar)
+	for _, e := range ar.Entries {
+		if e.Addr == domain {
+			return true
+		}
+	}
+	return false
+}
+
+// inZapretHostlist — домен (или его родитель) в hostlist какого-либо zapret-сервиса.
+func inZapretHostlist(domain string) bool {
+	files, _ := filepath.Glob("/opt/zapret-config/domains.gen/*.txt")
+	set := map[string]bool{}
+	for _, f := range files {
+		data, _ := os.ReadFile(f)
+		for _, ln := range strings.Split(string(data), "\n") {
+			ln = strings.TrimSpace(ln)
+			if ln != "" && !strings.HasPrefix(ln, "#") {
+				set[ln] = true
+			}
+		}
+	}
+	parts := strings.Split(domain, ".")
+	for i := 0; i+1 < len(parts); i++ {
+		if set[strings.Join(parts[i:], ".")] {
+			return true
+		}
+	}
+	return false
+}
+
+func isBrainEntity(domain string) bool {
+	data, err := os.ReadFile("/etc/gateway/brain-services.json")
+	if err != nil {
+		return false
+	}
+	var svc []struct {
+		Domain string `json:"domain"`
+	}
+	json.Unmarshal(data, &svc)
+	for _, s := range svc {
+		if s.Domain == domain {
+			return true
+		}
+	}
+	return false
 }
 
 func short(s string) string {
