@@ -1,0 +1,15 @@
+[Unit]
+Description=Gateway brain restore (пересоздать zapret-сущности после ребута)
+After=network-online.target xray.service zapret.service
+Wants=network-online.target
+Before=gateway-brain-worker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Пересоздаёт nfqws-демоны + ipset + iptables-правила сущностей из
+# /etc/gateway/brain-services.json (transient-юниты/правила не переживают ребут).
+ExecStart=/opt/gateway-brain/brain-apply.sh restore
+
+[Install]
+WantedBy=multi-user.target

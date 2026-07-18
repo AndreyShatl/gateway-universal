@@ -126,14 +126,27 @@ do_remove() {
   echo "🗑 удалено: $d"
 }
 
+# do_restore — пересоздать все сущности из состояния (после ребута): ipset(resolve)
+# + правила + демон. Наблюдаемые IP клиента само-восстановит детектор при заходе.
+do_restore() {
+  [ -f "$STATE" ] || { echo "нет состояния — нечего восстанавливать"; return; }
+  python3 -c "import json;print('\n'.join(x['domain']+'\t'+str(x['queue'])+'\t'+x['strategy'] for x in json.load(open('$STATE'))))" 2>/dev/null | \
+  while IFS=$'\t' read -r d q strat; do
+    [ -n "$d" ] && [ -n "$q" ] || continue
+    local ipset=brain_$(san "$d")
+    ipset create $ipset hash:ip family inet -exist
+    for ip in $(getent ahostsv4 "$d" | awk '{print $1}' | sort -u); do ipset add $ipset $ip -exist; done
+    svc_rules -A $ipset "$q"
+    start_daemon "$d" "$q" $strat
+    echo "↻ восстановлен: $d (очередь $q)"
+  done
+}
+
 case "${1:-}" in
   zapret) shift; d=$1; shift; ar_del "$d"; do_zapret "$d" "$@" ;;  # zapret => убрать из VPS
   vps)    shift; ar_add "$1"; echo "🔵 vps: $1 добавлен в автообход" ;;
   remove) shift; do_remove "$1"; ar_del "$1" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
-  restore)
-    python3 -c "import json,os;f='$STATE';[print(x['domain'],x['queue'],x['strategy']) for x in (json.load(open(f)) if os.path.exists(f) else [])]" 2>/dev/null | \
-    while read -r d q s; do :; done
-    echo "restore: пересоздание — TODO (systemd-run не переживает ребут; нужен boot-хук)" ;;
+  restore) do_restore ;;
   *) echo "usage: brain-apply.sh {zapret <d> <strat>|vps <d>|remove <d>|list|restore}" >&2; exit 2 ;;
 esac
