@@ -32,9 +32,11 @@ teardown() {
   [ -n "$NPID" ] && kill "$NPID" 2>/dev/null
   pkill -f "qnum=$QNUM" 2>/dev/null   # добить возможных сирот на тест-очереди
   ip netns del $NS 2>/dev/null
+  ip link del veth-s 2>/dev/null      # ГЛАВНОЕ: остаток veth ломает следующий netns (был флак!)
   iptables -t nat -D POSTROUTING -s $SUBNET -o $WAN -j MASQUERADE 2>/dev/null
   iptables -t mangle -D POSTROUTING -s $NSIP -p tcp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM --queue-bypass 2>/dev/null
   iptables -t mangle -D POSTROUTING -s $NSIP -j ACCEPT 2>/dev/null
+  conntrack -D -d "$IP" 2>/dev/null >/dev/null  # сбросить conntrack цели (иначе connbytes «залипает»)
 }
 trap teardown EXIT
 teardown 2>/dev/null   # снять остатки прошлого запуска
@@ -53,7 +55,19 @@ iptables -t nat -A POSTROUTING -s $SUBNET -o $WAN -j MASQUERADE
 iptables -t mangle -I POSTROUTING 1 -s $NSIP -p tcp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM --queue-bypass
 iptables -t mangle -I POSTROUTING 2 -s $NSIP -j ACCEPT
 
-nscurl() { ip netns exec $NS curl -s -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:$PORT:$IP" --max-time 4 "https://$DOMAIN/" 2>/dev/null; }
+nscurl() { ip netns exec $NS curl -s -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:$PORT:$IP" --max-time 6 "https://$DOMAIN/" 2>/dev/null; }
+
+# wait_bound — ждать, пока nfqws реально ЗАБИНДИТ очередь QNUM (появится в
+# /proc/net/netfilter/nfnetlink_queue). Иначе ClientHello проскакивает по
+# --queue-bypass без обхода и пресет ложно «фейлится» (источник флака).
+wait_bound() {
+  local i
+  for i in $(seq 1 40); do
+    grep -qE "^[[:space:]]*$QNUM[[:space:]]" /proc/net/netfilter/nfnetlink_queue 2>/dev/null && return 0
+    sleep 0.05
+  done
+  return 1
+}
 
 BASE=$(nscurl); BASE=${BASE:-000}
 echo "прямой доступ клиента (без обхода): HTTP=$BASE"
@@ -71,7 +85,8 @@ for i in $(seq 0 $((N-1))); do
   [ -n "$NPID" ] && kill "$NPID" 2>/dev/null; NPID=
   # без --daemon: $! = реальный процесс (убиваемо, без сирот); --filter-tcp — как боевой
   $NFQWS --qnum=$QNUM --dpi-desync-fwmark=$MARK --filter-tcp=$PORT $tcp >/dev/null 2>&1 &
-  NPID=$!; sleep 1.2
+  NPID=$!
+  wait_bound || { kill "$NPID" 2>/dev/null; NPID=; echo "  [$i] $name — nfqws не забиндил, пропуск"; continue; }
   code=$(nscurl); code=${code:-000}
   kill "$NPID" 2>/dev/null; NPID=
   if [ "$code" != "000" ]; then
