@@ -19,8 +19,8 @@ import (
 const (
 	autorouteIPSet   = "gw_autoroute"
 	autorouteLAN     = "192.168.0.0/16"
-	autoroutePort    = "12347"          // dokodemo autoroute-in (TCP REDIRECT)
-	autorouteUDPPort = "12346"          // существующий tproxy-udp inbound -> proxy-mux
+	autoroutePort    = "12347" // dokodemo autoroute-in (TCP REDIRECT)
+	autorouteUDPPort = "12346" // существующий tproxy-udp inbound -> proxy-mux
 	autorouteMark    = "0x1/0xffffffff"
 )
 
@@ -115,11 +115,13 @@ func (a autoRoute) route() bool {
 
 // entry — адрес в авто-обходе + метаданные (когда и чем добавлен).
 type entry struct {
-	Addr   string `json:"addr"`
-	Added  string `json:"added,omitempty"`  // RFC3339
-	Source string `json:"source,omitempty"` // manual | rst-after-clienthello | syn-timeout | quic-no-response | legacy
-	Port   int    `json:"port,omitempty"`   // порт блокировки (для ночной перепроверки)
-	Clean  int    `json:"clean,omitempty"`  // подряд чистых перепроверок (round-trip, пишет детектор)
+	Addr      string `json:"addr"`
+	Added     string `json:"added,omitempty"`      // RFC3339
+	Source    string `json:"source,omitempty"`     // manual | rst-after-clienthello | syn-timeout | quic-no-response | legacy
+	Port      int    `json:"port,omitempty"`       // порт блокировки (для ночной перепроверки)
+	Clean     int    `json:"clean,omitempty"`      // подряд чистых перепроверок (round-trip, пишет детектор)
+	Status    string `json:"status,omitempty"`     // "no_bypass" — ни напрямую, ни через VPS (T55, пишет brain-nightly.sh)
+	CheckedAt string `json:"checked_at,omitempty"` // RFC3339, последняя проверка no_bypass (T55)
 }
 
 // UnmarshalJSON — принимает и новый объект, и старую строку (миграция формата).

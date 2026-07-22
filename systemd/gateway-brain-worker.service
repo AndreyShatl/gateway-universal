@@ -4,8 +4,7 @@ After=network-online.target xray.service zapret.service
 Wants=network-online.target
 
 [Service]
-# Воркер очереди «мозга»: домены из /etc/gateway/brain-queue -> перебор пресетов
-# (solve) -> применение (brain-apply): zapret-сущность или VPS-fallback.
+Environment=SOLVE=/opt/gateway-brain/solve.sh APPLY=/opt/gateway-brain/brain-apply.sh GWDB=/root/gateway-universal/scripts/gwdb.py
 ExecStart=/opt/gateway-brain/brain-worker.sh
 Restart=always
 RestartSec=5

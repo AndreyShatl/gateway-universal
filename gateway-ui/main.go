@@ -36,9 +36,6 @@ import (
 //go:embed static/*.html
 var staticFS embed.FS
 
-//go:embed strategies.json
-var strategiesJSON []byte
-
 const sessionCookie = "gwsess"
 const sessionTTL = 12 * time.Hour
 const sessionsFile = "/etc/gateway/ui-sessions.json" // сессии переживают рестарт UI
@@ -56,14 +53,14 @@ type server struct {
 	userDomainsDir string // /etc/gateway/domains (домены из UI)
 	xrayConfig     string // /opt/xray/config.json (рабочий конфиг)
 	xrayBin        string // /opt/xray/xray
-	scanDir        string // /etc/gateway/scan (состояние поиска стратегий)
-	blockcheck     string // /opt/zapret/blockcheck.sh
-	overrides      string // (устар.) оверрайды стратегий
-	servicesFile   string // /etc/gateway/zapret-services.json (динамические сервисы)
+	scanDir        string // /etc/gateway/scan (поиск стратегий убран, оставлен только для пути zupdate.log = Dir(scanDir))
+	blockcheck     string // /opt/zapret/blockcheck.sh (репо zapret — для версии/апдейта движка)
+	servicesFile   string // /etc/gateway/zapret-services.json (читает Монитор; UI-редактор убран, см. DECISIONS)
 	connsFile      string // /etc/gateway/connections.json (сохранённые VPS-хосты)
 	autorouteFile  string // /etc/gateway/autoroute.json (авто-обход: список + тумблер)
 	recheckFile    string // /etc/gateway/recheck.json (перепроверка: расписание + статистика)
 	ver            string // версия сборки (mtime бинаря) — для автоперезагрузки вкладки
+	dbPath         string // /etc/gateway/gateway.db (T48: whitelist + presets, доступ через scripts/gwdb.py)
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -79,11 +76,11 @@ func main() {
 	xrayBin := flag.String("xray-bin", "/opt/xray/xray", "бинарник xray")
 	scanDir := flag.String("scan-dir", "/etc/gateway/scan", "каталог состояния поиска стратегий")
 	blockcheck := flag.String("blockcheck", "/opt/zapret/blockcheck.sh", "путь к blockcheck.sh")
-	overrides := flag.String("zapret-overrides", "/etc/gateway/zapret-overrides.env", "(устар.) файл оверрайдов")
 	servicesFile := flag.String("zapret-services", "/etc/gateway/zapret-services.json", "файл сервисов zapret")
 	connsFile := flag.String("connections", "/etc/gateway/connections.json", "файл сохранённых VPS-хостов")
 	autorouteFile := flag.String("autoroute", "/etc/gateway/autoroute.json", "файл авто-обхода (список + тумблер)")
 	recheckFile := flag.String("recheck", "/etc/gateway/recheck.json", "файл перепроверки (расписание + статистика)")
+	dbPath := flag.String("db", "/etc/gateway/gateway.db", "БД whitelist+presets (T48)")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -93,11 +90,15 @@ func main() {
 	s := &server{
 		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
 		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
-		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
+		scanDir: *scanDir, blockcheck: *blockcheck, servicesFile: *servicesFile,
 		connsFile: *connsFile, autorouteFile: *autorouteFile, recheckFile: *recheckFile,
+		dbPath: *dbPath,
 	}
 	s.loadSessions() // восстановить входы, чтобы рестарт UI не разлогинивал
 	s.ver = buildVersion()
+	if err := s.initGWDB(); err != nil {
+		log.Printf("gateway-ui: инициализация gateway.db: %v (продолжаю без неё)", err)
+	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
 	}
@@ -121,14 +122,10 @@ func main() {
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
-	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
-	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))
-	mux.HandleFunc("/api/strategies", s.requireAuth(s.handleStrategies))
+	mux.HandleFunc("/api/whitelist", s.requireAuth(s.handleWhitelist))
+	mux.HandleFunc("/api/presets", s.requireAuth(s.handlePresets))
 	mux.HandleFunc("/api/zapret/version", s.requireAuth(s.handleZapretVersion))
 	mux.HandleFunc("/api/zapret/update", s.requireAuth(s.handleZapretUpdate))
-	mux.HandleFunc("/api/scan", s.requireAuth(s.handleScan))
-	mux.HandleFunc("/api/scan/start", s.requireAuth(s.handleScanStart))
-	mux.HandleFunc("/api/scan/stop", s.requireAuth(s.handleScanStop))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/exit-ip", s.requireAuth(s.handleExitIP))
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))

@@ -1,0 +1,8 @@
+[Unit]
+Description=Gateway brain idle-stop (T54: остановить простаивающие >24ч)
+After=network-online.target zapret.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-idle-stop.sh

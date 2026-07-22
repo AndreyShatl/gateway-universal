@@ -112,35 +112,3 @@ func writeConfigVar(path, key, value string) error {
 	}
 	return os.Rename(tmp, path)
 }
-
-// upsertConfigVar — как writeConfigVar, но создаёт файл, если его нет.
-func upsertConfigVar(path, key, value string) error {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(path, []byte("# overrides стратегий zapret (правит gateway-ui)\n"), 0o644); err != nil {
-			return err
-		}
-	}
-	return writeConfigVar(path, key, value)
-}
-
-// removeConfigVar убирает строку KEY=… (если файла нет — ничего).
-func removeConfigVar(path, key string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	var kept []string
-	for _, ln := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(ln), key+"=") {
-			continue
-		}
-		kept = append(kept, ln)
-	}
-	return os.WriteFile(path, []byte(strings.Join(kept, "\n")), 0o644)
-}

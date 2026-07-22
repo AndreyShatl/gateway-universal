@@ -27,11 +27,11 @@ type nfqProfile struct {
 }
 
 type queueStat struct {
-	Qnum       int `json:"qnum"`
-	Queued     int `json:"queued"`      // сейчас в очереди
-	Dropped    int `json:"dropped"`     // дропнуто (очередь полна)
-	UserDrop   int `json:"user_dropped"`
-	Packets    int `json:"packets"`     // всего прошло (из iptables)
+	Qnum     int `json:"qnum"`
+	Queued   int `json:"queued"`  // сейчас в очереди
+	Dropped  int `json:"dropped"` // дропнуто (очередь полна)
+	UserDrop int `json:"user_dropped"`
+	Packets  int `json:"packets"` // всего прошло (из iptables)
 }
 
 type svcInfo struct {
@@ -43,20 +43,50 @@ type svcInfo struct {
 }
 
 var (
-	reQnum    = regexp.MustCompile(`--qnum=(\d+)`)
-	reFilterT = regexp.MustCompile(`--filter-tcp=(\S+)`)
-	reFilterU = regexp.MustCompile(`--filter-udp=(\S+)`)
-	reL7      = regexp.MustCompile(`--filter-l7=(\S+)`)
-	reHost    = regexp.MustCompile(`--hostlist=(\S+)`)
+	reQnum     = regexp.MustCompile(`--qnum=(\d+)`)
+	reFilterT  = regexp.MustCompile(`--filter-tcp=(\S+)`)
+	reFilterU  = regexp.MustCompile(`--filter-udp=(\S+)`)
+	reL7       = regexp.MustCompile(`--filter-l7=(\S+)`)
+	reHost     = regexp.MustCompile(`--hostlist=(\S+)`)
 	reFakePath = regexp.MustCompile(`\s--dpi-desync-fake-\S+=\S+`)
 )
 
 func (s *server) handleMonitor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"profiles": nfqProfiles(),
-		"queues":   queueStats(),
-		"services": svcList(s),
+		"profiles":    nfqProfiles(),
+		"queues":      queueStats(),
+		"services":    svcList(s),
+		"accept_only": acceptOnlyEntities(), // T57: UDP-сущности без десинхронизации — нет процесса, invisible в profiles
+		"ver":         s.ver,                // авто-обновление вкладки после деплоя (checkVer в JS) — раньше это делал /api/scan
 	})
+}
+
+// acceptOnlyEntities — сущности мозга без очереди/nfqws (T57: UDP-домен, которому
+// хватило снять наш собственный DROP, десинхронизация не нужна). nfqProfiles их не
+// видит (нет процесса) — отдельная секция в Мониторе.
+type acceptOnlyEntity struct {
+	Domain string `json:"domain"`
+	Proto  string `json:"proto"`
+}
+
+func acceptOnlyEntities() []acceptOnlyEntity {
+	data, err := os.ReadFile("/etc/gateway/brain-services.json")
+	if err != nil {
+		return nil
+	}
+	var raw []struct {
+		Domain string `json:"domain"`
+		Proto  string `json:"proto"`
+		Queue  *int   `json:"queue"`
+	}
+	json.Unmarshal(data, &raw)
+	out := []acceptOnlyEntity{}
+	for _, x := range raw {
+		if x.Queue == nil {
+			out = append(out, acceptOnlyEntity{Domain: x.Domain, Proto: x.Proto})
+		}
+	}
+	return out
 }
 
 // brainQueues — карта очередь->домен из состояния мозга (сущности без hostlist
@@ -73,6 +103,9 @@ func brainQueues() map[int]string {
 	}
 	json.Unmarshal(data, &raw)
 	for _, x := range raw {
+		if x.Queue <= 0 {
+			continue // accept-only (T57, queue=null в JSON) — нет nfqws-процесса, нечего подписывать
+		}
 		m[x.Queue] = x.Domain
 	}
 	return m

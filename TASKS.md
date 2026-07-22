@@ -17,6 +17,243 @@
 
 ---
 
+## todo — веха: авто-мозг обхода блокировок v2 (whitelist + классификация + trusted-пресеты)
+
+Ложится поверх задокументированной вехи T41-T46 (см. раздел «done — веха: авто-обход + мозг» ниже).
+Согласовано с пользователем 2026-07-20 (новое ТЗ + блок-схема). Порядок: T48 (фундамент БД) →
+T49/T50/T51 (можно параллельно, но T50 удобнее после T49, т.к. классификация должна уважать whitelist).
+**Явно ОТЛОЖЕНО на потом** (согласовано, не делать в этой вехе):
+- ~~UDP-перебор в мозге~~ — сделано в T57 (2026-07-21), решение отменено по ходу вехи.
+- Консолидация групп (T52 сознательно НЕ мержим демоны, см. DECISIONS 2026-07-21) / авто-стоп
+  простаивающих демонов (T54, сделано) / чистка stale-записей (T55, сделано).
+- Переписывание сенсора detector/watcher.go с pcap на eBPF.
+- Полная миграция zapret-services.json/autoroute.json/brain-services.json/connections.json на SQLite —
+  новая БД заводится ТОЛЬКО под whitelist и presets, остальное остаётся как есть.
+
+### T48 · БД: SQLite (gateway.db) — таблицы whitelist + presets · M · done
+`/etc/gateway/gateway.db`. Таблицы:
+- `whitelist(id, pattern, kind['suffix'|'exact'], note, added_at, source['seed'|'manual'])`
+- `presets(id, name, proto['tcp'|'udp'], args, source['standard'|'custom'], trusted, success_count, fail_count, last_result_at)`
+  — сид: 20 стандартных flowseal-пресетов из `strategies.json` (source=standard; `trusted` на них
+  не влияет на порядок — стандартные ВСЕГДА пробуются первыми, флаг актуален только для custom-тира).
+Единственная точка схемы/доступа — **[scripts/gwdb.py](../scripts/gwdb.py)** (stdlib `sqlite3`,
+без новых пакетов). Изначально планировался Go-драйвер `modernc.org/sqlite` (pure-Go, без cgo) —
+**отклонено по факту**: тянет свой cc/ccgo-транспайлер, реальная сборка на стенде (6.6ГБ диск
+ЦЕЛИКОМ) упала `no space left on device`. gateway-ui ([gateway-ui/db.go](gateway-ui/db.go)) зовёт
+тот же `gwdb.py` через `exec.Command("python3", ...)`, как и bash-скрипты мозга — ноль новых
+Go-зависимостей. См. DECISIONS 2026-07-20 (диск).
+**Приёмка (де-факто, стенд):** `/api/presets` отдаёт 39 строк (20 пресетов × tcp/udp) сразу после
+рестарта gateway-ui; `/etc/gateway/gateway.db` создан.
+
+### T49 · Whitelist: правило .ru/.рф/.su + курируемый список приоритетнее · M · done
+Правило: домен, оканчивающийся на `ru`/`su`/`рф`/`xn--p1ai` (punycode-форма .рф), — в whitelist
+автоматически, сид заводится в [gateway-ui/db.go](gateway-ui/db.go) (`defaultWhitelistSeed`) при
+каждом старте UI. Явный сид госуслуг/банков/Max НЕ добавлен — все реальные проверенные примеры
+(gosuslugi.ru, nalog.ru и т.п.) уже покрыты суффиксом `.ru`, отдельные записи были бы избыточны.
+**Приоритет:** курируемый `xray/domains/*.txt` выше whitelist — проверяется `inCuratedRouting()` в
+[detector/main.go](detector/main.go) (сейчас там нет ни одного `.ru`-домена, конфликт гипотетический,
+но проверено кодом). Проверка — в `detector/main.go` (пропуск анализа ДО флага блока, реализовано в
+main.go, НЕ в watcher.go как планировалось — watcher не имел доступа к SNI-уровню принятия решений)
+и защитно в `brain-worker.sh` (пропуск домена, даже если он как-то попал в очередь).
+**UI:** сделан в T56 (вкладка «Whitelist»).
+**Приёмка (де-факто, стенд):** синтетический `test-whitelist-check.ru`, вручную дописанный в
+`/etc/gateway/brain-queue`, дал в логе `⚪ test-whitelist-check.ru — whitelist, пропуск` — ни один
+пресет не запускался, очередь очистилась. `gwdb.py whitelisted mos.ru` → 1, `youtube.com` → 0.
+
+### T50 · Классификация причины блока — переиспользовать `source` детектора · H · done
+Не новый детектор с нуля — у watcher.go УЖЕ есть классификация по сигнатуре (`source`:
+`syn-timeout` / `rst-after-clienthello` / `no-response-after-clienthello` / `quic-no-response` / `legacy`),
+её просто никто не читает при переборе пресетов. Меняем: `brain-queue` несёт `domain<TAB>source` (не
+только домен); `solve.sh`/`brain-worker.sh` смотрят на source:
+- `syn-timeout` (похоже на IP-уровневую блокировку — SYN не доходит вообще) → **пропустить перебор
+  20 пресетов**, сразу VPS (экономит время; можно переоценить позже ночным проходом).
+- `rst-after-clienthello` / `no-response-after-clienthello` (сигнатура DPI по SNI) / `legacy` / нет source
+  (ручной ввод, ночная переоценка) → обычный перебор как сейчас.
+- **DNS-подмена отдельно НЕ детектируем** — dnscrypt уже защищает локальный резолвинг, а разъезд
+  IP клиент/шлюз для мульти-IP CDN уже закрыт фиксом 2026-07-18 (детектор добавляет наблюдаемый
+  IP клиента в ipset). Дополнительный модуль был бы дублированием — если окажется, что не хватает,
+  вернуться к этому отдельной задачей.
+Реализовано в [detector/main.go](detector/main.go) (`enqueueBrain(domain, source)` пишет
+`domain\tsource`), [scripts/brain-worker.sh](scripts/brain-worker.sh) (парсит строку, source
+без табуляции → `reeval`), [scripts/brain-nightly.sh](scripts/brain-nightly.sh) (дедуп по домену
+до табуляции, пишет `\treeval`), [scripts/solve.sh](scripts/solve.sh) (принимает `[source]` вторым
+аргументом, после baseline-проверки — если `syn-timeout`, пропускает перебор).
+**Приёмка (де-факто, стенд):** `bash solve.sh rutracker.org syn-timeout` (реальный заблокированный
+домен, вручную, без brain-apply — безопасно для продакшена) → `source=syn-timeout — похоже на
+IP-блокировку, перебор пресетов пропущен` → `VPS`, ноль строк «пробую пресет». `bash solve.sh
+rutracker.org rst-after-clienthello` — обычный путь (baseline/перебор), классификация не мешает.
+Через полный конвейер: `printf 'test\tsyn-timeout\n' >> brain-queue` → в логе `(source=syn-timeout)`
+→ `VPS` мгновенно.
+
+### T51 · Custom/trusted-пресеты — тир после стандартных 20 · M · done
+Стандартные 20 — всегда первыми (без изменений, теперь читаются из `presets` через
+`gwdb.py presets-list --tier standard`, а не напрямую из `strategies.json` — раньше это
+делал `jq` по файлу, `PRESETS` env/переменная убрана из solve.sh/brain-worker.sh за ненадобностью).
+Если ни один не сработал — тир custom (изначально пусто, добавляются через
+`POST /api/presets action=add` — [gateway-ui/db.go](gateway-ui/db.go)), отсортированные
+`trusted DESC, success_count DESC` (сортировка — в `gwdb.py cmd_presets_list`). Первый успех
+custom-пресета → `trusted=true`, `success_count++` (`solve.sh` зовёт `gwdb.py preset-mark-success`
+сразу по факту успеха, до возврата вердикта). Никакого парсинга `/etc/zapret/custom/*.bat` (таких
+файлов на шлюзе нет).
+**UI:** сделана в T56 (вкладка «Пресеты»).
+**Приёмка (де-факто, стенд):** `preset-add test_custom_a/b` → `presets-list --tier custom`
+возвращает оба нетронутыми (trusted=0); `preset-mark-success` на втором → он встаёт ПЕРВЫМ в списке
+(trusted DESC). Сквозной прогон: `bash solve.sh rutracker.org rst-after-clienthello` — реальный
+блок, standard-тир из БД нашёл `general (ALT)` (id=3) на 2-й попытке, идентично поведению до
+миграции с raw JSON на БД (регрессии нет). Custom-тир с реальным доменом, где все 20 стандартных
+проваливаются, не тестировался живым трафиком (риск для прод-доменов) — логика идентична
+standard-тиру (одна и та же функция `try_tier`), проверена статически + сортировка/mark-success
+проверены напрямую через gwdb.py.
+
+### T52 · Пул очередей: расширить + падать громко при исчерпании · L · done
+Найдено при подготовке T53-55 (2026-07-21): на стенде (2 ядра, 1.9ГБ RAM, из них 783МБ свободно)
+уже 25 живых `brain-nfqws-*` (память не проблема — ~2МБ/процесс, ~55МБ суммарно), но
+`alloc_queue()` в [scripts/brain-apply.sh:21-27](scripts/brain-apply.sh:21) перебирает всего
+`QBASE..QBASE+50` (210-260) — 51 слот, уже занята половина. При исчерпании `alloc_queue` молча
+возвращает пустую строку, `svc_rules` получает пустой `$q` — тихая порча iptables-правил без
+единой строки в логе. **Изоляция (реш. 2026-07-18) остаётся как есть** — не мержим демоны, только
+раздвигаем потолок и ловим исчерпание явно.
+**Приёмка (де-факто, стенд):** `QPOOL=500` в [scripts/brain-apply.sh:16](scripts/brain-apply.sh:16),
+`alloc_queue` при неудаче пишет в stderr и `return 1`, `do_zapret` ловит через `||` и не создаёт
+сущность (`bash -n` + `brain-apply.sh list` прошли без ошибок после деплоя).
+
+### T53 · Активность сущностей: снэпшот счётчиков → last_active · M · done
+Фундамент под idle-stop (T54). Новый systemd-таймер (почасовой) читает пакетные счётчики
+NFQUEUE-правила каждой сущности (`iptables -t mangle -L POSTROUTING -v -n`), сравнивает с
+предыдущим снэпшотом (новое поле `packets` в `brain-services.json`); счётчик вырос — обновить
+`last_active` (ISO-таймстемп). Ничего не останавливает, только копит данные.
+Реализовано как отдельный почасовой таймер [systemd/gateway-brain-activity.timer](systemd/gateway-brain-activity.timer)
+→ [scripts/brain-activity.sh](scripts/brain-activity.sh). **Грабля найдена и закрыта:** `iptables -v`
+без `-x` сокращает большие счётчики (`135K`), `int()` падал — добавлен `-x` (точные числа).
+**Приёмка (де-факто, стенд):** ручной прогон обновил `packets`/`last_active` во всех записях
+`brain-services.json` (проверено на `nnmclub.to`: `packets: 795`, `last_active` = момент прогона).
+
+### T54 · Авто-стоп простаивающих >24ч (настраиваемо) · M · done
+Отдельный таймер [systemd/gateway-brain-idle-stop.timer](systemd/gateway-brain-idle-stop.timer)
+(полдень, **сознательно НЕ вместе с nightly в 04:00** — nightly и так пере-solve'ит/перезапускает
+ВСЕ сущности каждую ночь безусловно; если стопать в то же окно, тот же ночной проход тут же
+отменит стоп) → [scripts/brain-idle-stop.sh](scripts/brain-idle-stop.sh): `systemctl stop
+brain-nfqws-<domain>` для сущностей с `last_active` (T53) старше `IDLE_STOP_HOURS` (default 24).
+ipset и iptables-правила **не трогаются** (ТЗ 8.4). **Ограничение v1 (осознанно):** «запуск по
+триггеру трафика» из ТЗ не реализован — детектор игнорирует уже-brain-managed домены (петля-guard
+`isBrainEntity`), живой триггер потребовал бы отдельного слушателя. Реактивация — на ближайшем
+ночном проходе (04:00), т.е. простой демон стоит примерно с полудня до 4 утра следующих суток.
+Если суточная задержка окажется проблемой — отдельная задача на live-триггер.
+**Приёмка (де-факто, стенд, синтетический тест на `te-st.org`):** искусственно состарил
+`last_active` → `2020-01-01` → прогон `brain-idle-stop.sh` → `systemctl is-active
+brain-nfqws-te_st_org` = `inactive`, `ipset list brain_te_st_org` и `iptables -t mangle -S
+POSTROUTING | grep te_st_org` — оба на месте (NFQUEUE-правило и ACCEPT не удалены). Другая
+сущность (`nnmclub.to`) не затронута. **Важная находка:** `systemctl start` на остановленный
+transient-юнит (`systemd-run --collect`) НЕ работает — юнит уже собран сборщиком мусора
+(`Unit ... not found`); реактивация возможна только через `brain-apply.sh zapret <d> <strat>`
+(пересоздаёт юнит с нуля) — ИМЕННО так и делает nightly, значит реактивация корректна по
+конструкции. te-st.org восстановлен вручную после теста (`brain-apply.sh zapret te-st.org ...`),
+продакшен не пострадал.
+
+### T55 · no_bypass-статус + очистка устаревших записей · M · done
+`brain-nightly.sh` теперь для каждого VPS-домена из `${vps[@]}` (не покрытого zapret-сервисом)
+зовёт `gateway-detector probe <d> --socks 127.0.0.1:1081` (verdict `down` = «direct FAIL + vps
+FAIL» — переиспользуем готовую логику prober'а, не дублируем) → `status:"no_bypass"` +
+`checked_at` в записи `autoroute.json`; verdict `blocked` (VPS всё ещё нужен и работает) снимает
+статус, если был, и обновляет `checked_at`. Порог очистки — `NO_BYPASS_CLEANUP_DAYS` (default 30, env).
+**`direct` >90 дней (ТЗ 8.5) — сознательно НЕ реализован отдельно**: уже закрыт более быстрым и
+точным механизмом T42 (`gateway-recheck.timer`) — снимает адрес после 2 прогонов подряд «работает
+напрямую», не ждёт 90 дней. Дублировать не стали, соответствие зафиксировано в CANON.
+
+**Найдена и закрыта серьёзная грабля (не из плана):** [gateway-ui/autoroute.go:117-123](gateway-ui/autoroute.go:117)
+хранит записи `autoroute.json` в типизированной Go-структуре `entry{Addr,Added,Source,Port,Clean}`
+БЕЗ полей `status`/`checked_at` — при любой перезаписи файла из gateway-ui (add/remove через UI,
+POST на `/api/autoroute`) Go молча ронял оба новых поля (unmarshal → marshal без неизвестных полей).
+Добавлены `Status`/`CheckedAt` в структуру (с `omitempty`) — без этого T55 работал бы только до
+первого клика в UI. Пофиксено и передеплоено (`go build` + `systemctl restart gateway-ui`).
+
+**Приёмка (де-факто, стенд, полный цикл на реальных данных):**
+1. Прогон `brain-nightly.sh` (31 VPS-домен, ~5с/домен, реальные network-пробы) нашёл 2 реально
+   мёртвых (`ec2-*.compute.amazonaws.com`, не отвечают ни напрямую, ни через VPS) →
+   `status:no_bypass` + `checked_at`. Лог: `🚫 no_bypass: помечено 2, снято 0, проверено
+   VPS-рабочих 26, удалено устаревших 0`.
+2. `GET /api/autoroute` (после фикса Go-структуры) отдаёт оба поля нетронутыми; `POST
+   action=add` (реальная запись на диск через `writeAutoRoute`) — поля пережили round-trip.
+3. Искусственно состарил `checked_at` обеих записей → `2020-01-01` → прогон логики очистки →
+   `removed=2`, `no_bypass remaining: 0` в файле (220 записей осталось). Синтетический
+   мусор от тестирования (`test-classify-iptest.example` и т.п.) вычищен из прод-файла вручную.
+
+### T56 · UI: убрать ручное управление (youtube/discord/instagram/zapret/поиск), добавить whitelist+presets · H · done
+Пользователь: featured-вкладки (YouTube/Discord/Instagram) и «Zapret (прочие)» были нужны только
+для РУЧНОГО переключения VPS/zapret/напрямую — теперь это делает мозг, вкладки не нужны. Убрано:
+- [gateway-ui/scan.go](gateway-ui/scan.go) целиком (поиск рабочих стратегий, `/api/scan*`).
+- `handleServices`/`handleStrategies`/`handleZapret` + `zService`/`readServices`/`validateServices`
+  + helpers (`flagVal`/`splitByNew`/`baseName`/`readLines`) из [gateway-ui/zapret.go](gateway-ui/zapret.go)
+  — CRUD сервисов, каталог пресетов, просмотр запущенных стратегий.
+- Роуты `/api/scan`, `/api/scan/start`, `/api/scan/stop`, `/api/zapret`, `/api/zapret/services`,
+  `/api/strategies` (проверено: все 404 после деплоя).
+- `//go:embed strategies.json` в main.go (мёртв — `gwdb.py` читает файл с диска напрямую, T48).
+- Вкладки YouTube/Discord/Instagram/Zapret(прочие) + вся их JS/CSS в dashboard.html (~340 строк).
+**НЕ тронуто (важно):** `zapret-services.json` как источник конфигурации для
+`zapret.sh`/`render-config.sh`/Монитора — редактор убран, файл и то, что его читает, работает
+как раньше (Discord=vps, YouTube/Instagram=zapret зафиксированы как есть).
+**Оставлено и перенесено**, не удалено: карточка «Движок zapret» (`handleZapretVersion`/
+`handleZapretUpdate`, обновление nfqws из апстрима bol-van — это не про ручное переключение
+роутинга) переехала из вкладки Zapret во вкладку «Управление».
+**Добавлено:** вкладки Whitelist и Пресеты (использует готовый API из T48/T49/T51) — список,
+добавление, удаление для whitelist; список (standard/custom, trusted-бейдж, success_count) +
+форма добавления custom-пресета.
+**Попутно:** `checkVer` (авто-релоад вкладки после деплоя) раньше дёргался только из `/api/scan` —
+перевесил на `/api/monitor` (добавил `"ver"` в ответ [monitor.go](gateway-ui/monitor.go)), иначе
+авто-релоад сломался бы вместе с поиском. Вычищен мёртвый CSS (`.scanw`,`.zap-strats`,`.mode-tog`,
+`.side-feat`,`.st-card` и т.п. — ни разу не использовались в оставшейся разметке).
+**Найдена и исправлена ошибка деплоя (не в коде, в процессе):** `scp .../static/dashboard.html`
+в общую директорию (без указания `static/` в пути назначения) кладёт файл по basename в корень
+`gateway-ui/`, не в `gateway-ui/static/` — `go:embed static/*.html` тогда молча продолжает
+встраивать СТАРЫЙ файл. Синтетическая проверка (`grep data-nav` в собранном дашборде) поймала это
+сразу после первого деплоя, до того как было объявлено «готово».
+**Приёмка (де-факто, стенд):** `curl .../` → `<a data-nav=...>` ровно 9 штук (было 11, -4 +2);
+`/api/scan`, `/api/zapret/services`, `/api/strategies`, `/api/zapret` → 404; `/api/zapret/version`
+→ 200 с реальными данными (коммит `1a1fc38`); `/api/whitelist`, `/api/presets` → 200 с данными.
+
+### T57 · UDP/QUIC-обход в мозге (было только TCP) · H · done
+Найдено при разборе живого лога: домен с `source=quic-no-response` получал TCP-фикс от мозга
+(solve.sh always TCP) — иногда «случайно» помогает (браузер падает на TCP), но не чинит саму
+UDP-блокировку. Разобрался в реальных iptables: **UDP/443 у нас САМИХ глобально DROP** кроме
+Meta-подсетей ([zapret/zapret.sh:63-70](zapret/zapret.sh:63), "заставляет браузеры падать на
+TCP") — для НЕ-Meta доменов `quic-no-response` почти всегда означает наш же DROP, не внешний
+DPI-блок. Юзер выбрал строить настоящий UDP-обход (не оставлять как есть).
+- **Активная проверка `prober.Probe` всегда била по TCP** — для чисто-QUIC кандидата TCP почти
+  всегда открыт → verdict=ok → кандидат тихо терялся, до мозга не доходил вообще. Добавлена
+  отдельная ветка `quicBlocked()` в [detector/main.go](detector/main.go) — `curl --http3-only`
+  напрямую (без VPS-сравнения, SOCKS5 не тащит QUIC) — до общего TCP-пути.
+- **solve.sh** ([scripts/solve.sh](scripts/solve.sh)): `source=quic-no-response` → `PROTO=udp`,
+  своя тест-очередь `QNUM_UDP=59782`, `curl --http3-only` вместо обычного curl. **Ключевой
+  нюанс:** раз блок обычно наш же DROP, "работает после снятия своего же DROP" — это НЕ "DIRECT/
+  ничего не делать" (как для TCP), а отдельный вердикт `ZAPRET udp accept-only` (пустая
+  стратегия) — постоянный ACCEPT нужен всё равно, иначе прод-трафик по-прежнему дропается.
+  Полноценный перебор UDP-пресетов (standard→custom, `try_tier` теперь общая для обоих
+  протоколов) остаётся на случай, если ACCEPT сам по себе не помог (настоящий внешний DPI-блок
+  QUIC) — этот путь не тестировался живым трафиком (нет под рукой домена с реальным внешним
+  QUIC-блоком), но код идентичен уже провalidated TCP-пути.
+- **brain-apply.sh**: `svc_rules`/`do_zapret`/`start_daemon`/`state_put`/`do_restore` теперь
+  proto-осведомлены. TCP — как было (`nat PREROUTING RETURN` обход xray). UDP — вместо RETURN:
+  `mangle PREROUTING ACCEPT` + `filter FORWARD ACCEPT` (позиция 1, перед глобальным DROP), мимо
+  очереди/nfqws, если стратегия пустая (accept-only).
+- **brain-worker.sh**: формат вердикта расширен `ZAPRET<TAB>proto<TAB>name<TAB>args` (было 3 поля).
+**Найден и закрыт баг очистки по пути:** `do_remove` вызывал `svc_rules -D` только если была
+очередь (`[ -n "$q" ] && ...`) — accept-only сущности (queue=null) при удалении оставляли ACCEPT-
+правила в iptables навсегда (утечка, обнаружено на реальном тесте). Фикс: `svc_rules -D` зовётся
+всегда, сама решает по `$q`, чистить ли ещё и NFQUEUE-часть.
+**Приёмка (де-факто, стенд, реальный трафик, без риска для прод-доменов):**
+1. `bash solve.sh cloudflare.com quic-no-response` (безопасно — Cloudflare не в бою) →
+   `прямой доступ клиента: HTTP=301` → `ZAPRET udp accept-only` (внешне не заблокирован, только
+   наш DROP мешал).
+2. Полный конвейер: `printf 'cloudflare.com\tquic-no-response\n' >> brain-queue` → лог `✅
+   cloudflare.com → zapret/udp` → `brain-services.json`: `{"proto":"udp","queue":null,
+   "strategy":""}` → `mangle PREROUTING`/`filter FORWARD` ACCEPT на `brain_cloudflare_com`
+   реально стоят, `systemctl is-active brain-nfqws-cloudflare_com` = `inactive` (демон и не
+   создавался — как задумано).
+3. `brain-apply.sh remove cloudflare.com` (после фикса) — оба ACCEPT-правила и ipset снялись
+   одним вызовом, проверено `iptables -S` (пусто) + `ipset list` (`does not exist`).
+
+---
+
 ## todo — UI: навигация и новые разделы
 
 ### T18 · Каркас навигации дашборда (адаптивный сайдбар) · M · done
@@ -197,9 +434,100 @@ PR #48. У featured-сервисов кнопка 💾 Сохранить во �
 zapret-домены не вычитались из VPS, YouTube шёл через туннель; залит свежий, xray перерендерен.
 Репо боевой синхронизирован с main. Бэкапы: `/root/gw-backup-*/rollback.sh`, `/root/gw-repo-backup-*.tar.gz`.
 
+## done — веха: авто-обход + «мозг» (catch-up 2026-07-20)
+
+Эти задачи были реализованы и закоммичены (30+ коммитов, `feat(autoroute)`/`feat(brain)`) без
+единой строчки в TASKS/DECISIONS/CANON — CLAUDE.md требует обновлять доки СРАЗУ, это нарушено.
+Ниже — восстановленная задним числом хронология по реальным коммитам, чтобы состояние проекта
+снова жило в файлах, а не в истории сессий. Новые задачи по доработке этой вехи — см. следующий
+раздел «todo — веха: авто-мозг обхода блокировок v2».
+
+### T41 · Детектор + «Авто-обход»: обнаружение блокировок и VPS-fallback · H · done
+Коммиты: c69e500, 0e21cf3, b564262, 4e41345, 0972eb1, 1410f9b, c7ff4cb, c0dc3b1, 30de58f, c2ce60e,
+88041e7, 31fbbc9, 05437ad, 021b6b8 (PR #55–#59 + прямые). Отдельный Go-бинарь [detector/](detector/):
+prober (активная проверка прямой/VPS) + watcher (пассивный pcap-детект, TCP synThreshold=5/60с,
+UDP udpThreshold=8/10с — [watcher.go:54,76](detector/watcher/watcher.go:54), QUIC/SNI отдельно) +
+applier (autoroute.json + ipset `gw_autoroute`, без рестарта xray). UI: два НЕЗАВИСИМЫХ тумблера
+`detect`/`route` ([gateway-ui/autoroute.go](gateway-ui/autoroute.go)), не единый переключатель.
+Детект IP-блоков на всех портах (игровые серверы), UDP игровых серверов через TPROXY.
+**Приёмка (де-факто, боевая):** systemd `gateway-detector.service` active; новые блоки появляются
+в `autoroute.json` с `source`; тумблер `route` реально включает/выключает заворот в ipset.
+
+### T42 · «Авто-обход»: подвкладка «Перепроверка» · M · done
+Коммиты: 41685ee, 9de9d2e (T42 — номер уже стоит в комментарии кода, [recheck.go:12](gateway-ui/recheck.go:12)).
+Независимое от `detect/route` расписание (`gateway-recheck.timer`, дефолт 04:00): прогоняет весь
+список автообхода напрямую vs через VPS, убирает адрес, если он работает напрямую **два прогона
+подряд** (антифлак). Это частичная «ночная самоочистка» — но только для VPS-списка, до
+zapret-сущностей мозга (T44-46) не достаёт.
+**Приёмка (де-факто):** `gateway-recheck.timer` active; `/etc/gateway/recheck.json` копит
+last_run/last_removed/last_pending.
+
+### T43 · Шифрованный DNS (dnscrypt-proxy DoH) · M · done
+Коммиты: 35324f8, 771ace6. [dns/setup-dnscrypt.sh](dns/setup-dnscrypt.sh) + `gateway-dns-redirect.sh`.
+Резолвинг не читается/не подменяется на пути детектора и прокси. Фикс: сокет с FreeBind переживает
+ребут без `network-online` зависимости. **На боевой (192.168.1.106) стоит, на тестовом стенде — нет**
+(асимметрия окружений, учитывать при переносе выводов между стендом и боевой).
+**Приёмка (де-факто, боевая):** `dnscrypt-proxy.service` active, DNS резолвится через DoH.
+
+### T44 · «Мозг»: solve.sh — перебор готовых пресетов через netns-фейк-клиента · H · done
+Коммиты: 48b370e (wip), 3242263 (v3 рабочее ядро), 30506b3 (фикс флака). [scripts/solve.sh](scripts/solve.sh).
+Ключевой инсайт: собственный трафик стенда десинхронизируется nfqws НЕ так, как форвардный
+клиентский (боевые правила исключают `addrtype !LOCAL`) — оба варианта харнесса (OUTPUT и
+POSTROUTING напрямую) давали ложный VPS-вердикт даже для доменов, реально живущих на zapret.
+Решение: netns `solvns` + veth, форвард+MASQUERADE через WAN — трафик неотличим от настоящего
+LAN-клиента. Тестовая очередь QNUM=59781 изолирована от боевых 200/201. Второй найденный флак:
+остаток `veth-s` после teardown ломает следующий netns-setup (`RTNETLINK: File exists`) → тоже
+ложный VPS; фикс — явный `ip link del veth-s` в teardown.
+**Приёмка (де-факто, е2е на стенде):** rutor.info/nnmclub/rutracker.org → ZAPRET стабильно 3/3 прогона.
+
+### T45 · «Мозг»: brain-apply.sh — применитель zapret-сущности per-домен · H · done
+Коммиты: ba0e5b5, df9f441 (фикс `d unbound`). [scripts/brain-apply.sh](scripts/brain-apply.sh).
+Архитектура «очередь = сервис = сущность»: каждый домен — своя очередь NFQUEUE (`alloc_queue`,
+от 210+), свой ipset `brain_<domain>`, свои iptables-правила. Обязателен `nat PREROUTING RETURN`
+для ipset сущности — без него весь TCP 80/443 уходит в xray tproxy REDIRECT как LOCAL раньше,
+чем доходит до правил сущности (найдено на реальном клиенте: rutor.info открылся только после
+добавления RETURN). `restore` пересоздаёт сущности из `brain-services.json` после ребута.
+**Приёмка (де-факто, е2е реальным клиентом без VPN):** rutor.info — блок → solve нашёл стратегию →
+brain-apply создал сущность (очередь 210 + ipset) → трафик desync, сайт открылся.
+
+### T46 · «Мозг»: воркер-очередь + ночной проход + авто-триггер + restore · H · done
+Коммиты: e44e0ac, 0411e1a, c38e430, f9b4589. [scripts/brain-worker.sh](scripts/brain-worker.sh),
+[scripts/brain-nightly.sh](scripts/brain-nightly.sh). Воркер потребляет `/etc/gateway/brain-queue`
+(atomic pop, flock) → solve → brain-apply. Детектор при новом блоке enqueue'ит домен автоматически.
+Найденные и закрытые в бою баги: петля (детектор пере-ловил уже обработанные домены — фикс: skip
+если уже сущность/автообход/hostlist), мульти-IP CDN (Cloudflare/DoH на клиенте резолвит другие IP,
+чем стенд — фикс: детектор добавляет наблюдаемый IP клиента в ipset), коллизии очередей, `d unbound`
+в do_remove. Discord voice сознательно закреплён на VPS — ни solve, ни nightly его не трогают
+(через zapret не пробивается). **Ночной проход НЕ делает** консолидацию/idle-stop/чистку stale —
+только пересчитывает управляемые домены (см. GOALS/новую веху).
+**Приёмка (де-факто, е2е):** nnmclub→zapret, kinozal→VPS автономно, без участия человека;
+restore пересоздал сущности после ребута.
+
+### T47 · Известный техдолг (не блокирует, но накопился) · L · done
+Из аудита gateway-ui (2026-07-20): `overrides`/`--zapret-overrides` в main.go — помечено «(устар.)»
+от T24, ничем не читалось; `upsertConfigVar`/`removeConfigVar` в router.go — объявлены, нигде не
+вызывались. Оба удалены (2026-07-21). **Устарело к моменту чистки:** «мозг не имеет API/вкладки» —
+это закрыто T56 (Whitelist/Пресеты) ещё до этой задачи; не переделывал, просто отметил здесь.
+Состояние по-прежнему размазано по независимым JSON без общей схемы/истории событий — принятое
+решение (DECISIONS 2026-07-20), не техдолг.
+**Приёмка (де-факто):** `grep -rn overrides gateway-ui/*.go` и `grep -rn
+'upsertConfigVar\|removeConfigVar' gateway-ui/*.go` — ноль совпадений. `go build` чистый,
+gateway-ui задеплоен и активен, `/api/status` отвечает 200.
+
 ## todo — хвосты / на будущее
 - **Game mode** (порт-диапазон 1024-65535, тумблер Off/TCP/UDP/TCP+UDP) — обсуждён, ещё не сделан.
-- **addrtype-фикс на боевой** (T37) — намеренно НЕ применён к live zapret.sh; применить при следующем install.sh или по решению.
+  Пересекается по духу (не по коду) с новым ТЗ п.6.2 (custom-пресеты/Game Mode) — сверить перед
+  реализацией, чтобы не сделать дважды.
+- ~~addrtype-фикс на боевой (T37)~~ — **снято 2026-07-22**: машина 192.168.1.106 больше не
+  существует (владелец подтвердил). Фикс остаётся в шаблоне (`install.sh`) для будущих деплоев,
+  просто применять сейчас некуда.
+- ~~accept-only UDP-сущности невидимы в Мониторе~~ — **сделано 2026-07-22**: новая секция
+  «Accept-only, без десинхронизации» в Мониторе ([gateway-ui/monitor.go](gateway-ui/monitor.go)
+  `acceptOnlyEntities()`, `/api/monitor` поле `accept_only`). Заодно нашёл и починил регрессию из
+  T56 — CSS-класс `.st-badge` (использовался в существующем рендере сервисов/протоколов) был
+  случайно удалён при чистке мёртвого CSS, восстановлен. Проверено живьём: тестовая
+  accept-only-сущность (cloudflare.com) появилась в `/api/monitor.accept_only`, после `remove` —
+  пропала.
 
 ### T16 · Кросс-компиляция release-бинарников gateway-ui · M · done
 [gateway-ui/build-release.sh](gateway-ui/build-release.sh) собирает amd64/arm64/armv7l (CGO off, -s -w).

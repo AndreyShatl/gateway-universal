@@ -6,7 +6,9 @@
 #   DIRECT -> ничего (не заблокирован)
 # Serial: netns/тест-очередь одна, поэтому обрабатываем строго по одному.
 #
-# Очередь: /etc/gateway/brain-queue (один домен на строку, append = enqueue).
+# Очередь: /etc/gateway/brain-queue ("domain<TAB>source" на строку, T50 — source
+# из сигнатуры детектора, напр. syn-timeout/rst-after-clienthello; строки без
+# табуляции — старый формат/ночная переоценка, source считается "reeval").
 # Запуск: systemd gateway-brain-worker.service (loop, Restart=always).
 set -uo pipefail
 
@@ -15,7 +17,7 @@ LOCK=/etc/gateway/brain-queue.lock
 LOG=/var/log/gateway-brain.log
 SOLVE=${SOLVE:-/root/solve.sh}
 APPLY=${APPLY:-/root/brain-apply.sh}
-PRESETS=${PRESETS:-/root/strategies.json}
+GWDB=${GWDB:-/root/gateway-universal/scripts/gwdb.py}
 IDLE=${IDLE:-5}
 
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
@@ -32,21 +34,31 @@ pop() {
 
 log "воркер запущен"
 while true; do
-  domain=$(pop)
-  if [ -z "$domain" ]; then sleep "$IDLE"; continue; fi
+  line=$(pop)
+  if [ -z "$line" ]; then sleep "$IDLE"; continue; fi
+  domain="${line%%$'\t'*}"
+  if [ "$domain" = "$line" ]; then source=reeval; else source="${line#*$'\t'}"; fi
   # нормализация: только домен, без схемы/путей
   domain=$(echo "$domain" | sed -E 's#^https?://##; s#/.*$##' | tr -d ' ')
   [ -n "$domain" ] || continue
-  log "▶ $domain — тестирую пресеты"
+  # whitelist (T49): защитно — даже если домен как-то попал в очередь (ручной
+  # ввод, старая версия детектора), не трогаем .ru/.su/.рф и т.п.
+  if [ "$(python3 "$GWDB" whitelisted "$domain" 2>/dev/null)" = "1" ]; then
+    log "⚪ $domain — whitelist, пропуск"
+    continue
+  fi
+  log "▶ $domain (source=$source) — тестирую пресеты"
 
-  out=$(ZAPRET=/opt/zapret PRESETS="$PRESETS" bash "$SOLVE" "$domain" 2>/dev/null)
+  out=$(ZAPRET=/opt/zapret GWDB="$GWDB" bash "$SOLVE" "$domain" "$source" 2>/dev/null)
   verdict=$(echo "$out" | grep -E '^(ZAPRET|VPS|DIRECT)' | tail -1)
 
   case "$verdict" in
     ZAPRET*)
-      strat=$(echo "$verdict" | cut -f3-)
-      bash "$APPLY" zapret "$domain" $strat >/dev/null 2>&1 \
-        && log "✅ $domain → zapret (низкий пинг)" \
+      # формат (T57): "ZAPRET<TAB>proto<TAB>name<TAB>args..."
+      proto=$(echo "$verdict" | cut -f2)
+      strat=$(echo "$verdict" | cut -f4-)
+      bash "$APPLY" zapret "$domain" "$proto" $strat >/dev/null 2>&1 \
+        && log "✅ $domain → zapret/$proto (низкий пинг)" \
         || log "⚠ $domain → zapret ошибка применения"
       ;;
     DIRECT*)

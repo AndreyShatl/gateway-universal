@@ -83,6 +83,7 @@ func runWatch() {
 	if *iface == "" {
 		log.Fatal("не удалось определить WAN-интерфейс, задайте --iface")
 	}
+	gwdbScript = filepath.Join(filepath.Dir(*configEnv), "scripts", "gwdb.py")
 	log.Printf("detector: iface=%s vps=%s apply=%v", *iface, *vps, *apply)
 	// watcher -> prober (подтверждение) -> [тень: лог | apply: применить]
 	handler := func(c watcher.Candidate) {
@@ -92,6 +93,12 @@ func runWatch() {
 		// кандидата — можно добавить вручную, если это реально нужный адрес.
 		if c.Signal == "udp-no-reply" {
 			log.Printf("🔵 UDP без ответа: %s:%d (кандидат, не добавляю — UDP-молчание неоднозначно)", c.DstIP, c.Port)
+			return
+		}
+		// whitelist (T49): не анализируем вообще (даже тенью), если SNI попадает
+		// под правило whitelist (.ru/.рф/.su, см. gwdb.py) — КРОМЕ доменов, явно
+		// прописанных на VPS в xray/domains/*.txt (курируемый список приоритетнее).
+		if c.SNI != "" && isWhitelisted(c.SNI) && !inCuratedRouting(c.SNI) {
 			return
 		}
 		// уже обрабатывается — не пере-обрабатываем (иначе петля: свой трафик
@@ -111,6 +118,29 @@ func runWatch() {
 			if inZapretHostlist(c.SNI) {
 				return // hostlist-сервис фильтрует по SNI — IP не важен
 			}
+		}
+		// T57: QUIC-сигнал — prober.Probe ниже всегда бьёт по TCP, для чисто UDP-блока
+		// (у нас самих же глобальный DROP UDP/443 кроме Meta, см. zapret/zapret.sh) TCP
+		// почти всегда открыт => verdict=ok => кандидат тихо теряется, до мозга не доходит.
+		// Отдельная активная проверка через curl --http3-only (напрямую, без VPS-сравнения —
+		// прогон QUIC через VPS-socks не поддержан) перед обычным TCP-путём.
+		if c.Signal == "quic-no-response" && c.SNI != "" {
+			if quicBlocked(c.SNI) {
+				if *apply {
+					if applier.Apply(c.SNI, c.Signal, 443) {
+						log.Printf("✅ мгновенно в VPS (QUIC): %s (dst=%s)", c.SNI, c.DstIP)
+					}
+					addToSet(applier.IPSet, c.DstIP)
+					if enqueueBrain(c.SNI, c.Signal) {
+						log.Printf("→ %s в очередь мозга (проверка zapret UDP)", c.SNI)
+					}
+				} else {
+					log.Printf("🟡 БЫ добавил (QUIC): %s", c.SNI)
+				}
+			} else {
+				log.Printf("⚪ %s — QUIC напрямую снова работает, не добавляю", c.SNI)
+			}
+			return
 		}
 		target := c.SNI
 		if target == "" {
@@ -134,7 +164,7 @@ func runWatch() {
 				addToSet(applier.IPSet, c.DstIP) // + реальный IP клиента (мультиIP CDN)
 				// домен (по SNI) — в очередь «мозга»: воркер попробует перевести на
 				// zapret (низкий пинг). Блоки по чистому IP zapret не пробьёт — остаются VPS.
-				if c.SNI != "" && enqueueBrain(c.SNI) {
+				if c.SNI != "" && enqueueBrain(c.SNI, c.Signal) {
 					log.Printf("→ %s в очередь мозга (проверка zapret)", c.SNI)
 				}
 			} else {
@@ -307,12 +337,74 @@ func dryTag(apply bool) string {
 	return " [тень]"
 }
 
+// gwdbScript — путь к scripts/gwdb.py (whitelist + presets, T48/T49). Задаётся
+// в runWatch() из --config-env (тот же репозиторий).
+var gwdbScript = "/root/gateway-universal/scripts/gwdb.py"
+
+// isWhitelisted — проверка через gwdb.py (единая точка схемы с bash-стороной
+// мозга и gateway-ui, см. scripts/gwdb.py). Не найден python3/скрипт — считаем
+// НЕ whitelisted (fail-open к анализу, не fail-open к пропуску блокировок).
+func isWhitelisted(domain string) bool {
+	out, err := exec.Command("python3", gwdbScript, "whitelisted", domain).Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "1"
+}
+
+// quicBlocked — T57: активная проверка QUIC (curl --http3-only, напрямую, без
+// VPS — SOCKS5 не тащит QUIC/UDP полноценно). Пустой/ошибочный код ответа = блок.
+func quicBlocked(domain string) bool {
+	out, err := exec.Command("curl", "--http3-only", "-s", "-o", "/dev/null",
+		"-w", "%{http_code}", "--max-time", "6", "https://"+domain+"/").Output()
+	if err != nil {
+		return true
+	}
+	code := strings.TrimSpace(string(out))
+	return code == "" || code == "000"
+}
+
+// inCuratedRouting — домен (или его родитель) явно прописан в xray/domains/*.txt
+// (курируемый список ручного VPS-роутинга) — приоритетнее правила whitelist.
+// Каталог берём рядом с gwdbScript (тот же репозиторий: <repo>/scripts/gwdb.py
+// и <repo>/xray/domains/ — общий родитель <repo>).
+func inCuratedRouting(domain string) bool {
+	dir := filepath.Join(filepath.Dir(filepath.Dir(gwdbScript)), "xray", "domains")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	domain = strings.ToLower(domain)
+	for _, de := range entries {
+		if de.IsDir() || !strings.HasSuffix(de.Name(), ".txt") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		for _, ln := range strings.Split(string(data), "\n") {
+			t := strings.ToLower(strings.TrimSpace(ln))
+			if t == "" || strings.HasPrefix(t, "#") || strings.HasPrefix(t, "geosite:") {
+				continue
+			}
+			if domain == t || strings.HasSuffix(domain, "."+t) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 const brainQueueFile = "/etc/gateway/brain-queue"
 const brainQueueLock = "/etc/gateway/brain-queue.lock"
 
 // enqueueBrain — положить домен в очередь воркера «мозга» (dedup: не в очереди и
 // не уже zapret-сущность). Под тем же flock, что worker.pop, чтобы не гонки.
-func enqueueBrain(domain string) bool {
+// Строка очереди — "domain\tsource" (T50): source = сигнатура детектора
+// (syn-timeout/rst-after-clienthello/...), solve.sh использует её для
+// классификации (пропуск перебора пресетов при похожей на IP-блокировку).
+func enqueueBrain(domain, source string) bool {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" || strings.HasPrefix(domain, "geosite:") || isBrainEntity(domain) || inBrainQueue(domain) {
 		return false
@@ -332,17 +424,23 @@ func enqueueBrain(domain string) bool {
 		return false
 	}
 	defer f.Close()
-	f.WriteString(domain + "\n")
+	if source == "" {
+		source = "unknown"
+	}
+	f.WriteString(domain + "\t" + source + "\n")
 	return true
 }
 
+// inBrainQueue сравнивает только домен (первое поле "domain\tsource") — старые
+// строки без табуляции (до T50) тоже матчатся целиком, обратная совместимость.
 func inBrainQueue(domain string) bool {
 	data, err := os.ReadFile(brainQueueFile)
 	if err != nil {
 		return false
 	}
 	for _, ln := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(ln) == domain {
+		d := strings.SplitN(strings.TrimSpace(ln), "\t", 2)[0]
+		if d == domain {
 			return true
 		}
 	}

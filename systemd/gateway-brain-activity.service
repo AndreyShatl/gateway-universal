@@ -1,0 +1,8 @@
+[Unit]
+Description=Gateway brain activity snapshot (T53: packet-счётчики -> last_active)
+After=network-online.target zapret.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-activity.sh

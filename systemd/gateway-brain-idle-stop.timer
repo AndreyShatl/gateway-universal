@@ -1,0 +1,10 @@
+[Unit]
+Description=Дневной идле-стоп простаивающих сущностей мозга (T54, полдень — после ночного прохода)
+
+[Timer]
+OnCalendar=*-*-* 12:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
