@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# brain-nightly.sh — ночной проход: закинуть все управляемые домены в очередь
-# воркера на ПЕРЕОЦЕНКУ. Воркер: solve -> zapret/VPS; DIRECT -> убрать (GC).
-# Так список сам мигрирует: разблокированные уходят, VPS-домены пробуются на
-# zapret (низкий пинг). Discord (services.json mode=vps) НЕ в списках — не трогаем.
+# brain-nightly.sh v2 (T-consolidate, 2026-07-23) — ночной проход: закинуть все
+# управляемые домены в очередь воркера на ПЕРЕОЦЕНКУ. Вся логика "сначала своя
+# группа, потом другие существующие, потом полный перебор" теперь в
+# brain-worker.sh (process_domain) — nightly просто собирает список доменов и
+# кладёт в очередь, как раньше. State теперь ГРУППОВОЙ (T-consolidate):
+# [{group_id, proto, strategy, queue, domains:[...]}], не {domain: ...} — читаем
+# домены из ВСЕХ групп, а не x['domain'] (иначе KeyError на новом формате).
+# Discord (services.json mode=vps) НЕ в списках — не трогаем.
 set -uo pipefail
 
 QUEUE=/etc/gateway/brain-queue
@@ -11,9 +15,13 @@ STATE=/etc/gateway/brain-services.json
 AR=/etc/gateway/autoroute.json
 LOG=/var/log/gateway-brain.log
 
-# домены zapret-сущностей — тоже переоцениваем (solve теперь детерминирован после
-# фикса veth): вдруг разблокировали (DIRECT->GC) или стратегия перестала пробивать.
-mapfile -t ents < <(python3 -c "import json,os;print('\n'.join(x['domain'] for x in (json.load(open('$STATE')) if os.path.exists('$STATE') else [])))" 2>/dev/null)
+# домены brain-групп — тоже переоцениваем (T-consolidate: состояние теперь
+# групповое, читаем domains[] из КАЖДОЙ группы, не x['domain']).
+mapfile -t ents < <(python3 -c "
+import json,os
+data=json.load(open('$STATE')) if os.path.exists('$STATE') else []
+print('\n'.join(d for g in data for d in g.get('domains',[])))
+" 2>/dev/null)
 # домены VPS-автообхода (не IP, не geosite, НЕ покрытые zapret-сервисом) —
 # пробуем перевести на zapret. Покрытые сервисом (instagram/youtube CDN) пропускаем.
 mapfile -t vps < <(python3 -c "

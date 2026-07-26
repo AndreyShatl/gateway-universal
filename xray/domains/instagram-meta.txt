@@ -50,3 +50,13 @@ igsonar.com
 messenger.com
 oculus.com
 oculuscdn.com
+fb.watch
+fb.me
+fb.gg
+analytics.facebook.com
+fbcdn-a.akamaihd.net
+fbsbx.net
+threads.com
+atmeta.com
+llama.com
+facebook.design

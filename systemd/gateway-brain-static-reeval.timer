@@ -1,0 +1,15 @@
+[Unit]
+Description=Ночная проверка zapret для youtube/discord/instagram (раз в сутки)
+
+[Timer]
+# 05:00, НЕ 04:00 — brain-nightly.service и gateway-recheck.service тоже 04:00
+# и оба тоже дёргают solve.sh (общий netns "solvns" + фиксированные тестовые
+# очереди QNUM 59781/59782) — одновременный запуск будет драться за один и тот
+# же netns/очередь. Час разницы + их 30-мин джиттер почти всегда достаточно,
+# чтобы они успели закончить раньше нашего старта.
+OnCalendar=*-*-* 05:00:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -12,3 +12,15 @@ discord.media
 discordcdn.com
 dis.gd
 discord.co
+discord.gift
+discord.gifts
+discord.design
+discord.dev
+discord.new
+discord.store
+discord.tools
+discordapp.io
+discordstatus.com
+discordsays.com
+discord-activities.com
+discordactivities.com

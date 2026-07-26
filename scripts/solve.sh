@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# solve.sh v4 — ядро «мозга»: перебор ГОТОВЫХ пресетов через NETNS-фейк-клиента.
+# solve.sh v5 — ядро «мозга»: перебор ГОТОВЫХ пресетов через NETNS-фейк-клиента.
 # Трафик netns форвардится+NAT через стенд как настоящий LAN-клиент, значит
 # nfqws десинхронизирует его как боевой (локальный трафик стенда — не воспроизводит).
 # Изоляция от живых qnum200/201/210+: ACCEPT для netns-трафика в mangle POSTROUTING
 # (после нашей очереди) → на боевые правила не попадает.
 #
-#   solve.sh <domain> [source]
+#   solve.sh <domain> [source]                    — полный перебор (как раньше)
+#   solve.sh --test-args <domain> <proto> <args>  — ПРОВЕРИТЬ ОДНУ конкретную
+#     стратегию (T-consolidate): нужно для группировки доменов по общей стратегии —
+#     "сработает ли для ЭТОГО домена стратегия, уже найденная для ДРУГОГО" — без
+#     полного перебора тиров. Вывод последней строкой: "OK <code>" | "FAIL <code>".
+#
 # source (T50) — сигнатура детектора (syn-timeout/rst-after-clienthello/quic-no-response/...).
 # Определяет и протокол, и стратегию проверки (T57):
 #   - "quic-no-response" → УЖЕ значит "клиент видит нет ответа на UDP/443 QUIC" — тестируем
@@ -16,11 +21,9 @@
 #   - "syn-timeout" — похоже на IP-уровневую TCP-блокировку — перебор TCP-пресетов её
 #     не чинит, пропускаем и сразу отдаём VPS.
 #   - всё остальное — обычный TCP-перебор.
-# Вывод (последняя строка): "ZAPRET<TAB><proto>\t<name>\t<args>" | "VPS" | "DIRECT"
+# Вывод (последняя строка, обычный режим): "ZAPRET<TAB><proto>\t<name>\t<args>" | "VPS" | "DIRECT"
 set -uo pipefail
 
-DOMAIN="${1:?usage: solve.sh <domain> [source]}"
-SOURCE="${2:-unknown}"
 ZAPRET="${ZAPRET:-/opt/zapret}"
 NFQWS="$ZAPRET/nfq/nfqws"
 FAKEDIR="${FAKEDIR:-$ZAPRET/files/fake}"
@@ -31,12 +34,30 @@ HOSTIP=10.99.99.1; NSIP=10.99.99.2; SUBNET=10.99.99.0/30
 QNUM_TCP=59781; QNUM_UDP=59782; MARK=0x40000000; PORT=443
 
 [ -x "$NFQWS" ] || { echo "нет nfqws" >&2; exit 2; }
-[ -f "$GWDB" ] || { echo "нет gwdb.py: $GWDB" >&2; exit 2; }
 
-if [ "$SOURCE" = "quic-no-response" ]; then PROTO=udp; QNUM=$QNUM_UDP; else PROTO=tcp; QNUM=$QNUM_TCP; fi
+TEST_MODE=0
+if [ "${1:-}" = "--test-args" ]; then
+  TEST_MODE=1
+  DOMAIN="${2:?usage: solve.sh --test-args <domain> <proto> <args>}"
+  PROTO="${3:?usage: solve.sh --test-args <domain> <proto> <args>}"
+  shift 3
+  TEST_ARGS="$*"
+  [ -n "$TEST_ARGS" ] || { echo "нужны args" >&2; exit 2; }
+  SOURCE=unknown
+else
+  [ -f "$GWDB" ] || { echo "нет gwdb.py: $GWDB" >&2; exit 2; }
+  DOMAIN="${1:?usage: solve.sh <domain> [source]}"
+  SOURCE="${2:-unknown}"
+  if [ "$SOURCE" = "quic-no-response" ]; then PROTO=udp; else PROTO=tcp; fi
+fi
+if [ "$PROTO" = "udp" ]; then QNUM=$QNUM_UDP; else QNUM=$QNUM_TCP; fi
 
 IP=$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR==1{print $1}')
-[ -n "$IP" ] || { echo "не резолвится: $DOMAIN" >&2; echo "VPS"; exit 0; }
+if [ -z "$IP" ]; then
+  echo "не резолвится: $DOMAIN" >&2
+  if [ "$TEST_MODE" = 1 ]; then echo "FAIL 000"; else echo "VPS"; fi
+  exit 0
+fi
 echo "цель: $DOMAIN -> $IP (proto=$PROTO)"
 
 NPID=
@@ -91,6 +112,22 @@ wait_bound() {
   done
   return 1
 }
+
+# --- режим --test-args (T-consolidate): одна стратегия, без базовой прямой
+# проверки и без перебора тиров — просто "работает ли ЭТА строка для ЭТОГО домена".
+if [ "$TEST_MODE" = 1 ]; then
+  a=${TEST_ARGS//\$FAKE/$FAKEDIR}
+  miss=0; for f in $(echo "$a" | grep -oE "$FAKEDIR/[^ ]+"); do [ -f "$f" ] || miss=1; done
+  if [ $miss -eq 1 ]; then echo "нет fake-файла для args" >&2; echo "FAIL 000"; exit 0; fi
+  $NFQWS --qnum=$QNUM --dpi-desync-fwmark=$MARK --filter-$PROTO=$PORT $a >/dev/null 2>&1 &
+  NPID=$!
+  if ! wait_bound; then kill "$NPID" 2>/dev/null; NPID=; echo "nfqws не забиндил" >&2; echo "FAIL 000"; exit 0; fi
+  if [ "$PROTO" = "udp" ]; then code=$(nscurl_udp); else code=$(nscurl); fi
+  code=${code:-000}
+  kill "$NPID" 2>/dev/null; NPID=
+  if [ "$code" != "000" ]; then echo "РАБОТАЕТ (HTTP=$code)"; echo "OK $code"; else echo "не работает"; echo "FAIL $code"; fi
+  exit 0
+fi
 
 if [ "$PROTO" = "udp" ]; then BASE=$(nscurl_udp); else BASE=$(nscurl); fi
 BASE=${BASE:-000}

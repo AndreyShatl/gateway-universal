@@ -1,6 +1,9 @@
-# Apple (4 записи)
+# Apple
 # Способ обхода: VLESS прокси
+# geosite: apple (2026-07-23: добавлено — раньше не было geosite-подстраховки,
+# только ручной список из 4 доменов)
 
+geosite:apple
 apple.com
 cdn-apple.com
 icloud.com

@@ -451,6 +451,17 @@ if [[ "${INSTALL_DISCORD_TPROXY:-yes}" == "yes" && -n "$VPS_ADDR" ]]; then
     ok "discord-tproxy enabled"
 fi
 
+say "Installing game-mode (blanket-ACCEPT for ephemeral game ports, off by default)…"
+mkdir -p /opt/gateway /etc/gateway
+cp "$SCRIPT_DIR/iptables/game-mode.sh" /opt/gateway/game-mode.sh
+chmod +x /opt/gateway/game-mode.sh
+[ -f /etc/gateway/game-mode.conf ] || echo off > /etc/gateway/game-mode.conf
+cp "$SCRIPT_DIR/systemd/game-mode.service" /etc/systemd/system/game-mode.service
+systemctl daemon-reload
+systemctl enable game-mode.service >/dev/null
+systemctl restart game-mode.service
+ok "game-mode enabled (mode=$(cat /etc/gateway/game-mode.conf))"
+
 # ==========================================================================
 #                        REVERSE SSH TUNNEL
 # ==========================================================================

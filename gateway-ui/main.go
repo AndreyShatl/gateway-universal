@@ -124,6 +124,7 @@ func main() {
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
 	mux.HandleFunc("/api/whitelist", s.requireAuth(s.handleWhitelist))
 	mux.HandleFunc("/api/presets", s.requireAuth(s.handlePresets))
+	mux.HandleFunc("/api/game-mode", s.requireAuth(s.handleGameMode))
 	mux.HandleFunc("/api/zapret/version", s.requireAuth(s.handleZapretVersion))
 	mux.HandleFunc("/api/zapret/update", s.requireAuth(s.handleZapretUpdate))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))

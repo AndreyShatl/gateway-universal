@@ -1,12 +1,13 @@
 [Unit]
-Description=Gateway auto-route detector (pcap → prober → applier)
+Description=Gateway auto-route detector (eBPF → prober → applier)
 After=network-online.target xray.service dnscrypt-proxy.service
 Wants=network-online.target
 
 [Service]
 # Запускается/останавливается gateway-ui по тумблеру «Авто-обход».
-# Пассивный pcap-детект блоков + перепроверка через VPS + применение (ipset).
-ExecStart=/opt/gateway-detector watch --apply --config-env /root/gateway-universal/config.env
+# Пассивный eBPF-детект блоков (T59, до 2026-07-23 — pcap) + перепроверка через
+# VPS + применение (ipset). Откат на pcap: ExecStart -> "watch --apply" (тот же бинарь).
+ExecStart=/opt/gateway-detector watch-ebpf --apply --config-env /root/gateway-universal/config.env
 Restart=on-failure
 RestartSec=5
 

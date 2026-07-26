@@ -14,7 +14,12 @@ import (
 var statusServices = []string{"xray", "zapret", "gateway-ui"}
 
 // сервисы, которые разрешено рестартить/смотреть из UI
-var manageable = map[string]bool{"xray": true, "zapret": true, "fix-gateway": true, "discord-tproxy": true}
+var manageable = map[string]bool{"xray": true, "zapret": true, "fix-gateway": true, "discord-tproxy": true,
+	"gateway-detector": true, "gateway-brain-worker": true}
+
+// gateway-brain-worker пишет подробный лог (per-domain ✅/🔵/⚠) не в stdout/journalctl,
+// а в свой файл — journalctl этого юнита показал бы только "воркер запущен" и тишину.
+const brainLogFile = "/var/log/gateway-brain.log"
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	svc := map[string]string{}
@@ -54,6 +59,12 @@ func (s *server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 		return
 	}
+	if svc == "zapret" {
+		// CANON #20: zapret.service флашит mangle POSTROUTING при каждом рестарте —
+		// без restore все brain-группы (T-consolidate) осиротеют молча.
+		runCmd("sleep", "2")
+		runCmd("/opt/gateway-brain/brain-apply.sh", "restore")
+	}
 	state, _ := runCmd("systemctl", "is-active", svc+".service")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": svc, "state": strings.TrimSpace(state)})
 }
@@ -73,6 +84,11 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("lines")); err == nil && v > 0 && v <= 200 {
 		n = v
 	}
-	out, _ := runCmd("journalctl", "-u", svc+".service", "-n", strconv.Itoa(n), "--no-pager")
+	var out string
+	if svc == "gateway-brain-worker" {
+		out, _ = runCmd("tail", "-n", strconv.Itoa(n), brainLogFile)
+	} else {
+		out, _ = runCmd("journalctl", "-u", svc+".service", "-n", strconv.Itoa(n), "--no-pager")
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"log": out})
 }

@@ -1,0 +1,8 @@
+[Unit]
+Description=Gateway brain — ночная проверка zapret для статических сервисов (youtube/discord/instagram)
+After=network-online.target gateway-brain-worker.service
+
+[Service]
+Type=oneshot
+Environment=GWDB=/root/gateway-universal/scripts/gwdb.py
+ExecStart=/opt/gateway-brain/brain-static-reeval.sh

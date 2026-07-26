@@ -1,6 +1,8 @@
-# Microsoft (10 записей)
+# Microsoft
 # Способ обхода: VLESS прокси
+# geosite: microsoft (2026-07-23: добавлено — раньше не было geosite-подстраховки)
 
+geosite:microsoft
 microsoft.com
 microsoftonline.com
 live.com

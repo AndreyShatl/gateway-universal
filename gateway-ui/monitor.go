@@ -53,12 +53,53 @@ var (
 
 func (s *server) handleMonitor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"profiles":    nfqProfiles(),
-		"queues":      queueStats(),
-		"services":    svcList(s),
-		"accept_only": acceptOnlyEntities(), // T57: UDP-сущности без десинхронизации — нет процесса, invisible в profiles
-		"ver":         s.ver,                // авто-обновление вкладки после деплоя (checkVer в JS) — раньше это делал /api/scan
+		"profiles":     nfqProfiles(),
+		"queues":       queueStats(),
+		"services":     svcList(s),
+		"accept_only":  acceptOnlyEntities(), // T57: UDP-сущности без десинхронизации — нет процесса, invisible в profiles
+		"brain_groups": brainGroupSummaries(),
+		"brain_totals": brainTotals(),
+		"ver":          s.ver, // авто-обновление вкладки после деплоя (checkVer в JS) — раньше это делал /api/scan
 	})
+}
+
+// brainGroupSummary — одна группа для карточки «Мозг» (T-consolidate, 2026-07-23):
+// не расписываем 113 доменов в одну строку (было в profiles/service — нечитаемо),
+// даём count + сам список отдельно (UI разворачивает по клику).
+type brainGroupSummary struct {
+	GroupID string   `json:"group_id"`
+	Proto   string   `json:"proto"`
+	Queue   *int     `json:"queue"`
+	Count   int      `json:"count"`
+	Domains []string `json:"domains"`
+}
+
+func brainGroupSummaries() []brainGroupSummary {
+	out := []brainGroupSummary{}
+	for _, g := range readBrainGroups() {
+		out = append(out, brainGroupSummary{GroupID: g.GroupID, Proto: g.Proto, Queue: g.Queue, Count: len(g.Domains), Domains: g.Domains})
+	}
+	return out
+}
+
+type brainTotalsInfo struct {
+	Groups   int     `json:"groups"`
+	Domains  int     `json:"domains"`
+	Daemons  int     `json:"daemons"`
+	MemoryMB float64 `json:"memory_mb"`
+}
+
+func brainTotals() brainTotalsInfo {
+	groups := readBrainGroups()
+	domains := 0
+	for _, g := range groups {
+		domains += len(g.Domains)
+	}
+	daemons, _ := runCmd("bash", "-c", "pgrep -c nfqws")
+	mem, _ := runCmd("bash", "-c", `ps -o rss= -C nfqws | awk '{s+=$1} END{printf "%.1f", s/1024}'`)
+	n, _ := strconv.Atoi(strings.TrimSpace(daemons))
+	m, _ := strconv.ParseFloat(strings.TrimSpace(mem), 64)
+	return brainTotalsInfo{Groups: len(groups), Domains: domains, Daemons: n, MemoryMB: m}
 }
 
 // acceptOnlyEntities — сущности мозга без очереди/nfqws (T57: UDP-домен, которому
@@ -69,44 +110,47 @@ type acceptOnlyEntity struct {
 	Proto  string `json:"proto"`
 }
 
-func acceptOnlyEntities() []acceptOnlyEntity {
+// brainGroup — одна ГРУППА доменов с общей стратегией (T-consolidate, 2026-07-23:
+// схема сменилась с "сущность на домен" на "сущность на группу", см. CANON).
+type brainGroup struct {
+	GroupID string   `json:"group_id"`
+	Proto   string   `json:"proto"`
+	Queue   *int     `json:"queue"`
+	Domains []string `json:"domains"`
+}
+
+func readBrainGroups() []brainGroup {
 	data, err := os.ReadFile("/etc/gateway/brain-services.json")
 	if err != nil {
 		return nil
 	}
-	var raw []struct {
-		Domain string `json:"domain"`
-		Proto  string `json:"proto"`
-		Queue  *int   `json:"queue"`
-	}
+	var raw []brainGroup
 	json.Unmarshal(data, &raw)
+	return raw
+}
+
+func acceptOnlyEntities() []acceptOnlyEntity {
 	out := []acceptOnlyEntity{}
-	for _, x := range raw {
-		if x.Queue == nil {
-			out = append(out, acceptOnlyEntity{Domain: x.Domain, Proto: x.Proto})
+	for _, g := range readBrainGroups() {
+		if g.Queue != nil {
+			continue
+		}
+		for _, d := range g.Domains {
+			out = append(out, acceptOnlyEntity{Domain: d, Proto: g.Proto})
 		}
 	}
 	return out
 }
 
-// brainQueues — карта очередь->домен из состояния мозга (сущности без hostlist
-// скоупятся ipset'ом, их имя монитору иначе не видно).
+// brainQueues — карта очередь->домены (через запятую) из состояния мозга группами
+// (сущности без hostlist скоупятся ipset'ом, их имя монитору иначе не видно).
 func brainQueues() map[int]string {
 	m := map[int]string{}
-	data, err := os.ReadFile("/etc/gateway/brain-services.json")
-	if err != nil {
-		return m
-	}
-	var raw []struct {
-		Domain string `json:"domain"`
-		Queue  int    `json:"queue"`
-	}
-	json.Unmarshal(data, &raw)
-	for _, x := range raw {
-		if x.Queue <= 0 {
+	for _, g := range readBrainGroups() {
+		if g.Queue == nil || *g.Queue <= 0 {
 			continue // accept-only (T57, queue=null в JSON) — нет nfqws-процесса, нечего подписывать
 		}
-		m[x.Queue] = x.Domain
+		m[*g.Queue] = strings.Join(g.Domains, ", ")
 	}
 	return m
 }

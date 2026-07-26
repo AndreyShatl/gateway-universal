@@ -53,6 +53,9 @@ func (s *server) handleZapretUpdate(w http.ResponseWriter, r *http.Request) {
 		"git fetch --depth 1 origin && git reset --hard FETCH_HEAD || exit 1\n" +
 		"make -C nfq && make -C mdig && make -C tpws\n" +
 		"systemctl restart zapret.service\n" +
+		// CANON #20: zapret.service флашит mangle POSTROUTING при каждом рестарте —
+		// без restore все brain-группы (T-consolidate) осиротеют (демоны живы, правил нет).
+		"sleep 2 && /opt/gateway-brain/brain-apply.sh restore\n" +
 		"echo __ZUPDATE_DONE__ rc=$?\n"
 	scriptPath := filepath.Join(filepath.Dir(s.scanDir), "zupdate.sh")
 	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {

@@ -140,6 +140,7 @@
       <div class="nav-grp">Мозг</div>
       <a data-nav="whitelist">Whitelist</a>
       <a data-nav="presets">Пресеты</a>
+      <a data-nav="gamemode">Game Mode</a>
       <div class="nav-grp">Система</div>
       <a data-nav="monitor">Мониторинг</a>
       <a data-nav="network">Сеть</a>
@@ -340,6 +341,26 @@
         </div>
       </section>
 
+      <section data-sec="gamemode">
+        <div class="card">
+          <h2>Game Mode</h2>
+          <div class="muted">Бланкет-ACCEPT для эфемерных портов игровых серверов (1024-65535) —
+            трафик в этих портах вообще не анализируется и не десинхронизируется (без VPS, без zapret),
+            чтобы не добавлять задержку. UDP ограничен сверху 49999 — диапазон 50000-65535 закреплён
+            за голосом Discord (VPS-туннель) и Game Mode его не трогает.</div>
+          <div class="row">
+            <select id="gmMode">
+              <option value="off">Off</option>
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+              <option value="both">TCP+UDP</option>
+            </select>
+            <button id="gmApply">Применить</button>
+          </div>
+          <div id="gmMsg" class="msg"></div>
+        </div>
+      </section>
+
       <section data-sec="monitor">
         <div class="card">
           <div class="row" style="justify-content:space-between; align-items:center">
@@ -347,6 +368,12 @@
             <span class="muted" style="font-size:.85em" id="monUpd"></span>
           </div>
           <div class="muted" style="margin-top:6px">Демоны nfqws, очереди трафика и сервисы. Обновляется каждые 3 c. Только просмотр.</div>
+        </div>
+        <div class="card">
+          <h2>Мозг: группы по стратегии</h2>
+          <div class="muted" style="margin-bottom:6px">С 2026-07-23 (T-consolidate) — один демон обслуживает ВСЕ домены с одинаковой рабочей стратегией, не по домену на демон. Кликни группу, чтобы увидеть её домены.</div>
+          <div class="row" id="brainTotalsRow" style="gap:18px; flex-wrap:wrap"></div>
+          <div id="brainGroups" style="margin-top:10px"></div>
         </div>
         <div class="card">
           <h2>Активные zapret-профили (<span id="monDCount">0</span>)</h2>
@@ -395,6 +422,8 @@
             <select id="logSvc">
               <option value="xray">xray</option>
               <option value="zapret">zapret</option>
+              <option value="gateway-detector">детектор (eBPF)</option>
+              <option value="gateway-brain-worker">мозг (per-domain)</option>
             </select>
             <button id="btnLogs">Показать</button>
           </div>
@@ -609,6 +638,23 @@
     document.querySelector('.sidebar a[data-nav="presets"]').addEventListener('click', loadPresets);
     loadPresets();
 
+    // --- Game Mode ---
+    function loadGameMode() {
+      fetch('/api/game-mode').then(r => r.json()).then(d => { document.getElementById('gmMode').value = d.mode || 'off'; }).catch(() => {});
+    }
+    document.getElementById('gmApply').onclick = () => {
+      const mode = document.getElementById('gmMode').value;
+      const msg = document.getElementById('gmMsg');
+      fetch('/api/game-mode', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'mode='+encodeURIComponent(mode) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ режим: '+d.mode; }
+          else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
+        }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
+    };
+    document.querySelector('.sidebar a[data-nav="gamemode"]').addEventListener('click', loadGameMode);
+    loadGameMode();
+
 
     // --- Навигация ---
     const navItems = document.querySelectorAll('.sidebar a[data-nav]');
@@ -638,6 +684,16 @@
     }
     function renderMonitor(d) {
       checkVer(d.ver); // авто-обновление вкладки после деплоя
+      const bt = d.brain_totals || {groups:0, domains:0, daemons:0, memory_mb:0};
+      document.getElementById('brainTotalsRow').innerHTML = [
+        ['Групп', bt.groups], ['Доменов', bt.domains], ['Демонов nfqws', bt.daemons], ['Память', bt.memory_mb.toFixed(1)+' МБ']
+      ].map(([label,val]) => `<div><div class="muted" style="font-size:.8em">${label}</div><div style="font-size:1.3em; font-weight:600">${val}</div></div>`).join('');
+      const groups = (d.brain_groups || []).slice().sort((a,b)=>b.count-a.count);
+      document.getElementById('brainGroups').innerHTML = groups.length ? groups.map(g => `
+        <details style="margin:4px 0">
+          <summary style="cursor:pointer"><span class="st-badge">${esc(g.proto)}</span> ${g.queue!=null?'очередь '+g.queue:'accept-only'} — <b>${g.count}</b> ${g.count===1?'домен':'доменов'}</summary>
+          <div class="muted" style="margin:6px 0 0 16px; font-size:.85em">${g.domains.map(esc).join(', ')}</div>
+        </details>`).join('') : '<span class="muted">пусто</span>';
       // группируем профили по сервису: строка = сервис, внутри его каналы (proto·очередь·стратегия)
       const bySvc = {};
       for (const p of (d.profiles || [])) { (bySvc[p.service||'—'] ||= []).push(p); }

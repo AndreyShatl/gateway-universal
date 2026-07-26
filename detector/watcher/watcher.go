@@ -103,11 +103,7 @@ func (w *Watcher) Run() error {
 	if err := handle.SetBPFFilter(bpf); err != nil {
 		return fmt.Errorf("bpf: %w", err)
 	}
-	w.flows = map[string]*flowState{}
-	w.quic = map[string]*quicState{}
-	w.udp = map[string]*udpState{}
-	w.synFails = map[string]*synFail{}
-	go w.cleaner()
+	w.Init()
 
 	log.Printf("watcher: слушаю %s (dry-run=%v), фильтр: %s", w.Iface, w.DryRun, bpf)
 	src := gopacket.NewPacketSource(handle, handle.LinkType())
@@ -117,13 +113,26 @@ func (w *Watcher) Run() error {
 	return nil
 }
 
+// Init — завести карты состояния + фоновый cleaner. Общий вход и для pcap
+// (Run), и для eBPF-источника (T59) — источник пакетов заменяем, состояние и
+// пороговая логика (OnTCPPacket/OnUDPPacket/cleaner) — ОДНА и та же, не дублируем.
+func (w *Watcher) Init() {
+	w.flows = map[string]*flowState{}
+	w.quic = map[string]*quicState{}
+	w.udp = map[string]*udpState{}
+	w.synFails = map[string]*synFail{}
+	go w.cleaner()
+}
+
 func (w *Watcher) handle(pkt gopacket.Packet) {
 	ipl := pkt.Layer(layers.LayerTypeIPv4)
 	if ipl == nil {
 		return
 	}
 	if udpl := pkt.Layer(layers.LayerTypeUDP); udpl != nil {
-		w.handleUDP(ipl.(*layers.IPv4), udpl.(*layers.UDP))
+		ip := ipl.(*layers.IPv4)
+		udp := udpl.(*layers.UDP)
+		w.OnUDPPacket(ip.SrcIP, ip.DstIP, uint16(udp.SrcPort), uint16(udp.DstPort), udp.Payload)
 		return
 	}
 	tcpl := pkt.Layer(layers.LayerTypeTCP)
@@ -132,23 +141,30 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 	}
 	ip := ipl.(*layers.IPv4)
 	tcp := tcpl.(*layers.TCP)
-	key := flowKey(ip.SrcIP, uint16(tcp.SrcPort), ip.DstIP, uint16(tcp.DstPort))
+	w.OnTCPPacket(ip.SrcIP, ip.DstIP, uint16(tcp.SrcPort), uint16(tcp.DstPort), tcp.SYN, tcp.ACK, tcp.RST, tcp.Payload)
+}
+
+// OnTCPPacket — та же логика, что раньше была инлайн в handle(), вынесена на
+// примитивных параметрах (не gopacket-типах), чтобы её мог звать и eBPF-путь
+// (T59, см. detector/ebpfsensor) без дублирования состояния/таймингов.
+func (w *Watcher) OnTCPPacket(srcIP, dstIP net.IP, srcPort, dstPort uint16, syn, ack, rst bool, payload []byte) {
+	key := flowKey(srcIP, srcPort, dstIP, dstPort)
 
 	// SYN без ACK — исходящая попытка соединения (инициатор). Заводим flow, чтобы
 	// поймать «SYN ушёл, SYN-ACK не пришёл» = блок по IP (SYN дропается).
-	if tcp.SYN && !tcp.ACK {
-		if isPrivate(ip.DstIP) {
+	if syn && !ack {
+		if isPrivate(dstIP) {
 			return
 		}
 		w.mu.Lock()
 		if w.flows[key] == nil {
-			w.flows[key] = &flowState{dstIP: ip.DstIP.String(), dstPort: uint16(tcp.DstPort), synAt: time.Now()}
+			w.flows[key] = &flowState{dstIP: dstIP.String(), dstPort: dstPort, synAt: time.Now()}
 		}
 		w.mu.Unlock()
 		return
 	}
 	// SYN-ACK — сервер ответил, соединение устанавливается: снимаем подозрение.
-	if tcp.SYN && tcp.ACK {
+	if syn && ack {
 		w.mu.Lock()
 		if f := w.flows[key]; f != nil {
 			f.gotSynAck = true
@@ -157,7 +173,7 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 		return
 	}
 
-	if tcp.RST {
+	if rst {
 		w.mu.Lock()
 		f := w.flows[key]
 		if f != nil && !f.sawData && time.Since(f.chAt) < 4*time.Second {
@@ -171,16 +187,16 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 		return
 	}
 
-	pl := tcp.Payload
+	pl := payload
 	if len(pl) > 5 && pl[0] == 0x16 && pl[5] == 0x01 { // TLS handshake record, ClientHello
 		// пропускаем ClientHello к приватным адресам (не интернет)
-		if isPrivate(ip.DstIP) {
+		if isPrivate(dstIP) {
 			return
 		}
 		w.mu.Lock()
 		f := w.flows[key]
 		if f == nil {
-			f = &flowState{dstIP: ip.DstIP.String()}
+			f = &flowState{dstIP: dstIP.String()}
 			w.flows[key] = f
 		}
 		f.sni = parseSNI(pl)
@@ -196,32 +212,36 @@ func (w *Watcher) handle(pkt gopacket.Packet) {
 	}
 }
 
-// handleUDP — QUIC (HTTP/3) на :443. Ловим клиентский Initial (расшифровываем SNI)
-// и следим, ответил ли сервер. Молчание сервера >3с после Initial = блок HTTP/3.
 func (w *Watcher) handleUDP(ip *layers.IPv4, udp *layers.UDP) {
+	w.OnUDPPacket(ip.SrcIP, ip.DstIP, uint16(udp.SrcPort), uint16(udp.DstPort), udp.Payload)
+}
+
+// OnUDPPacket — QUIC (HTTP/3) на :443 + общий UDP (не 443/53), логика вынесена
+// на примитивных параметрах (см. OnTCPPacket) для переиспользования из eBPF-пути.
+func (w *Watcher) OnUDPPacket(srcIP, dstIP net.IP, srcPort, dstPort uint16, payload []byte) {
 	// --- QUIC (HTTP/3) на 443 ---
-	if udp.DstPort == 443 || udp.SrcPort == 443 {
-		pl := udp.Payload
-		if udp.DstPort == 443 && len(pl) >= 1200 && isQUICClientInitial(pl) {
-			if isPrivate(ip.DstIP) {
+	if dstPort == 443 || srcPort == 443 {
+		pl := payload
+		if dstPort == 443 && len(pl) >= 1200 && isQUICClientInitial(pl) {
+			if isPrivate(dstIP) {
 				return
 			}
-			key := flowKey(ip.SrcIP, uint16(udp.SrcPort), ip.DstIP, uint16(udp.DstPort))
+			key := flowKey(srcIP, srcPort, dstIP, dstPort)
 			sni := parseQUICInitialSNI(pl)
 			if debugQUIC {
-				log.Printf("🔧 quic-initial dst=%s len=%d sni=%q", ip.DstIP, len(pl), sni)
+				log.Printf("🔧 quic-initial dst=%s len=%d sni=%q", dstIP, len(pl), sni)
 			}
 			w.mu.Lock()
 			if w.quic[key] == nil {
-				w.quic[key] = &quicState{sni: sni, dstIP: ip.DstIP.String(), sentAt: time.Now()}
+				w.quic[key] = &quicState{sni: sni, dstIP: dstIP.String(), sentAt: time.Now()}
 			}
 			w.mu.Unlock()
 			return
 		}
-		if udp.SrcPort == 443 {
-			key := flowKey(ip.DstIP, uint16(udp.DstPort), ip.SrcIP, uint16(udp.SrcPort))
+		if srcPort == 443 {
+			key := flowKey(dstIP, dstPort, srcIP, srcPort)
 			w.mu.Lock()
-			if q := w.quic[key]; q != nil && q.dstIP == ip.SrcIP.String() {
+			if q := w.quic[key]; q != nil && q.dstIP == srcIP.String() {
 				q.gotResp = true
 			}
 			w.mu.Unlock()
@@ -232,20 +252,20 @@ func (w *Watcher) handleUDP(ip *layers.IPv4, udp *layers.UDP) {
 	// --- общий UDP (не 443/53): «шлём, ответа нет» = блок по IP (игровые сессии) ---
 	// внешний адрес должен быть обычным публичным unicast (не multicast/broadcast —
 	// они не отвечают by design и дали бы ложные срабатывания).
-	out := isPrivate(ip.SrcIP) && pubUnicast(ip.DstIP) // исходящий к публичному
-	in := pubUnicast(ip.SrcIP) && isPrivate(ip.DstIP)  // входящий от публичного
+	out := isPrivate(srcIP) && pubUnicast(dstIP) // исходящий к публичному
+	in := pubUnicast(srcIP) && isPrivate(dstIP)  // входящий от публичного
 	if out {
-		key := fmt.Sprintf("%s:%d", ip.DstIP, uint16(udp.DstPort))
+		key := fmt.Sprintf("%s:%d", dstIP, dstPort)
 		w.mu.Lock()
 		u := w.udp[key]
 		if u == nil {
-			u = &udpState{dstIP: ip.DstIP.String(), dstPort: uint16(udp.DstPort), firstAt: time.Now()}
+			u = &udpState{dstIP: dstIP.String(), dstPort: dstPort, firstAt: time.Now()}
 			w.udp[key] = u
 		}
 		u.sent++
 		w.mu.Unlock()
 	} else if in {
-		key := fmt.Sprintf("%s:%d", ip.SrcIP, uint16(udp.SrcPort))
+		key := fmt.Sprintf("%s:%d", srcIP, srcPort)
 		w.mu.Lock()
 		if u := w.udp[key]; u != nil {
 			u.recv++
