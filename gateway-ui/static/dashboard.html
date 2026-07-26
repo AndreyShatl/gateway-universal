@@ -141,6 +141,7 @@
       <a data-nav="whitelist">Whitelist</a>
       <a data-nav="presets">Пресеты</a>
       <a data-nav="gamemode">Game Mode</a>
+      <a data-nav="adguard">Реклама (DNS)</a>
       <div class="nav-grp">Система</div>
       <a data-nav="monitor">Мониторинг</a>
       <a data-nav="network">Сеть</a>
@@ -358,6 +359,22 @@
             <button id="gmApply">Применить</button>
           </div>
           <div id="gmMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="adguard">
+        <div class="card">
+          <h2>Реклама (AdGuard Home)</h2>
+          <div class="muted">DNS-блокировка рекламы/трекеров на самом шлюзе — работает на всех
+            устройствах дома автоматически, ничего ставить не нужно. Полная панель (фильтры,
+            список клиентов, журнал запросов) — отдельно, ссылка ниже.</div>
+          <div id="aghUnavailable" class="msg bad" hidden>AdGuard Home недоступен — проверьте сервис на шлюзе.</div>
+          <div id="aghBody" hidden>
+            <div class="row" id="aghStatsRow" style="gap:18px; flex-wrap:wrap; margin-top:8px"></div>
+            <h2 style="margin-top:16px">Топ заблокированных доменов</h2>
+            <div style="overflow-x:auto"><table id="aghBlocked" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+            <div class="row" style="margin-top:12px"><a id="aghLink" target="_blank"><button type="button">Открыть полную панель AdGuard Home ↗</button></a></div>
+          </div>
         </div>
       </section>
 
@@ -654,6 +671,33 @@
     };
     document.querySelector('.sidebar a[data-nav="gamemode"]').addEventListener('click', loadGameMode);
     loadGameMode();
+
+    // --- Реклама (AdGuard Home) ---
+    function loadAdguard() {
+      fetch('/api/adguard').then(r => r.json()).then(d => {
+        document.getElementById('aghUnavailable').hidden = !!d.available;
+        document.getElementById('aghBody').hidden = !d.available;
+        if (!d.available) return;
+        const st = d.stats || {};
+        const queries = (st.num_dns_queries||0), blocked = (st.num_blocked_filtering||0)+(st.num_replaced_safebrowsing||0)+(st.num_replaced_parental||0);
+        const pct = queries ? (100*blocked/queries).toFixed(1) : '0';
+        document.getElementById('aghStatsRow').innerHTML = [
+          ['Запросов (24ч)', queries.toLocaleString()],
+          ['Заблокировано', blocked.toLocaleString()],
+          ['Доля блокировок', pct+'%'],
+        ].map(([label,val]) => `<div><div class="muted" style="font-size:.8em">${label}</div><div style="font-size:1.3em; font-weight:600">${val}</div></div>`).join('');
+        const top = (st.top_blocked_domains || []).slice(0, 15);
+        tbl(document.getElementById('aghBlocked'), ['Домен', 'Запросов'],
+          top.length ? top.map(o => { const k = Object.keys(o)[0]; return [esc(k), o[k]]; })
+                     : [['<span class="muted">пока пусто</span>', '']]);
+        document.getElementById('aghLink').href = d.ui_url || '#';
+      }).catch(() => {
+        document.getElementById('aghUnavailable').hidden = false;
+        document.getElementById('aghBody').hidden = true;
+      });
+    }
+    document.querySelector('.sidebar a[data-nav="adguard"]').addEventListener('click', loadAdguard);
+    loadAdguard();
 
 
     // --- Навигация ---

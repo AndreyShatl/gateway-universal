@@ -1,6 +1,10 @@
 # Локальная конфигурация с секретами — НЕ коммитим
 config.env
+config.parents.env
 *.env.local
+
+# Личные заметки (не для публичного репозитория)
+universal-dev-bootstrap.md
 
 # Бэкапы
 *.bak
