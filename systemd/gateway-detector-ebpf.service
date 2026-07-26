@@ -1,0 +1,15 @@
+[Unit]
+Description=Gateway auto-route detector (eBPF → prober → применитель) — T59, экспериментальный
+After=network-online.target xray.service dnscrypt-proxy.service
+Wants=network-online.target
+
+[Service]
+# ТОЛЬКО x86_64, требует toolchain (clang/libbpf-dev) на этапе сборки. Экспериментальный
+# путь (T59) — переключать на боевую вместо gateway-detector.service осознанно, не по
+# умолчанию при установке. Тот же бинарь /opt/gateway-detector, другая подкоманда.
+ExecStart=/opt/gateway-detector watch-ebpf --apply --config-env /root/gateway-universal/config.env
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -2,9 +2,24 @@
 
 Универсальный шаблон для превращения любой Debian/Ubuntu-машины (Raspberry Pi, тонкий клиент, VPS) в прозрачный сетевой шлюз обхода блокировок **за одну команду**.
 
-Нативный xray (VLESS+Reality) + zapret (nfqws) + iptables + Instagram QUIC bypass. Без Docker.
+## Установка одной командой
 
-**Дополнительно:** Discord-голос (UDP) через VLESS-туннель (discord-tproxy) + защита от петли шлюза (fix-gateway) + опциональный реверс-туннель к VPS для экстренного доступа.
+Нашёл этот репозиторий по ссылке из гайда? Вот и всё, что нужно — на самой машине,
+которая станет шлюзом (Debian/Ubuntu, доступ по SSH или напрямую):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AndreyShatl/gateway-universal/main/bootstrap.sh | sudo bash
+```
+
+Скрипт скачает репозиторий и задаст несколько простых вопросов (адрес VPS и ключи
+из панели 3x-ui, локальная подсеть — обычно можно просто нажимать Enter, приняв
+предложенные значения). В конце покажет пароли от веб-интерфейсов — их нужно сохранить.
+
+Нативный xray (VLESS+Reality) + zapret (nfqws) + iptables + шифрованный DNS + автоматический
+подбор рабочей DPI-стратегии по каждому домену ("мозг") + блокировка рекламы (AdGuard Home).
+Без Docker.
+
+**Дополнительно:** Discord-голос (UDP) через VLESS-туннель (discord-tproxy) + защита от петли шлюза (fix-gateway) + опциональный реверс-туннель к VPS для экстренного доступа + Game Mode (низкая задержка для игровых серверов).
 
 ## Как это работает
 
@@ -37,7 +52,7 @@
 ### Вариант A — деплой с Mac на удалённую машину
 
 ```bash
-git clone git@github.com:andrey-shat/gateway-universal.git
+git clone git@github.com:AndreyShatl/gateway-universal.git
 cd gateway-universal
 cp config.example.env config.env
 $EDITOR config.env                       # заполнить VPS_ADDR, UUID, Reality-ключи
@@ -52,7 +67,7 @@ bash deploy.sh --host 192.168.1.69 --password 'xxx' --config ./config.env --yes
 ### Вариант B — установка прямо на целевой машине
 
 ```bash
-git clone https://github.com/andrey-shat/gateway-universal.git
+git clone https://github.com/AndreyShatl/gateway-universal.git
 cd gateway-universal
 cp config.example.env config.env
 nano config.env
@@ -100,6 +115,13 @@ sudo bash install.sh
 | fix-gateway.service | `/etc/systemd/system/fix-gateway.service` |
 | discord-tproxy (UDP-голос через туннель) | `/opt/gateway/discord-tproxy.sh` + `/etc/systemd/system/discord-tproxy.service` |
 | ssh-tunnel.service (опц.) | `/etc/systemd/system/ssh-tunnel.service` |
+| dnscrypt-proxy (шифрованный DNS) | `/etc/dnscrypt-proxy/`, редирект всего :53 (`dns/`) |
+| "мозг" — авто-подбор zapret-стратегии на домен | `/opt/gateway-brain/` (solve/apply/worker/nightly) |
+| gateway-detector (авто-обнаружение блокировок) | `/opt/gateway-detector` (pcap по умолчанию; eBPF — опционально, см. ниже) |
+| gateway-ui (веб-интерфейс) | `/opt/gateway-ui/gateway-ui`, порт 8088 |
+| AdGuard Home (блокировка рекламы, DNS-уровень) | `/opt/AdGuardHome/`, порт 3000 |
+| Game Mode (низкая задержка для игр, выключен по умолчанию) | `/opt/gateway/game-mode.sh` |
+| еженедельное автообновление движка zapret | `/opt/gateway-brain/zapret-auto-update.sh`, воскресенье 02:00 |
 
 ## Проверка после установки
 

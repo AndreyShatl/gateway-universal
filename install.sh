@@ -71,6 +71,10 @@ CONFIG_ENV="${SCRIPT_DIR}/config.env"
 : "${INSTALL_WEB_UI:=yes}"
 : "${WEB_UI_PORT:=8088}"
 : "${WEB_UI_PASSWORD:=}"
+: "${INSTALL_DNSCRYPT:=yes}"
+: "${INSTALL_BRAIN:=yes}"
+: "${INSTALL_ADGUARD:=yes}"
+: "${ADGUARD_PASSWORD:=}"
 : "${NON_INTERACTIVE:=no}"
 : "${SKIP_HEALTHCHECK:=no}"
 
@@ -96,6 +100,10 @@ while [[ $# -gt 0 ]]; do
         --no-web-ui)           INSTALL_WEB_UI=no; shift;;
         --web-ui-port)         WEB_UI_PORT="$2"; shift 2;;
         --no-block-quic)       BLOCK_QUIC=no; shift;;
+        --no-dnscrypt)         INSTALL_DNSCRYPT=no; shift;;
+        --no-brain)            INSTALL_BRAIN=no; shift;;
+        --no-adguard)          INSTALL_ADGUARD=no; shift;;
+        --adguard-password)    ADGUARD_PASSWORD="$2"; shift 2;;
         --non-interactive|-y)  NON_INTERACTIVE=yes; shift;;
         --skip-healthcheck)    SKIP_HEALTHCHECK=yes; shift;;
         -h|--help)
@@ -187,6 +195,11 @@ if [[ -z "$IFACE" ]]; then
 fi
 ask IFACE "Внешний интерфейс (WAN)" "$IFACE"
 
+if [[ "$NON_INTERACTIVE" != "yes" && "$INSTALL_ADGUARD" == "yes" ]]; then
+    read -r -p "${C_BLU}?${C_OFF} Блокировать рекламу на всех устройствах дома (AdGuard Home)? [Y/n]: " ans
+    [[ "${ans,,}" =~ ^n ]] && INSTALL_ADGUARD=no
+fi
+
 echo
 say "Итоговая конфигурация:"
 cat <<EOF
@@ -203,6 +216,9 @@ cat <<EOF
   BUILD_ZAPRET        = $BUILD_ZAPRET_FROM_SOURCE
   INSTAGRAM_QUIC_BYPASS = $INSTAGRAM_QUIC_BYPASS
   BLOCK_QUIC          = $BLOCK_QUIC
+  INSTALL_DNSCRYPT    = $INSTALL_DNSCRYPT
+  INSTALL_BRAIN       = $INSTALL_BRAIN
+  INSTALL_ADGUARD     = $INSTALL_ADGUARD
 EOF
 
 if [[ "$NON_INTERACTIVE" != "yes" ]]; then
@@ -218,9 +234,18 @@ APT_PKGS=(
     curl wget ca-certificates gettext-base
     iptables iproute2 iputils-ping dnsutils
     gawk sed grep procps jq ipset libpcap0.8
+    python3 unzip
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
     APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)
+fi
+if [[ "$INSTALL_WEB_UI" == "yes" ]]; then
+    # ставим Go всегда: готового релиза gateway-ui может не быть под архитектуру/
+    # версию — надёжнее собрать из исходников этого же клона, чем зависеть от сети
+    APT_PKGS+=(golang-go)
+fi
+if [[ "$INSTALL_DNSCRYPT" == "yes" ]]; then
+    APT_PKGS+=(dnscrypt-proxy)
 fi
 # iptables-persistent без вопросов
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean false" | debconf-set-selections
@@ -412,6 +437,22 @@ if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
 fi
 
 # ==========================================================================
+#                        ШИФРОВАННЫЙ DNS (dnscrypt-proxy)
+# ==========================================================================
+# Провайдер/ТСПУ подделывает открытый DNS :53 — блокируемые домены резолвятся в
+# фейковые IP (T43). dns/setup-dnscrypt.sh: DoH-апстрим + редирект всего :53 в
+# него + resolv.conf -> 127.0.0.1 (immutable). Если следом ставим AdGuard Home —
+# он переставит dnscrypt на :5353 сам (см. ниже), тут этого не трогаем.
+if [[ "$INSTALL_DNSCRYPT" == "yes" ]]; then
+    say "Installing dnscrypt-proxy (encrypted DNS)…"
+    if LAN="$LAN" bash "$SCRIPT_DIR/dns/setup-dnscrypt.sh"; then
+        ok "dnscrypt-proxy настроен (шифрованный DNS на :53)"
+    else
+        warn "dnscrypt-proxy setup failed — DNS останется как есть"
+    fi
+fi
+
+# ==========================================================================
 #                        FIX-GATEWAY SERVICE
 # ==========================================================================
 if [[ "$INSTALL_FIX_GATEWAY" == "yes" ]]; then
@@ -513,23 +554,30 @@ if [[ "$INSTALL_WEB_UI" == "yes" ]]; then
     UI_DIR="${INSTALL_PREFIX}/gateway-ui"
     mkdir -p "$UI_DIR" /etc/gateway
 
-    # 1) Бинарник: скачать готовый из GitHub release под арх; если не вышло —
-    #    собрать из исходников (только если на машине есть go).
+    # 1) Собрать из исходников ЭТОГО клона (гарантированно актуальный код — готовый
+    #    release может отставать/не существовать под архитектуру); если Go почему-то
+    #    недоступен — запасной путь: скачать готовый релиз.
     UI_OK=yes
-    UI_URL="https://github.com/AndreyShatl/gateway-universal/releases/latest/download/gateway-ui-${ARCH}"
-    # качаем во временный файл и подменяем через mv — иначе curl -o поверх
-    # запущенного бинарника падает с "Text file busy" при переустановке.
-    if curl -fsSL "$UI_URL" -o "$UI_DIR/gateway-ui.new" 2>/dev/null && [[ -s "$UI_DIR/gateway-ui.new" ]]; then
-        chmod +x "$UI_DIR/gateway-ui.new"
-        mv "$UI_DIR/gateway-ui.new" "$UI_DIR/gateway-ui"
-        ok "gateway-ui: скачан из release ($ARCH)"
-    elif command -v go >/dev/null 2>&1; then
-        say "release недоступен — собираю из исходников…"
-        ( cd "$SCRIPT_DIR/gateway-ui" && go build -o "$UI_DIR/gateway-ui" . ) \
-            && ok "gateway-ui собран" || { warn "сборка gateway-ui не удалась"; UI_OK=no; }
+    if command -v go >/dev/null 2>&1; then
+        say "Собираю gateway-ui из исходников…"
+        ( cd "$SCRIPT_DIR/gateway-ui" && GOTOOLCHAIN=local TMPDIR=/var/tmp go build -o "$UI_DIR/gateway-ui.new" . ) \
+            && mv "$UI_DIR/gateway-ui.new" "$UI_DIR/gateway-ui" && ok "gateway-ui собран" \
+            || { warn "сборка gateway-ui не удалась — пробую готовый release"; UI_OK=no; }
     else
-        warn "не удалось скачать gateway-ui ($ARCH) и нет Go для сборки — пропускаю"
         UI_OK=no
+    fi
+    if [[ "$UI_OK" != "yes" ]]; then
+        UI_URL="https://github.com/AndreyShatl/gateway-universal/releases/latest/download/gateway-ui-${ARCH}"
+        # качаем во временный файл и подменяем через mv — иначе curl -o поверх
+        # запущенного бинарника падает с "Text file busy" при переустановке.
+        if curl -fsSL "$UI_URL" -o "$UI_DIR/gateway-ui.new" 2>/dev/null && [[ -s "$UI_DIR/gateway-ui.new" ]]; then
+            chmod +x "$UI_DIR/gateway-ui.new"
+            mv "$UI_DIR/gateway-ui.new" "$UI_DIR/gateway-ui"
+            ok "gateway-ui: скачан из release ($ARCH)"
+            UI_OK=yes
+        else
+            warn "ни сборка, ни скачивание gateway-ui не удались — пропускаю веб-интерфейс"
+        fi
     fi
 
     if [[ "$UI_OK" == "yes" ]]; then
@@ -572,9 +620,11 @@ fi
 # Пассивный детектор блокировок (pcap → prober → applier). Запускается/останав-
 # ливается gateway-ui по тумблеру «Авто-обход» (здесь только ставим бинарь+юнит).
 if [[ -d "$SCRIPT_DIR/detector" ]] && command -v go >/dev/null 2>&1; then
-    say "Building gateway-detector…"
+    say "Building gateway-detector (pcap, безопасный дефолт на всех архитектурах)…"
     apt-get install -y -qq libpcap-dev >/dev/null 2>&1 || true
-    if ( cd "$SCRIPT_DIR/detector" && CGO_ENABLED=1 go build -o /opt/gateway-detector . ) 2>/dev/null; then
+    # TMPDIR=/var/tmp — на слабом железе /tmp бывает отдельным маленьким разделом,
+    # сборка Go может упасть "no space left on device" даже при свободном / (было).
+    if ( cd "$SCRIPT_DIR/detector" && CGO_ENABLED=1 TMPDIR=/var/tmp GOTOOLCHAIN=local go build -o /opt/gateway-detector . ) 2>/dev/null; then
         cp "$SCRIPT_DIR/systemd/gateway-detector.service" /etc/systemd/system/gateway-detector.service
         # ночная перепроверка списка авто-обхода (снятие разблокированных)
         cp "$SCRIPT_DIR/systemd/gateway-recheck.service" /etc/systemd/system/gateway-recheck.service
@@ -582,8 +632,151 @@ if [[ -d "$SCRIPT_DIR/detector" ]] && command -v go >/dev/null 2>&1; then
         systemctl daemon-reload
         systemctl enable --now gateway-recheck.timer >/dev/null 2>&1 || true
         ok "gateway-detector установлен (управляется тумблером в UI); ночная перепроверка в 04:00"
+        ok "(опционально, вручную) eBPF-детектор (T59, экспериментальный, x86_64): clang libbpf-dev linux-headers-\$(uname -r) bpftool, затем go build -tags ebpf, systemd/gateway-detector-ebpf.service"
     else
         warn "сборка gateway-detector не удалась (нужен gcc + libpcap-dev) — авто-детект недоступен"
+    fi
+fi
+
+# ==========================================================================
+#                    "МОЗГ" (brain): авто-обход per-domain через zapret
+# ==========================================================================
+# solve.sh (перебор пресетов) -> brain-apply.sh (группа=стратегия, T-consolidate)
+# -> brain-worker.sh (очередь) -> brain-nightly.sh (переоценка). Детектор выше
+# кладёт заблокированные домены в очередь автоматически.
+if [[ "$INSTALL_BRAIN" == "yes" ]]; then
+    say "Installing brain (авто-подбор zapret-стратегий по доменам)…"
+    mkdir -p /opt/gateway-brain /etc/gateway
+    for f in gwdb.py solve.sh brain-apply.sh brain-worker.sh brain-nightly.sh \
+             brain-activity.sh brain-idle-stop.sh brain-static-reeval.sh zapret-auto-update.sh; do
+        cp "$SCRIPT_DIR/scripts/$f" /opt/gateway-brain/"$f"
+    done
+    chmod +x /opt/gateway-brain/*.sh
+
+    # состояние с нуля (свежая установка) — не трогаем, если уже есть (переустановка)
+    [[ -f /etc/gateway/brain-services.json ]] || echo '[]' > /etc/gateway/brain-services.json
+    [[ -f /etc/gateway/brain-queue ]] || : > /etc/gateway/brain-queue
+    [[ -f /etc/gateway/zapret-services.json ]] || cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
+
+    # whitelist (.ru/.su/.рф не анализируются) + пресеты (flowseal, из strategies.json)
+    python3 /opt/gateway-brain/gwdb.py init --strategies-file "$SCRIPT_DIR/gateway-ui/strategies.json" >/dev/null 2>&1 || true
+
+    for u in gateway-brain-worker.service gateway-brain-restore.service \
+             gateway-brain-nightly.service gateway-brain-nightly.timer \
+             gateway-brain-activity.service gateway-brain-activity.timer \
+             gateway-brain-idle-stop.service gateway-brain-idle-stop.timer \
+             gateway-brain-static-reeval.service gateway-brain-static-reeval.timer \
+             gateway-zapret-autoupdate.service gateway-zapret-autoupdate.timer; do
+        cp "$SCRIPT_DIR/systemd/$u" /etc/systemd/system/"$u"
+    done
+    systemctl daemon-reload
+    systemctl enable --now gateway-brain-restore.service gateway-brain-worker.service >/dev/null 2>&1 || true
+    systemctl enable --now gateway-brain-nightly.timer gateway-brain-activity.timer \
+        gateway-brain-idle-stop.timer gateway-brain-static-reeval.timer \
+        gateway-zapret-autoupdate.timer >/dev/null 2>&1 || true
+    ok "brain установлен (voркер + ночная переоценка 04:00 + автообновление zapret по воскресеньям 02:00)"
+fi
+
+# ==========================================================================
+#                 БЛОКИРОВКА РЕКЛАМЫ (AdGuard Home, DNS-уровень)
+# ==========================================================================
+# Встраивается МЕЖДУ клиентами и dnscrypt-proxy: клиент -> AdGuard Home (:53,
+# фильтрует рекламу/трекеры) -> dnscrypt-proxy (127.0.0.1:5353, шифрованный
+# upstream) -> интернет. Существующий редирект всего :53 (dns/gateway-dns-
+# redirect.sh) не трогаем — AdGuard Home просто занимает порт вместо dnscrypt.
+if [[ "$INSTALL_ADGUARD" == "yes" ]]; then
+    say "Installing AdGuard Home (блокировка рекламы на DNS-уровне)…"
+    AGH_DIR="${INSTALL_PREFIX}/AdGuardHome"
+    if [[ -z "$ADGUARD_PASSWORD" ]]; then
+        ADGUARD_PASSWORD="$(head -c 9 /dev/urandom | base64 | tr -d '/+=' | cut -c1-12)"
+    fi
+
+    AGH_OK=yes
+    if [[ ! -x "$AGH_DIR/AdGuardHome" ]]; then
+        TMP="$(mktemp -d)"
+        AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_amd64.tar.gz"
+        case "$ARCH" in
+            aarch64) AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_arm64.tar.gz";;
+            armv7l)  AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv7.tar.gz";;
+        esac
+        # static.adguard.com у некоторых провайдеров/ТСПУ виснет по TLS напрямую —
+        # если direct не прошёл за 15с и уже поднят VPS-туннель, пробуем через него.
+        if ! curl -fsSL --max-time 15 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || [[ ! -s "$TMP/agh.tar.gz" ]]; then
+            if [[ "$INSTALL_XRAY" == "yes" ]] && ss -tlnp 2>/dev/null | grep -q ':1081 '; then
+                warn "прямое скачивание AdGuard Home зависло — пробую через VPS-туннель…"
+                curl -fsSL --max-time 60 --socks5-hostname 127.0.0.1:1081 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || true
+            fi
+        fi
+        if [[ -s "$TMP/agh.tar.gz" ]] && tar -xzf "$TMP/agh.tar.gz" -C "$INSTALL_PREFIX" 2>/dev/null; then
+            ok "AdGuard Home скачан"
+        else
+            warn "не удалось скачать/распаковать AdGuard Home — пропускаю блокировку рекламы"
+            AGH_OK=no
+        fi
+        rm -rf "$TMP"
+    fi
+
+    if [[ "$AGH_OK" == "yes" ]]; then
+        # dnscrypt-proxy (если стоит) — сдвигаем на 127.0.0.1:5353, освобождая :53
+        if systemctl list-unit-files dnscrypt-proxy.socket >/dev/null 2>&1; then
+            mkdir -p /etc/systemd/system/dnscrypt-proxy.socket.d
+            cat > /etc/systemd/system/dnscrypt-proxy.socket.d/override.conf <<'OVR'
+[Socket]
+FreeBind=true
+ListenStream=
+ListenDatagram=
+ListenStream=127.0.0.1:5353
+ListenDatagram=127.0.0.1:5353
+OVR
+            systemctl daemon-reload
+            systemctl restart dnscrypt-proxy.socket dnscrypt-proxy.service 2>/dev/null || true
+        fi
+
+        if [[ ! -f /etc/systemd/system/AdGuardHome.service ]]; then
+            ( cd "$AGH_DIR" && ./AdGuardHome -s install ) >/dev/null 2>&1 || true
+            sleep 2
+        fi
+        # веб-панель :3000 — только LAN (тот же паттерн, что у gateway-ui:8088)
+        mkdir -p /etc/systemd/system/AdGuardHome.service.d
+        cat > /etc/systemd/system/AdGuardHome.service.d/firewall.conf <<EOF
+[Service]
+ExecStartPre=/bin/bash -c "iptables -C INPUT -p tcp --dport 3000 -s $LAN -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 3000 -s $LAN -j ACCEPT"
+ExecStartPre=/bin/bash -c "iptables -C INPUT -p tcp --dport 3000 -j DROP 2>/dev/null || iptables -A INPUT -p tcp --dport 3000 -j DROP"
+EOF
+        # loopback ACCEPT (иначе сам шлюз не достучится до :3000/:8088 — правило
+        # ACCEPT-LAN-DROP-остальное не пропускает 127.0.0.1, он не в LAN-подсети)
+        iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT
+        systemctl daemon-reload
+        systemctl enable --now AdGuardHome.service >/dev/null 2>&1 || true
+        sleep 2
+
+        # первичная настройка через API (без интерактивного мастера установки)
+        curl -s --max-time 10 -X POST http://127.0.0.1:3000/control/install/configure \
+            -H "Content-Type: application/json" \
+            -d "{\"web\":{\"ip\":\"0.0.0.0\",\"port\":3000},\"dns\":{\"ip\":\"0.0.0.0\",\"port\":53},\"username\":\"admin\",\"password\":\"$ADGUARD_PASSWORD\"}" \
+            >/dev/null 2>&1 || true
+        sleep 1
+        AGH_COOKIE_JAR="$(mktemp)"
+        curl -s --max-time 30 -c "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/login \
+            -H "Content-Type: application/json" -d "{\"name\":\"admin\",\"password\":\"$ADGUARD_PASSWORD\"}" >/dev/null 2>&1 || true
+        # upstream — наш локальный шифрованный резолвер, не внешний DoH напрямую
+        curl -s --max-time 10 -b "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/dns_config \
+            -H "Content-Type: application/json" \
+            -d '{"upstream_dns":["127.0.0.1:5353"],"bootstrap_dns":["127.0.0.1:5353"]}' >/dev/null 2>&1 || true
+        curl -s --max-time 30 -b "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/filtering/refresh \
+            -H "Content-Type: application/json" -d '{}' >/dev/null 2>&1 || true
+        rm -f "$AGH_COOKIE_JAR"
+
+        # для gateway-ui (сводка статистики на дашборде)
+        if ! grep -q "^ADGUARD_PASSWORD=" "$CONFIG_ENV" 2>/dev/null; then
+            echo "ADGUARD_PASSWORD=$ADGUARD_PASSWORD" >> "$CONFIG_ENV"
+        fi
+
+        if systemctl is-active --quiet AdGuardHome.service; then
+            ok "AdGuard Home установлен и активен (панель :3000, LAN-only)"
+        else
+            warn "AdGuardHome.service не запустился — проверь логи"
+        fi
     fi
 fi
 
@@ -637,18 +830,33 @@ if [[ "$SKIP_HEALTHCHECK" != "yes" ]]; then
     fi
 fi
 
+GW_LAN_IP="$(ip -o -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
 echo
 ok "Installation complete."
 cat <<EOF
 
 ${C_BLD}Next steps:${C_OFF}
-  1. На роутере: DHCP → шлюз = IP этой машины, DNS = 8.8.8.8
+  1. На роутере: DHCP → шлюз = IP этой машины (${GW_LAN_IP:-?}), DNS = ${GW_LAN_IP:-IP_шлюза}
+     (сам шлюз резолвит через шифрованный DNS — не указывайте 8.8.8.8/другой публичный,
+     иначе провайдер снова увидит и подменит DNS-запросы всех устройств дома)
   2. Проверить с клиента: curl https://api.ipify.org (должен вернуться IP VPS для заблокированных)
-  3. Логи:
+  3. Веб-интерфейс шлюза: http://${GW_LAN_IP:-IP_шлюза}:${WEB_UI_PORT}
+EOF
+[[ -n "${UI_GEN_PW:-}" ]] && echo "     Пароль: ${C_BLD}${UI_GEN_PW}${C_OFF} (сохрани — больше нигде не показывается)"
+if [[ "$INSTALL_ADGUARD" == "yes" && "${AGH_OK:-no}" == "yes" ]]; then
+cat <<EOF
+  4. Блокировка рекламы (AdGuard Home): http://${GW_LAN_IP:-IP_шлюза}:3000
+     Логин: admin  Пароль: ${C_BLD}${ADGUARD_PASSWORD}${C_OFF} (сохрани — тоже нигде больше не показывается)
+     Сводка статистики уже видна прямо в веб-интерфейсе шлюза, раздел «Реклама (DNS)»
+EOF
+fi
+cat <<EOF
+  5. Логи:
        journalctl -u xray.service -f
        journalctl -u zapret.service -f
-  4. Управление zapret:
+       journalctl -u gateway-brain-worker.service -f   # (или в веб-интерфейсе — Логи)
+  6. Управление zapret:
        ${INSTALL_PREFIX}/zapret-config/zapret.sh {start|stop|restart|status}
 
-${C_BLD}Repo:${C_OFF} https://github.com/andrey-shat/gateway-universal
+${C_BLD}Repo:${C_OFF} https://github.com/AndreyShatl/gateway-universal
 EOF
