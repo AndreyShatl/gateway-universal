@@ -227,14 +227,21 @@ if [[ "$NON_INTERACTIVE" != "yes" ]]; then
 fi
 
 # ---------- APT зависимости ------------------------------------------
-say "Installing apt dependencies…"
+say "Updating system packages…"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+# Обновляем ВСЮ систему (не только пакеты шлюза) — особенно важно на свежей
+# виртуалке/образе, где базовый набор пакетов может быть старым (безопасность,
+# совместимость с systemd/iptables-nft и т.д.). --with-new-pkgs подтягивает
+# новые зависимости, если версия пакета того требует.
+apt-get upgrade -y -qq --with-new-pkgs || warn "apt-get upgrade завершился с ошибками — продолжаю установку"
+
+say "Installing apt dependencies…"
 APT_PKGS=(
     curl wget ca-certificates gettext-base
     iptables iproute2 iputils-ping dnsutils
     gawk sed grep procps jq ipset libpcap0.8
-    python3 unzip
+    python3 unzip conntrack
 )
 if [[ "$INSTALL_ZAPRET" == "yes" && "$BUILD_ZAPRET_FROM_SOURCE" == "yes" ]]; then
     APT_PKGS+=(build-essential git libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap-dev zlib1g-dev pkg-config)
