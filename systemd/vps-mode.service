@@ -1,0 +1,12 @@
+[Unit]
+Description=VPS mode — toggle between VPS+zapret and zapret-only
+After=network-online.target xray.service zapret.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/opt/gateway/vps-mode.sh "$(cat /etc/gateway/vps-mode.conf 2>/dev/null || echo on)"'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

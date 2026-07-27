@@ -175,6 +175,12 @@ ask_secret() {
     printf -v "$var" '%s' "$ans"
 }
 
+if [[ "$NON_INTERACTIVE" != "yes" && "$INSTALL_XRAY" == "yes" && -z "$VPS_ADDR" ]]; then
+    read -r -p "${C_BLU}?${C_OFF} Есть ли у вас VPS для туннеля (VLESS+Reality)? Без него шлюз будет работать
+  только через zapret (DPI-обход напрямую, без запасного VPS-канала). [Y/n]: " ans
+    [[ "${ans,,}" =~ ^n ]] && INSTALL_XRAY=no
+fi
+
 if [[ "$INSTALL_XRAY" == "yes" ]]; then
     say "VPS (VLESS + Reality) — данные из 3x-ui панели"
     ask        VPS_ADDR           "VPS IP или домен"
@@ -376,8 +382,18 @@ if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
     # Список сервисов: сид рядом с конфигом + пользовательский в /etc/gateway (если ещё нет)
     cp "$SCRIPT_DIR/zapret/services.json" "$ZAPRET_CFG/services.json"
     mkdir -p /etc/gateway
-    [[ -f /etc/gateway/zapret-services.json ]] || cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
-    ok "zapret services.json установлен"
+    if [[ ! -f /etc/gateway/zapret-services.json ]]; then
+        if [[ "$INSTALL_XRAY" == "yes" ]]; then
+            cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
+        else
+            # без VPS фолбэка нет — сервисы с mode=vps (напр. Discord) без него
+            # молча не десинхронизировались бы (не в zapret-хостлисте, не в
+            # проксировании — xray не установлен). Переводим все на zapret —
+            # хуже, чем VPS, не будет, лучше попробовать, чем оставить как есть.
+            jq 'map(.mode = "zapret")' "$SCRIPT_DIR/zapret/services.json" > /etc/gateway/zapret-services.json
+        fi
+    fi
+    ok "zapret services.json установлен$( [[ "$INSTALL_XRAY" != "yes" ]] && echo " (все сервисы на zapret — VPS не настроен)" )"
 
     # Доп. fake-болванки для готовых стратегий (flowseal): дополняют штатные
     # из апстрима zapret. Нужны пресетам из gateway-ui (--dpi-desync-fake-*).
@@ -509,6 +525,21 @@ systemctl daemon-reload
 systemctl enable game-mode.service >/dev/null
 systemctl restart game-mode.service
 ok "game-mode enabled (mode=$(cat /etc/gateway/game-mode.conf))"
+
+# Переключатель "VPS+zapret" / "только zapret" (в UI — «Режим работы»). Дефолт
+# зависит от того, настроен ли VPS при установке — если да, начинаем с "on"
+# (как раньше, ничего не меняется), если нет — "off" сразу (нечего включать).
+say "Installing vps-mode toggle…"
+cp "$SCRIPT_DIR/iptables/vps-mode.sh" /opt/gateway/vps-mode.sh
+chmod +x /opt/gateway/vps-mode.sh
+if [[ ! -f /etc/gateway/vps-mode.conf ]]; then
+    if [[ "$INSTALL_XRAY" == "yes" ]]; then echo on > /etc/gateway/vps-mode.conf; else echo off > /etc/gateway/vps-mode.conf; fi
+fi
+cp "$SCRIPT_DIR/systemd/vps-mode.service" /etc/systemd/system/vps-mode.service
+systemctl daemon-reload
+systemctl enable vps-mode.service >/dev/null
+systemctl restart vps-mode.service
+ok "vps-mode enabled (режим=$(cat /etc/gateway/vps-mode.conf))"
 
 # ==========================================================================
 #                        REVERSE SSH TUNNEL
@@ -663,7 +694,13 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
     # состояние с нуля (свежая установка) — не трогаем, если уже есть (переустановка)
     [[ -f /etc/gateway/brain-services.json ]] || echo '[]' > /etc/gateway/brain-services.json
     [[ -f /etc/gateway/brain-queue ]] || : > /etc/gateway/brain-queue
-    [[ -f /etc/gateway/zapret-services.json ]] || cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
+    if [[ ! -f /etc/gateway/zapret-services.json ]]; then
+        if [[ "$INSTALL_XRAY" == "yes" ]]; then
+            cp "$SCRIPT_DIR/zapret/services.json" /etc/gateway/zapret-services.json
+        else
+            jq 'map(.mode = "zapret")' "$SCRIPT_DIR/zapret/services.json" > /etc/gateway/zapret-services.json
+        fi
+    fi
 
     # whitelist (.ru/.su/.рф не анализируются) + пресеты (flowseal, из strategies.json)
     python3 /opt/gateway-brain/gwdb.py init --strategies-file "$SCRIPT_DIR/gateway-ui/strategies.json" >/dev/null 2>&1 || true

@@ -135,6 +135,7 @@
     <nav class="sidebar">
       <a data-nav="overview">Обзор</a>
       <a data-nav="connection">Подключение</a>
+      <a data-nav="vpsmode">Режим работы</a>
       <a data-nav="domains">Домены</a>
       <a data-nav="autoroute">Авто-обход</a>
       <div class="nav-grp">Мозг</div>
@@ -181,6 +182,24 @@
           <textarea id="connLink" rows="3" placeholder="vless://UUID@host:2083?type=grpc&security=reality&pbk=…&sid=…&sni=…"></textarea>
           <div class="row"><button id="connAdd">Добавить</button></div>
           <div id="connMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="vpsmode">
+        <div class="card">
+          <h2>Режим работы</h2>
+          <div class="muted">«VPS + zapret» — обычный режим: то, что zapret не смог обойти сам,
+            уходит через VPS-туннель. «Только zapret» — VPS-туннель не используется вообще
+            (нет VPS или хотите работать без него) — что zapret не пробьёт, останется
+            заблокированным как есть, без запасного канала.</div>
+          <div class="row">
+            <select id="vmMode">
+              <option value="on">VPS + zapret</option>
+              <option value="off">Только zapret (без VPS)</option>
+            </select>
+            <button id="vmApply">Применить</button>
+          </div>
+          <div id="vmMsg" class="msg"></div>
         </div>
       </section>
 
@@ -671,6 +690,23 @@
     };
     document.querySelector('.sidebar a[data-nav="gamemode"]').addEventListener('click', loadGameMode);
     loadGameMode();
+
+    // --- Режим работы (VPS/zapret) ---
+    function loadVPSMode() {
+      fetch('/api/vps-mode').then(r => r.json()).then(d => { document.getElementById('vmMode').value = d.mode || 'on'; }).catch(() => {});
+    }
+    document.getElementById('vmApply').onclick = () => {
+      const mode = document.getElementById('vmMode').value;
+      const msg = document.getElementById('vmMsg');
+      fetch('/api/vps-mode', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'mode='+encodeURIComponent(mode) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ режим: '+(d.mode==='on'?'VPS + zapret':'только zapret'); }
+          else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
+        }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
+    };
+    document.querySelector('.sidebar a[data-nav="vpsmode"]').addEventListener('click', loadVPSMode);
+    loadVPSMode();
 
     // --- Реклама (AdGuard Home) ---
     function loadAdguard() {

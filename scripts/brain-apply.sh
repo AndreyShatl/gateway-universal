@@ -258,6 +258,20 @@ PY
 
 # --- VPS-автообход (без изменений) ---
 AR_JSON=/etc/gateway/autoroute.json; AR_IPSET=gw_autoroute
+GWCFG=${GWCFG:-/root/gateway-universal/config.env}
+
+VPS_MODE_FILE=${VPS_MODE_FILE:-/etc/gateway/vps-mode.conf}
+
+# has_vps — есть ли вообще настроенный VPS-туннель И включён ли режим VPS+zapret
+# (не "только zapret" — install.sh спросил при установке; UI может переключить
+# и после, gateway-ui/vpsmode.go). Без этой проверки ar_add создавал бы
+# автообход на несуществующий/выключенный xray-туннель — трафик просто
+# зависал бы вместо явного "не пробилось, остаётся заблокирован".
+has_vps() {
+  [ -f "$GWCFG" ] && grep -q '^VPS_ADDR=.\+' "$GWCFG" 2>/dev/null || return 1
+  [ "$(cat "$VPS_MODE_FILE" 2>/dev/null)" != "off" ]
+}
+
 ar_add() {
   local d=$1
   python3 - "$d" <<'PY'
@@ -348,7 +362,9 @@ for g in json.load(open('$STATE')):
 
 case "${1:-}" in
   zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_zapret "$d" "$proto" "$@" ;;
-  vps)    shift; do_remove "$1" >/dev/null 2>&1; ar_add "$1"; echo "🔵 vps: $1 в автообходе" ;;
+  vps)    shift; do_remove "$1" >/dev/null 2>&1
+          if has_vps; then ar_add "$1"; echo "🔵 vps: $1 в автообходе"
+          else echo "⚪ $1: ни одна стратегия zapret не пробила, VPS не настроен — остаётся заблокирован"; fi ;;
   remove-entity) shift; do_remove "$1" ;;
   remove) shift; do_remove "$1"; ar_del "$1" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
