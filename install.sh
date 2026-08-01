@@ -743,9 +743,14 @@ if [[ "$INSTALL_ADGUARD" == "yes" ]]; then
             aarch64) AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_arm64.tar.gz";;
             armv7l)  AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv7.tar.gz";;
         esac
-        # static.adguard.com у некоторых провайдеров/ТСПУ виснет по TLS напрямую —
-        # если direct не прошёл за 15с и уже поднят VPS-туннель, пробуем через него.
-        if ! curl -fsSL --max-time 15 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || [[ ! -s "$TMP/agh.tar.gz" ]]; then
+        # static.adguard.com у некоторых провайдеров/ТСПУ душит именно НАЧАЛО
+        # больших TLS-закачек (первые секунды на десятки КБ/с, потом разгоняется
+        # до нормальной скорости) — короткого --max-time не хватает не потому что
+        # соединение мертво, а потому что троттлинг съедает бюджет ДО разгона.
+        # 45с + пара повторов почти всегда переживают этот эффект (см. живой
+        # инцидент 2026-08-01: тот же URL с 15с падал, с руки — проходил за 2-3с
+        # после старта). Если и это не помогло и уже поднят VPS-туннель — фоллбэк ниже.
+        if ! curl -fsSL --max-time 45 --retry 2 --retry-delay 3 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || [[ ! -s "$TMP/agh.tar.gz" ]]; then
             if [[ "$INSTALL_XRAY" == "yes" ]] && ss -tlnp 2>/dev/null | grep -q ':1081 '; then
                 warn "прямое скачивание AdGuard Home зависло — пробую через VPS-туннель…"
                 curl -fsSL --max-time 60 --socks5-hostname 127.0.0.1:1081 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || true
