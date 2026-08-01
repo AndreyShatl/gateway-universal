@@ -47,11 +47,23 @@ func (s *server) handleConnection(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		// Vision-канал в роутинге не используется, но конфиг требует валидный
-		// UUID для него — если пуст, берём из gRPC.
+		// Vision-канал в роутинге не используется, но шаблон конфига требует
+		// валидные UUID И порт для него — если пусты, берём из gRPC. Раньше
+		// фоллбэк был только для UUID: ссылка с type=grpc на чистом шлюзе (без
+		// VPS_PORT_VISION в config.env вообще) рендерила шаблон с пустым
+		// значением порта — envsubst подставлял "" на месте числа, xray -test
+		// падал с "invalid character ',' looking for beginning of value"
+		// (живой инцидент 2026-08-01, воспроизведён на тестовой VM).
 		if cur, _ := readConfigVar(s.configEnv, "VPS_UUID_VISION"); cur == "" {
 			if u, ok := fields["VPS_UUID_GRPC"]; ok {
 				fields["VPS_UUID_VISION"] = u
+			}
+		}
+		if cur, _ := readConfigVar(s.configEnv, "VPS_PORT_VISION"); cur == "" {
+			if _, alreadySet := fields["VPS_PORT_VISION"]; !alreadySet {
+				if p, ok := fields["VPS_PORT_GRPC"]; ok {
+					fields["VPS_PORT_VISION"] = p
+				}
 			}
 		}
 		for k, v := range fields {
