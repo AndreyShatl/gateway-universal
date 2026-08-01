@@ -283,39 +283,54 @@ ok "sysctl applied"
 # ==========================================================================
 #                            XRAY
 # ==========================================================================
-if [[ "$INSTALL_XRAY" == "yes" ]]; then
-    XRAY_DIR="${INSTALL_PREFIX}/xray"
-    say "Installing xray → $XRAY_DIR"
-    mkdir -p "$XRAY_DIR"
+# Бинарник/geodata/systemd-юнит ставим ВСЕГДА, независимо от INSTALL_XRAY —
+# без VPS-креды на момент установки это просто неактивный, ничего не стоящий
+# инструмент про запас (~40МБ). Так человек без VPS сейчас, но с VPS позже,
+# может просто вставить vless://-ссылку в веб-панели (см. gateway-ui/
+# connection.go, handleConnection) — без переустановки шлюза. Настройка (render-
+# config) + запуск + iptables-редирект остаются строго за INSTALL_XRAY/наличием
+# реальных VPS_* — нельзя рендерить конфиг без креды и нельзя заворачивать
+# трафик в незапущенный xray (см. vps-mode.sh — тот же редирект, что ставится
+# ниже, специально не трогаем без работающего xray).
+XRAY_DIR="${INSTALL_PREFIX}/xray"
+say "Installing xray binary → $XRAY_DIR"
+mkdir -p "$XRAY_DIR"
 
-    if ! command -v "$XRAY_DIR/xray" >/dev/null 2>&1 || ! "$XRAY_DIR/xray" version >/dev/null 2>&1; then
-        XRAY_VER="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | head -1 | grep -oE 'v[0-9.]+')"
-        [[ -n "$XRAY_VER" ]] || die "Cannot determine latest Xray version"
-        say "Downloading Xray $XRAY_VER ($XRAY_ARCH)…"
-        TMP="$(mktemp -d)"
-        curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${XRAY_ARCH}.zip" -o "$TMP/xray.zip"
-        command -v unzip >/dev/null || apt-get install -y -qq unzip
-        unzip -q -o "$TMP/xray.zip" -d "$XRAY_DIR"
-        chmod +x "$XRAY_DIR/xray"
-        rm -rf "$TMP"
-        ok "Xray binary installed"
-    else
-        ok "Xray already installed: $("$XRAY_DIR/xray" version | head -1)"
+if ! command -v "$XRAY_DIR/xray" >/dev/null 2>&1 || ! "$XRAY_DIR/xray" version >/dev/null 2>&1; then
+    XRAY_VER="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -oE '"tag_name": *"v[^"]+"' | head -1 | grep -oE 'v[0-9.]+')"
+    [[ -n "$XRAY_VER" ]] || die "Cannot determine latest Xray version"
+    say "Downloading Xray $XRAY_VER ($XRAY_ARCH)…"
+    TMP="$(mktemp -d)"
+    curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VER}/Xray-linux-${XRAY_ARCH}.zip" -o "$TMP/xray.zip"
+    command -v unzip >/dev/null || apt-get install -y -qq unzip
+    unzip -q -o "$TMP/xray.zip" -d "$XRAY_DIR"
+    chmod +x "$XRAY_DIR/xray"
+    rm -rf "$TMP"
+    ok "Xray binary installed"
+else
+    ok "Xray already installed: $("$XRAY_DIR/xray" version | head -1)"
+fi
+
+# Geodata (geosite/geoip)
+for f in geosite.dat geoip.dat; do
+    if [[ ! -f "$XRAY_DIR/$f" ]]; then
+        say "Downloading $f…"
+        curl -fsSL "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" -o "$XRAY_DIR/geosite.dat" 2>/dev/null || true
+        curl -fsSL "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"              -o "$XRAY_DIR/geoip.dat"   2>/dev/null || true
+        break
     fi
+done
+[[ -s "$XRAY_DIR/geosite.dat" ]] || warn "geosite.dat is missing — geosite rules won't work"
+[[ -s "$XRAY_DIR/geoip.dat"   ]] || warn "geoip.dat is missing"
+ok "Geodata ready"
 
-    # Geodata (geosite/geoip)
-    for f in geosite.dat geoip.dat; do
-        if [[ ! -f "$XRAY_DIR/$f" ]]; then
-            say "Downloading $f…"
-            curl -fsSL "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" -o "$XRAY_DIR/geosite.dat" 2>/dev/null || true
-            curl -fsSL "https://github.com/v2fly/geoip/releases/latest/download/geoip.dat"              -o "$XRAY_DIR/geoip.dat"   2>/dev/null || true
-            break
-        fi
-    done
-    [[ -s "$XRAY_DIR/geosite.dat" ]] || warn "geosite.dat is missing — geosite rules won't work"
-    [[ -s "$XRAY_DIR/geoip.dat"   ]] || warn "geoip.dat is missing"
-    ok "Geodata ready"
+# systemd unit — тоже всегда, даже без VPS (просто не enable/start ниже).
+say "Installing xray.service…"
+cp "$SCRIPT_DIR/systemd/xray.service" /etc/systemd/system/xray.service
+sed -i "s|__XRAY_DIR__|$XRAY_DIR|g" /etc/systemd/system/xray.service
+systemctl daemon-reload
 
+if [[ "$INSTALL_XRAY" == "yes" ]]; then
     # Рендер config.json — общий код для install и веб-UI (xray/render-config.sh):
     # резолв VPS_ADDR→IP, список доменов из xray/domains, envsubst, xray -test.
     say "Rendering xray config…"
@@ -328,11 +343,6 @@ if [[ "$INSTALL_XRAY" == "yes" ]]; then
         || die "render-config failed (проверь VPS-параметры / шаблон)"
     ok "xray config valid"
 
-    # systemd unit
-    say "Installing xray.service…"
-    cp "$SCRIPT_DIR/systemd/xray.service" /etc/systemd/system/xray.service
-    sed -i "s|__XRAY_DIR__|$XRAY_DIR|g" /etc/systemd/system/xray.service
-    systemctl daemon-reload
     systemctl enable xray.service >/dev/null
     systemctl restart xray.service
     sleep 1
@@ -342,6 +352,8 @@ if [[ "$INSTALL_XRAY" == "yes" ]]; then
         journalctl -u xray.service -n 20 --no-pager || true
         die "xray failed to start"
     fi
+else
+    ok "xray готов, но не настроен (нет VPS-креды) — добавить можно позже через веб-панель (Подключение → вставить vless://-ссылку)"
 fi
 
 # ==========================================================================

@@ -64,6 +64,20 @@ func (s *server) handleConnection(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось: " + err.Error(), "output": out})
 			return
 		}
+		// Первое подключение VPS на шлюзе, который ставился без VPS (install.sh
+		// всегда кладёт бинарник/юнит про запас, см. install.sh) — xray.service
+		// мог быть не enable'нут, а редирект LAN->xray ещё не стоит вообще
+		// (vps-mode.conf=off с самой установки). vps-mode.sh сам идемпотентен
+		// (проверяет -C перед -I), безопасно звать и когда уже "on".
+		runCmd("systemctl", "enable", "xray.service")
+		if readVPSMode() != "on" {
+			if out, err := runCmd("/opt/gateway/vps-mode.sh", "on"); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{
+					"error": "xray настроен, но не удалось включить редирект трафика: " + err.Error(), "output": out,
+				})
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "addr": fields["VPS_ADDR"]})
 
 	default:
