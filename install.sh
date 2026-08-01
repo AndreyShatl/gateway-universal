@@ -738,22 +738,38 @@ if [[ "$INSTALL_ADGUARD" == "yes" ]]; then
     AGH_OK=yes
     if [[ ! -x "$AGH_DIR/AdGuardHome" ]]; then
         TMP="$(mktemp -d)"
-        AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_amd64.tar.gz"
+        AGH_ASSET="AdGuardHome_linux_amd64.tar.gz"
         case "$ARCH" in
-            aarch64) AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_arm64.tar.gz";;
-            armv7l)  AGH_URL="https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv7.tar.gz";;
+            aarch64) AGH_ASSET="AdGuardHome_linux_arm64.tar.gz";;
+            armv7l)  AGH_ASSET="AdGuardHome_linux_armv7.tar.gz";;
         esac
+        AGH_URL="https://static.adguard.com/adguardhome/release/$AGH_ASSET"
+        # AdGuardHome — open-source, тот же .tar.gz лежит и в GitHub Releases
+        # (без привязки к версии: releases/latest/download/... сам редиректит
+        # на актуальный релиз). Резервный источник — не для скорости, а на
+        # случай, когда static.adguard.com блокируется/душится (см. ниже),
+        # а GitHub в это же время доступен (живой инцидент 2026-08-01: TLS-
+        # handshake к static.adguard.com завис намертво, тот же файл с GitHub
+        # долетел за 2с).
+        AGH_URL_FALLBACK="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/$AGH_ASSET"
         # static.adguard.com у некоторых провайдеров/ТСПУ душит именно НАЧАЛО
         # больших TLS-закачек (первые секунды на десятки КБ/с, потом разгоняется
         # до нормальной скорости) — короткого --max-time не хватает не потому что
         # соединение мертво, а потому что троттлинг съедает бюджет ДО разгона.
         # 45с + пара повторов почти всегда переживают этот эффект (см. живой
         # инцидент 2026-08-01: тот же URL с 15с падал, с руки — проходил за 2-3с
-        # после старта). Если и это не помогло и уже поднят VPS-туннель — фоллбэк ниже.
+        # после старта). Но иногда это не троттлинг, а полная блокировка TLS по
+        # SNI (тот же день, тот же домен — TLS handshake завис насмерть без
+        # единого байта ответа) — тогда таймаут/ретраи не помогут в принципе,
+        # нужен другой источник (GitHub) или VPS-туннель.
         if ! curl -fsSL --max-time 45 --retry 2 --retry-delay 3 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || [[ ! -s "$TMP/agh.tar.gz" ]]; then
             if [[ "$INSTALL_XRAY" == "yes" ]] && ss -tlnp 2>/dev/null | grep -q ':1081 '; then
                 warn "прямое скачивание AdGuard Home зависло — пробую через VPS-туннель…"
                 curl -fsSL --max-time 60 --socks5-hostname 127.0.0.1:1081 -o "$TMP/agh.tar.gz" "$AGH_URL" 2>/dev/null || true
+            fi
+            if [[ ! -s "$TMP/agh.tar.gz" ]]; then
+                warn "static.adguard.com недоступен — пробую GitHub Releases…"
+                curl -fsSL --max-time 30 -o "$TMP/agh.tar.gz" "$AGH_URL_FALLBACK" 2>/dev/null || true
             fi
         fi
         if [[ -s "$TMP/agh.tar.gz" ]] && tar -xzf "$TMP/agh.tar.gz" -C "$INSTALL_PREFIX" 2>/dev/null; then
