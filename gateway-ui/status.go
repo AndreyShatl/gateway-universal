@@ -13,13 +13,19 @@ import (
 // инфраструктура, их статус в обзоре не нужен.
 var statusServices = []string{"xray", "zapret", "gateway-ui"}
 
-// сервисы, которые разрешено рестартить/смотреть из UI
-var manageable = map[string]bool{"xray": true, "zapret": true, "fix-gateway": true, "discord-tproxy": true,
-	"gateway-detector": true, "gateway-brain-worker": true}
+// сервисы, которые разрешено рестартить из UI
+var manageable = map[string]bool{"xray": true, "zapret": true, "fix-gateway": true, "discord-tproxy": true}
 
-// gateway-brain-worker пишет подробный лог (per-domain ✅/🔵/⚠) не в stdout/journalctl,
-// а в свой файл — journalctl этого юнита показал бы только "воркер запущен" и тишину.
-const brainLogFile = "/var/log/gateway-brain.log"
+// сервисы, чьи логи можно ПРОСМОТРЕТЬ из UI (шире manageable — только чтение,
+// рестарт отдельно не даём: gateway-brain-* управляются своими таймерами,
+// дёргать их руками из UI смысла нет, а вот логи посмотреть — полезно).
+var loggable = map[string]bool{
+	"xray": true, "zapret": true, "fix-gateway": true, "discord-tproxy": true,
+	"gateway-ui": true, "AdGuardHome": true, "gateway-detector": true,
+	"gateway-brain-worker": true, "gateway-brain-nightly": true,
+	"gateway-brain-static-reeval": true, "gateway-brain-domain-actualize": true,
+	"gateway-brain-healthcheck": true, "gateway-zapret-autoupdate": true,
+}
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	svc := map[string]string{}
@@ -59,12 +65,6 @@ func (s *server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 		return
 	}
-	if svc == "zapret" {
-		// CANON #20: zapret.service флашит mangle POSTROUTING при каждом рестарте —
-		// без restore все brain-группы (T-consolidate) осиротеют молча.
-		runCmd("sleep", "2")
-		runCmd("/opt/gateway-brain/brain-apply.sh", "restore")
-	}
 	state, _ := runCmd("systemctl", "is-active", svc+".service")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": svc, "state": strings.TrimSpace(state)})
 }
@@ -76,7 +76,7 @@ func (s *server) handleSmoke(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	svc := r.URL.Query().Get("service")
-	if !manageable[svc] {
+	if !loggable[svc] {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "сервис не разрешён"})
 		return
 	}
@@ -84,11 +84,6 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("lines")); err == nil && v > 0 && v <= 200 {
 		n = v
 	}
-	var out string
-	if svc == "gateway-brain-worker" {
-		out, _ = runCmd("tail", "-n", strconv.Itoa(n), brainLogFile)
-	} else {
-		out, _ = runCmd("journalctl", "-u", svc+".service", "-n", strconv.Itoa(n), "--no-pager")
-	}
+	out, _ := runCmd("journalctl", "-u", svc+".service", "-n", strconv.Itoa(n), "--no-pager")
 	writeJSON(w, http.StatusOK, map[string]any{"log": out})
 }
