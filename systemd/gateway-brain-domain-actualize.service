@@ -1,0 +1,7 @@
+[Unit]
+Description=Gateway brain — актуализация списков доменов discord/instagram/youtube/ai-services из geosite (MetaCubeX/meta-rules-dat)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-domain-actualize.sh

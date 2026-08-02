@@ -1,0 +1,12 @@
+[Unit]
+Description=Актуализация списков доменов discord/instagram/youtube/ai-services (раз в сутки, до static-reeval в 05:00)
+
+[Timer]
+# 04:30, между brain-nightly (04:00) и brain-static-reeval (05:00) — только
+# правит JSON/txt и рендерит xray, solve.sh/netns не трогает, конфликтов нет.
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
