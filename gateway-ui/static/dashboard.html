@@ -137,6 +137,7 @@
       <a data-nav="connection">Подключение</a>
       <a data-nav="vpsmode">Режим работы</a>
       <a data-nav="domains">Домены</a>
+      <a data-nav="zapret-svc">Сервисы (VPS/zapret)</a>
       <a data-nav="autoroute">Авто-обход</a>
       <div class="nav-grp">Мозг</div>
       <a data-nav="whitelist">Whitelist</a>
@@ -221,6 +222,19 @@
             <summary>Списки по умолчанию (<span id="defCount">…</span>) — идут через VPS</summary>
             <ul id="defList" class="list ro"></ul>
           </details>
+        </div>
+      </section>
+
+      <section data-sec="zapret-svc">
+        <div class="card">
+          <h2>Сервисы (zapret / VPS)</h2>
+          <div class="muted">Discord, Instagram, YouTube и общий трафик — можно вручную закрепить
+            за VPS (работает гарантированно, но грузит VPS-туннель) или оставить на zapret
+            (локальный DPI-обход, экономит VPS, но может не пробивать всегда). Ночной автоподбор
+            сам двигает домены между zapret/VPS — здесь можно прямо сейчас перекрыть весь сервис
+            на VPS, если что-то не работает.</div>
+          <div id="zapretSvcList"></div>
+          <div id="zapretSvcMsg" class="msg"></div>
         </div>
       </section>
 
@@ -736,6 +750,53 @@
     };
     document.querySelector('.sidebar a[data-nav="vpsmode"]').addEventListener('click', loadVPSMode);
     loadVPSMode();
+
+    // --- Сервисы (per-service zapret/VPS) ---
+    let zapretSvcCache = [];
+    function renderZapretServices(list) {
+      const box = document.getElementById('zapretSvcList');
+      if (!list.length) { box.innerHTML = '<div class="muted">сервисов нет</div>'; return; }
+      box.innerHTML = list.map(s => `
+        <div class="card" style="margin-bottom:10px">
+          <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap">
+            <div><b>${esc(s.name || s.id)}</b>
+              <span class="muted" style="margin-left:8px">доменов: ${(s.domains||[]).length}</span></div>
+            <div class="row">
+              <select data-svc-mode="${esc(s.id)}">
+                <option value="vps" ${s.mode === 'vps' ? 'selected' : ''}>VPS</option>
+                <option value="zapret" ${s.mode !== 'vps' ? 'selected' : ''}>zapret</option>
+              </select>
+              <button data-svc-apply="${esc(s.id)}">Применить</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+      box.querySelectorAll('[data-svc-apply]').forEach(btn => {
+        btn.onclick = () => applyZapretServiceMode(btn.dataset.svcApply);
+      });
+    }
+    function loadZapretServices() {
+      fetch('/api/zapret/services').then(r => r.json()).then(d => {
+        zapretSvcCache = d.services || [];
+        renderZapretServices(zapretSvcCache);
+      }).catch(() => {
+        const msg = document.getElementById('zapretSvcMsg');
+        msg.className = 'msg bad'; msg.textContent = '✗ не удалось загрузить сервисы';
+      });
+    }
+    function applyZapretServiceMode(id) {
+      const sel = document.querySelector(`[data-svc-mode="${CSS.escape(id)}"]`);
+      const mode = sel.value;
+      const msg = document.getElementById('zapretSvcMsg');
+      msg.className = 'msg'; msg.textContent = 'применяю…';
+      const updated = zapretSvcCache.map(s => s.id === id ? Object.assign({}, s, { mode }) : s);
+      fetch('/api/zapret/services', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) })
+        .then(async r => { const d = await r.json().catch(() => ({}));
+          if (r.ok) { msg.className = 'msg good'; msg.textContent = '✓ ' + id + ' → ' + (mode === 'vps' ? 'VPS' : 'zapret') + ' применено'; loadZapretServices(); }
+          else { msg.className = 'msg bad'; msg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { msg.className = 'msg bad'; msg.textContent = '✗ сеть'; });
+    }
+    document.querySelector('.sidebar a[data-nav="zapret-svc"]').addEventListener('click', loadZapretServices);
 
     // --- Реклама (AdGuard Home) ---
     function loadAdguard() {
