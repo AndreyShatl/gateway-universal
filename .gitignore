@@ -28,3 +28,4 @@ universal-dev-bootstrap.md
 # IDE
 .idea/
 .vscode/
+__pycache__/

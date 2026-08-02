@@ -1,0 +1,7 @@
+[Unit]
+Description=Еженедельное автообновление движка ciadpi (hufrea/byedpi) + восстановление ciadpi-групп
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/ciadpi-auto-update.sh

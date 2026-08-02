@@ -162,6 +162,11 @@
           <div id="mgmtMsg" class="msg"></div>
           <pre id="mgmtOut" class="out"></pre>
         </div>
+        <div class="card">
+          <h2>Движки обхода</h2>
+          <div class="muted" style="margin-bottom:6px">Сводка по каждому движку — сколько доменов сейчас через него идёт и сколько стратегий накоплено в базе, независимо от того, есть ли активные группы прямо сейчас.</div>
+          <div id="enginesSummary" class="row" style="gap:12px; flex-wrap:wrap"></div>
+        </div>
       </section>
 
       <section data-sec="connection">
@@ -354,6 +359,7 @@
           <div class="row">
             <input id="prName" placeholder="имя">
             <select id="prProto"><option value="tcp">tcp</option><option value="udp">udp</option></select>
+            <select id="prEngine"><option value="zapret">zapret</option><option value="ciadpi">ciadpi</option><option value="vps">vps</option><option value="direct">direct</option></select>
           </div>
           <textarea id="prArgs" rows="2" placeholder="--dpi-desync=... аргументы nfqws"></textarea>
           <div class="row"><button id="prAdd">+ Добавить пресет</button></div>
@@ -405,6 +411,16 @@
           </div>
           <div class="muted" style="margin-top:6px">Демоны nfqws, очереди трафика и сервисы. Обновляется каждые 3 c. Только просмотр.</div>
         </div>
+        <div class="card" id="nightlyCard" hidden>
+          <h2>Ночная проверка — идёт сейчас</h2>
+          <div class="muted" style="margin-bottom:8px">Мозг разбирает очередь: своя группа → другая существующая → полный перебор (zapret → ciadpi → VPS).</div>
+          <div style="background:var(--muted-bg,#5552); border-radius:6px; overflow:hidden; height:22px; position:relative">
+            <div id="nightlyBar" style="background:var(--accent-bg,#59f9); height:100%; width:0%; transition:width .5s"></div>
+            <div id="nightlyBarText" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:.85em; font-weight:600"></div>
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:.85em">Живая лента (новые события сверху):</div>
+          <pre id="nightlyFeed" class="out" style="max-height:260px; overflow-y:auto; font-size:.8em"></pre>
+        </div>
         <div class="card">
           <h2>Мозг: группы по стратегии</h2>
           <div class="muted" style="margin-bottom:6px">С 2026-07-23 (T-consolidate) — один демон обслуживает ВСЕ домены с одинаковой рабочей стратегией, не по домену на демон. Кликни группу, чтобы увидеть её домены.</div>
@@ -415,6 +431,16 @@
           <h2>Активные zapret-профили (<span id="monDCount">0</span>)</h2>
           <div class="muted" style="margin-bottom:6px">Строка = сервис, внутри его каналы (TCP/UDP на своих очередях со своей стратегией). ⚙ = авто-сущность мозга. Кликни стратегию, чтобы развернуть.</div>
           <div style="overflow-x:auto"><table id="monDaemons" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Демоны ciadpi (<span id="monCiadpiCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Второй движок десинхронизации (T-ciadpi) — REDIRECT в локальный ciadpi-процесс вместо NFQUEUE, метрики другие (нет глубины очереди), поэтому отдельная таблица.</div>
+          <div style="overflow-x:auto"><table id="monCiadpi" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Confidence-гистерезис (<span id="monReevalCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Раз домен подтвердил стабильную работу несколько ночей подряд — ночная переоценка перестаёт гонять его каждый раз, доверие растёт (0→30→70→100), следующая проверка отодвигается (1→3→7 суток).</div>
+          <div style="overflow-x:auto"><table id="monReeval" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
         </div>
         <div class="card">
           <h2>Accept-only, без десинхронизации (<span id="monACount">0</span>)</h2>
@@ -637,18 +663,20 @@
     function renderPresets(list) {
       const rows = (list || []).map(p => `<tr>
         <td style="padding:5px 8px">${esc(p.name)}</td>
+        <td style="padding:5px 8px"><span class="st-badge" style="background:var(--muted-bg,#5559)">${esc(p.engine||'zapret')}</span></td>
         <td style="padding:5px 8px">${esc(p.proto)}</td>
         <td style="padding:5px 8px">${p.source === 'custom' ? '<span class="st-badge">custom</span>' : '<span class="muted">standard</span>'}</td>
         <td style="padding:5px 8px">${p.trusted ? '<span class="st-badge" style="background:var(--good-tx,#2a7)">trusted</span>' : ''}</td>
         <td style="padding:5px 8px" class="muted">${p.success_count||0}</td>
+        <td style="padding:5px 8px" class="muted">${(p.score!==undefined?p.score:100).toFixed ? p.score.toFixed(0) : p.score}</td>
         <td style="padding:5px 8px">${stratCellPr(p.args)}</td>
       </tr>`).join('');
       document.getElementById('prTable').innerHTML =
         '<div style="overflow-x:auto"><table style="width:100%; border-collapse:collapse; font-size:13px">' +
-        '<tr><th style="text-align:left; padding:5px 8px">Имя</th><th style="text-align:left; padding:5px 8px">Протокол</th>' +
+        '<tr><th style="text-align:left; padding:5px 8px">Имя</th><th style="text-align:left; padding:5px 8px">Движок</th><th style="text-align:left; padding:5px 8px">Протокол</th>' +
         '<th style="text-align:left; padding:5px 8px">Тип</th><th style="text-align:left; padding:5px 8px">Доверенный</th>' +
-        '<th style="text-align:left; padding:5px 8px">Успехов</th><th style="text-align:left; padding:5px 8px">Аргументы</th></tr>' +
-        (rows || '<tr><td class="muted" style="padding:5px 8px" colspan="6">пусто</td></tr>') + '</table></div>';
+        '<th style="text-align:left; padding:5px 8px">Успехов</th><th style="text-align:left; padding:5px 8px">Score</th><th style="text-align:left; padding:5px 8px">Аргументы</th></tr>' +
+        (rows || '<tr><td class="muted" style="padding:5px 8px" colspan="8">пусто</td></tr>') + '</table></div>';
     }
     function stratCellPr(s) {
       if (!s) return '—';
@@ -662,10 +690,11 @@
       const name = document.getElementById('prName').value.trim();
       const proto = document.getElementById('prProto').value;
       const args = document.getElementById('prArgs').value.trim();
+      const engine = document.getElementById('prEngine').value;
       const msg = document.getElementById('prMsg');
       if (!name || !args) { msg.className = 'msg bad'; msg.textContent = 'имя и аргументы обязательны'; return; }
       fetch('/api/presets', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
-        body:'action=add&name='+encodeURIComponent(name)+'&proto='+encodeURIComponent(proto)+'&args='+encodeURIComponent(args) })
+        body:'action=add&name='+encodeURIComponent(name)+'&proto='+encodeURIComponent(proto)+'&engine='+encodeURIComponent(engine)+'&args='+encodeURIComponent(args) })
         .then(async r => { const d = await r.json();
           if (r.ok) { msg.className='msg good'; msg.textContent='✓ добавлено'; document.getElementById('prName').value=''; document.getElementById('prArgs').value=''; loadPresets(); }
           else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
@@ -756,7 +785,7 @@
       const tr = rows.map(r => '<tr>' + r.map(c => `<td style="padding:5px 8px; border-bottom:1px solid var(--border,#2222)">${c}</td>`).join('') + '</tr>').join('');
       el.innerHTML = th + tr;
     }
-    const svcBadge = m => `<span class="st-badge">${m === 'vps' ? 'VPS' : 'zapret'}</span>`;
+    const svcBadge = m => `<span class="st-badge">${({vps:'VPS', ciadpi:'ciadpi'})[m] || 'zapret'}</span>`;
     function stratCell(s) {
       if (!s) return '—';
       const short = s.length > 46 ? esc(s.slice(0, 46)) + '…' : esc(s);
@@ -769,9 +798,11 @@
         ['Групп', bt.groups], ['Доменов', bt.domains], ['Демонов nfqws', bt.daemons], ['Память', bt.memory_mb.toFixed(1)+' МБ']
       ].map(([label,val]) => `<div><div class="muted" style="font-size:.8em">${label}</div><div style="font-size:1.3em; font-weight:600">${val}</div></div>`).join('');
       const groups = (d.brain_groups || []).slice().sort((a,b)=>b.count-a.count);
+      const engColors = {ciadpi:'var(--accent-bg,#59f9)', zapret2:'var(--bad-bg,#f959)'};
+      const engBadge = e => `<span class="st-badge" style="background:${engColors[e]||'var(--muted-bg,#5559)'}">${esc(e||'zapret')}</span>`;
       document.getElementById('brainGroups').innerHTML = groups.length ? groups.map(g => `
         <details style="margin:4px 0">
-          <summary style="cursor:pointer"><span class="st-badge">${esc(g.proto)}</span> ${g.queue!=null?'очередь '+g.queue:'accept-only'} — <b>${g.count}</b> ${g.count===1?'домен':'доменов'}</summary>
+          <summary style="cursor:pointer">${engBadge(g.engine)} <span class="st-badge">${esc(g.proto)}</span> ${g.queue!=null?'очередь '+g.queue:(g.port!=null?'порт '+g.port:'accept-only')} — <b>${g.count}</b> ${g.count===1?'домен':'доменов'}</summary>
           <div class="muted" style="margin:6px 0 0 16px; font-size:.85em">${g.domains.map(esc).join(', ')}</div>
         </details>`).join('') : '<span class="muted">пусто</span>';
       // группируем профили по сервису: строка = сервис, внутри его каналы (proto·очередь·стратегия)
@@ -786,6 +817,21 @@
           ).join('');
           return [`<b>${esc(name)}</b>`, chans];
         }));
+      const cp = (d.ciadpi_profiles || []);
+      document.getElementById('monCiadpiCount').textContent = cp.length;
+      tbl(document.getElementById('monCiadpi'), ['Домены', 'Порт', 'PID', 'RSS', 'Стратегия'],
+        cp.length ? cp.map(x => [esc(x.domains || '—'), x.port, x.pid, (x.rss_kb ? (x.rss_kb/1024).toFixed(1)+' МБ' : '—'), stratCell(x.strategy)])
+                   : [['<span class="muted">пусто</span>', '', '', '', '']]);
+      const rs = (d.reeval_schedule || []).slice().sort((a,b) => (b.confidence||0) - (a.confidence||0));
+      document.getElementById('monReevalCount').textContent = rs.length;
+      const confBadge = c => {
+        const color = c >= 100 ? 'var(--good-tx,#2a7)' : c >= 70 ? 'var(--accent-bg,#59f9)' : c >= 30 ? 'var(--muted-bg,#5559)' : 'var(--bad-bg,#f559)';
+        return `<span class="st-badge" style="background:${color}">${c}</span>`;
+      };
+      const fmtDate = s => s ? new Date(s).toLocaleString() : '—';
+      tbl(document.getElementById('monReeval'), ['Домен', 'Движок', 'Стратегия', 'Confidence', 'Последняя проверка', 'Следующая проверка'],
+        rs.length ? rs.map(x => [esc(x.domain), esc(x.engine||'—'), esc(x.strategy_name||'—'), confBadge(x.confidence||0), fmtDate(x.last_reeval_at), fmtDate(x.next_reeval_at)])
+                   : [['<span class="muted">пусто</span>', '', '', '', '', '']]);
       const ao = (d.accept_only || []);
       document.getElementById('monACount').textContent = ao.length;
       tbl(document.getElementById('monAcceptOnly'), ['Домен', 'Протокол'],
@@ -806,6 +852,24 @@
     }
     setInterval(() => { if (document.visibilityState === 'visible' && monSec && !monSec.hidden) loadMonitor(); }, 3000);
     document.querySelector('.sidebar a[data-nav="monitor"]').addEventListener('click', loadMonitor);
+
+    // --- Прогресс ночной проверки (T-progress-ui) — карточка появляется, только
+    // когда есть что показывать (running=true), обновление каждые 2с для ощущения
+    // "в реальном времени".
+    function loadNightlyProgress() {
+      fetch('/api/nightly-progress').then(r => r.json()).then(p => {
+        const card = document.getElementById('nightlyCard');
+        if (!p.running) { card.hidden = true; return; }
+        card.hidden = false;
+        const pct = p.total > 0 ? Math.min(100, Math.round(p.done / p.total * 100)) : 0;
+        document.getElementById('nightlyBar').style.width = pct + '%';
+        document.getElementById('nightlyBarText').textContent = `${p.done} / ${p.total} (${pct}%)`;
+        document.getElementById('nightlyFeed').textContent = (p.feed || []).join('\n');
+      }).catch(() => {});
+    }
+    setInterval(() => { if (document.visibilityState === 'visible' && monSec && !monSec.hidden) loadNightlyProgress(); }, 2000);
+    document.querySelector('.sidebar a[data-nav="monitor"]').addEventListener('click', loadNightlyProgress);
+    loadNightlyProgress();
 
     // --- Обзор: ping ---
     fetch('/api/ping').then(r => r.json()).then(d => {
@@ -1064,6 +1128,46 @@
       });
     }
     loadStatus();
+
+    // --- Обзор: сводка по движкам (T-ciadpi) — не зависит от того, есть ли
+    // активные группы прямо сейчас: тянет /api/presets (стратегии по движку),
+    // /api/monitor (живые группы/доходы zapret+ciadpi), /api/autoroute (VPS).
+    function loadEnginesSummary() {
+      Promise.all([
+        fetch('/api/presets').then(r => r.json()).catch(() => ({presets:[]})),
+        fetch('/api/monitor').then(r => r.json()).catch(() => ({})),
+        fetch('/api/autoroute').then(r => r.json()).catch(() => ({entries:[]})),
+      ]).then(([pr, mon, ar]) => {
+        const presets = pr.presets || [];
+        const groups = mon.brain_groups || [];
+        const countBy = (eng) => {
+          const gs = groups.filter(g => (g.engine || 'zapret') === eng);
+          const domains = gs.reduce((s,g) => s + (g.count||0), 0);
+          return { groups: gs.length, domains };
+        };
+        const z = countBy('zapret'), c = countBy('ciadpi'), z2 = countBy('zapret2');
+        const zStrats = presets.filter(p => (p.engine||'zapret') === 'zapret').length;
+        const cStrats = presets.filter(p => p.engine === 'ciadpi').length;
+        const z2Strats = presets.filter(p => p.engine === 'zapret2').length;
+        const vDomains = (ar.entries || []).length;
+        const daemonsN = mon.brain_totals ? mon.brain_totals.daemons : 0;
+        const cDaemons = (mon.ciadpi_profiles || []).length;
+        const z2Daemons = z2.groups; // zapret2: 1 группа = 1 демон (как zapret1), нет отдельного profiles-эндпоинта
+        const card = (title, color, rows) => `
+          <div style="flex:1; min-width:160px; border:1px solid var(--border,#333); border-radius:8px; padding:10px 12px">
+            <div style="font-weight:600; margin-bottom:6px"><span class="st-badge" style="background:${color}">${title}</span></div>
+            ${rows.map(([label,val]) => `<div class="muted" style="font-size:.85em; display:flex; justify-content:space-between"><span>${label}</span><b style="color:var(--fg,inherit)">${val}</b></div>`).join('')}
+          </div>`;
+        document.getElementById('enginesSummary').innerHTML =
+          card('zapret', 'var(--muted-bg,#5559)', [['доменов', z.domains], ['групп', z.groups], ['демонов nfqws', daemonsN - cDaemons - z2Daemons], ['стратегий в базе', zStrats]]) +
+          card('ciadpi', 'var(--accent-bg,#59f9)', [['доменов', c.domains], ['групп', c.groups], ['демонов', cDaemons], ['стратегий в базе', cStrats]]) +
+          card('zapret2', 'var(--bad-bg,#f959)', [['доменов', z2.domains], ['групп', z2.groups], ['демонов', z2Daemons], ['стратегий в базе', z2Strats]]) +
+          card('VPS', 'var(--bad-bg,#f559)', [['доменов (автообход)', vDomains]]);
+      }).catch(() => {});
+    }
+    loadEnginesSummary();
+    setInterval(loadEnginesSummary, 10000);
+
     document.getElementById('btnExit').onclick = () => {
       mMsg.className = 'msg'; mMsg.textContent = 'Проверяю exit IP…'; mOut.textContent = '';
       fetch('/api/exit-ip').then(r => r.json()).then(d => {
