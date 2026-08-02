@@ -200,14 +200,14 @@
       <section data-sec="vpsmode">
         <div class="card">
           <h2>Режим работы</h2>
-          <div class="muted">«VPS + zapret» — обычный режим: то, что zapret не смог обойти сам,
-            уходит через VPS-туннель. «Только zapret» — VPS-туннель не используется вообще
-            (нет VPS или хотите работать без него) — что zapret не пробьёт, останется
-            заблокированным как есть, без запасного канала.</div>
+          <div class="muted">«VPS + DPI» — обычный режим: то, что DPI-обход (zapret/ciadpi/zapret2)
+            не смог обойти сам, уходит через VPS-туннель. «Только DPI» — VPS-туннель не
+            используется вообще (нет VPS или хотите работать без него) — что DPI-обход
+            не пробьёт, останется заблокированным как есть, без запасного канала.</div>
           <div class="row">
             <select id="vmMode">
-              <option value="on">VPS + zapret</option>
-              <option value="off">Только zapret (без VPS)</option>
+              <option value="on">VPS + DPI</option>
+              <option value="off">Только DPI (без VPS)</option>
             </select>
             <button id="vmApply">Применить</button>
           </div>
@@ -750,7 +750,7 @@
       fetch('/api/vps-mode', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
         body:'mode='+encodeURIComponent(mode) })
         .then(async r => { const d = await r.json();
-          if (r.ok) { msg.className='msg good'; msg.textContent='✓ режим: '+(d.mode==='on'?'VPS + zapret':'только zapret'); }
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ режим: '+(d.mode==='on'?'VPS + DPI':'только DPI'); }
           else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
         }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
     };
@@ -785,7 +785,7 @@
             <div class="row">
               <select data-svc-mode="${esc(s.id)}">
                 <option value="vps" ${s.mode === 'vps' ? 'selected' : ''}>VPS</option>
-                <option value="zapret" ${s.mode !== 'vps' ? 'selected' : ''}>zapret</option>
+                <option value="zapret" ${s.mode !== 'vps' ? 'selected' : ''}>DPI (zapret/ciadpi/zapret2)</option>
               </select>
               <button data-svc-apply="${esc(s.id)}">Применить</button>
             </div>
@@ -837,7 +837,10 @@
     function loadZapretServices() {
       domainEngineCache = null; // сбрасываем при каждом заходе на вкладку — данные могли устареть
       fetch('/api/zapret/services').then(r => r.json()).then(d => {
-        zapretSvcCache = d.services || [];
+        // quic_fallback — не сервис с доменами, а стратегия по умолчанию для
+        // ВСЕГО непойманного QUIC/UDP-443 (domains всегда []); нечего тут
+        // переключать/показывать — просто шумит в списке карточек.
+        zapretSvcCache = (d.services || []).filter(s => s.id !== 'quic_fallback');
         renderZapretServices(zapretSvcCache);
       }).catch(() => {
         const msg = document.getElementById('zapretSvcMsg');
