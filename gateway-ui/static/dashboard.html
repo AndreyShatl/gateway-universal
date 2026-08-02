@@ -85,6 +85,18 @@
   .svc .b { padding:3px 10px; border-radius:999px; font-size:12px; background:var(--pill-bg); color:var(--pill-tx); }
   .svc .b.up { background:var(--good-bg); color:var(--good-tx); }
   .st-badge { padding:2px 8px; border-radius:999px; font-size:11px; background:var(--pill-bg); color:var(--pill-tx); }
+  .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex;
+                     align-items:center; justify-content:center; z-index:1000; }
+  .modal-box { background:var(--panel); border:1px solid var(--border); border-radius:14px;
+               padding:20px 22px; width:min(640px, 92vw); max-height:82vh; display:flex; flex-direction:column; }
+  .modal-box h3 { margin:0 0 12px; display:flex; justify-content:space-between; align-items:center; }
+  .modal-box .modal-body { overflow-y:auto; flex:1; }
+  .modal-close { background:none; border:1px solid var(--border); border-radius:8px; cursor:pointer;
+                 color:var(--text); font-size:14px; padding:2px 10px; }
+  .modal-close:hover { border-color:var(--accent); }
+  .modal-box table { width:100%; border-collapse:collapse; font-size:13px; }
+  .modal-box th, .modal-box td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); }
+  .modal-box th { color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; }
   .svc .b.down { background:var(--bad-bg); color:var(--bad-tx); }
   .out { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:10px;
          font-size:12px; white-space:pre-wrap; max-height:240px; overflow:auto; margin-top:10px; }
@@ -753,6 +765,18 @@
 
     // --- Сервисы (per-service zapret/VPS) ---
     let zapretSvcCache = [];
+    let domainEngineCache = null; // domain(lower) -> {engine, group_id} — строится из /api/monitor.brain_groups
+    function domainEngineMap() {
+      if (domainEngineCache) return Promise.resolve(domainEngineCache);
+      return fetch('/api/monitor').then(r => r.json()).then(d => {
+        const map = {};
+        (d.brain_groups || []).forEach(g => {
+          (g.domains || []).forEach(dom => { map[dom.toLowerCase()] = { engine: g.engine, group_id: g.group_id }; });
+        });
+        domainEngineCache = map;
+        return map;
+      });
+    }
     function renderZapretServices(list) {
       const box = document.getElementById('zapretSvcList');
       if (!list.length) { box.innerHTML = '<div class="muted">сервисов нет</div>'; return; }
@@ -767,6 +791,7 @@
                 <option value="zapret" ${s.mode !== 'vps' ? 'selected' : ''}>zapret</option>
               </select>
               <button data-svc-apply="${esc(s.id)}">Применить</button>
+              <button data-svc-domains="${esc(s.id)}" class="secondary">Домены →</button>
             </div>
           </div>
         </div>
@@ -774,8 +799,51 @@
       box.querySelectorAll('[data-svc-apply]').forEach(btn => {
         btn.onclick = () => applyZapretServiceMode(btn.dataset.svcApply);
       });
+      box.querySelectorAll('[data-svc-domains]').forEach(btn => {
+        btn.onclick = () => openServiceDomainsModal(btn.dataset.svcDomains);
+      });
+    }
+    function closeModal() {
+      const el = document.getElementById('svcDomainsModal');
+      if (el) el.remove();
+      document.removeEventListener('keydown', modalEscHandler);
+    }
+    function modalEscHandler(e) { if (e.key === 'Escape') closeModal(); }
+    function engineBadge(engine) {
+      const colors = { zapret: 'var(--muted-bg,#5559)', ciadpi: 'var(--accent-bg,#59f9)', zapret2: 'var(--bad-bg,#f959)', vps: 'var(--good-bg,#5f59)', direct: 'var(--faint-bg,#8885)' };
+      const labels = { zapret: 'zapret', ciadpi: 'ciadpi', zapret2: 'zapret2', vps: 'VPS', direct: 'direct' };
+      return `<span class="st-badge" style="background:${colors[engine]||'var(--muted-bg,#5559)'}">${labels[engine]||engine}</span>`;
+    }
+    function openServiceDomainsModal(id) {
+      const svc = zapretSvcCache.find(s => s.id === id);
+      if (!svc) return;
+      closeModal();
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      backdrop.id = 'svcDomainsModal';
+      backdrop.innerHTML = `
+        <div class="modal-box">
+          <h3>${esc(svc.name || svc.id)} — домены <button class="modal-close">✕</button></h3>
+          <div class="modal-body"><div class="muted">загрузка…</div></div>
+        </div>`;
+      backdrop.addEventListener('click', e => { if (e.target === backdrop) closeModal(); });
+      backdrop.querySelector('.modal-close').onclick = closeModal;
+      document.body.appendChild(backdrop);
+      document.addEventListener('keydown', modalEscHandler);
+      const body = backdrop.querySelector('.modal-body');
+      domainEngineMap().then(map => {
+        const rows = (svc.domains || []).slice().sort().map(d => {
+          const hit = map[d.toLowerCase()];
+          const engine = hit ? hit.engine : (svc.mode === 'vps' ? 'vps' : 'direct');
+          const group = hit ? esc(hit.group_id) : '<span class="muted">—</span>';
+          return [esc(d), engineBadge(engine), group];
+        });
+        body.innerHTML = '<table></table>';
+        tbl(body.querySelector('table'), ['Домен', 'Обход', 'Группа'], rows.length ? rows : [['<span class="muted">пусто</span>', '', '']]);
+      }).catch(() => { body.innerHTML = '<div class="msg bad">✗ не удалось загрузить</div>'; });
     }
     function loadZapretServices() {
+      domainEngineCache = null; // сбрасываем при каждом заходе на вкладку — данные могли устареть
       fetch('/api/zapret/services').then(r => r.json()).then(d => {
         zapretSvcCache = d.services || [];
         renderZapretServices(zapretSvcCache);
