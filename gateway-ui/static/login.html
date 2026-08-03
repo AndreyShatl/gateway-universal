@@ -36,6 +36,7 @@
             font-size:16px; line-height:1; cursor:pointer; }
   .pw-eye:hover { background:none; opacity:1; }
   .err { color:var(--bad); font-size:13px; margin-bottom:12px; }
+  .hint { color:var(--text); font-size:11px; margin:-8px 0 14px; opacity:.6; }
   .theme-toggle { position:fixed; top:16px; right:16px; width:auto; padding:6px 10px;
                   background:none; border:1px solid var(--border); border-radius:8px;
                   color:var(--text); font-size:15px; cursor:pointer; }
@@ -48,9 +49,11 @@
     <h1>🛡️ gateway-ui</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
     <div class="pw-wrap">
-      <input id="pw" type="password" name="password" placeholder="Пароль" autofocus required>
+      <input id="pw" type="password" name="password" placeholder="Password" autocomplete="current-password"
+             autofocus required inputmode="latin" autocapitalize="off" autocorrect="off" spellcheck="false">
       <button id="pwEye" class="pw-eye" type="button" title="Показать пароль" aria-label="Показать пароль">👁️</button>
     </div>
+    <div class="hint">Только латиница/цифры — кириллица отфильтровывается на лету</div>
     <button type="submit">Войти</button>
   </form>
   <script>
@@ -71,6 +74,13 @@
       pwEye.title = show ? 'Скрыть пароль' : 'Показать пароль';
       pw.focus();
     };
+    // Только английская раскладка: печатаемый ASCII (0x20-0x7E) — молча
+    // отрезаем всё остальное (кириллицу и т.п.), чтобы не набрать пароль
+    // в чужой раскладке незаметно для себя.
+    pw.addEventListener('input', () => {
+      const filtered = pw.value.replace(/[^\x20-\x7E]/g, '');
+      if (filtered !== pw.value) pw.value = filtered;
+    });
   </script>
 </body>
 </html>
