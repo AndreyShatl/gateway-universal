@@ -482,7 +482,7 @@ for g in json.load(open('$CSTATE')):
 # (REDIRECT) — тот же механизм, что zapret1: NFQUEUE + mangle POSTROUTING, просто
 # другой бинарник (nfqws2, Lua-desync вместо --dpi-desync=...) — поэтому модель
 # groups/queue/svc_rules почти буквально копия zapret1-веток выше, не ciadpi.
-Z2DIR=${Z2DIR:-/opt/zapret2}; NFQWS2=$Z2DIR/nfq/nfqws2
+Z2DIR=${Z2DIR:-/opt/zapret2}; NFQWS2=$Z2DIR/nfq2/nfqws2
 Z2LUA="--lua-init=@$Z2DIR/lua/zapret-lib.lua --lua-init=@$Z2DIR/lua/zapret-antidpi.lua --lua-init=@$Z2DIR/lua/zapret-auto.lua"
 Z2STATE=/etc/gateway/brain-services-zapret2.json
 Z2BASE=800; Z2POOL=300

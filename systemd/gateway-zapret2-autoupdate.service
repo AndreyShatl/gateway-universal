@@ -1,0 +1,7 @@
+[Unit]
+Description=Еженедельное автообновление движка zapret2 (bol-van/zapret2) + восстановление zapret2-групп
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/zapret2-auto-update.sh

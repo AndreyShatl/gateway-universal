@@ -526,6 +526,22 @@
           <div id="zupMsg" class="msg"></div>
           <details class="defaults"><summary>Лог обновления</summary><pre id="zupLog" class="out"></pre></details>
         </div>
+        <div class="card">
+          <h2>Движок ciadpi</h2>
+          <div class="muted">Обновление из апстрима hufrea/byedpi. Останавливает активные ciadpi-группы перед сборкой, откатывается на предыдущий коммит при неудачной сборке.</div>
+          <div id="cverView" class="kv"><dd class="muted">загрузка…</dd></div>
+          <div class="row"><button id="cUpdate">Обновить движок</button></div>
+          <div id="cupMsg" class="msg"></div>
+          <details class="defaults"><summary>Лог обновления</summary><pre id="cupLog" class="out"></pre></details>
+        </div>
+        <div class="card">
+          <h2>Движок zapret2</h2>
+          <div class="muted">Обновление из апстрима bol-van/zapret2 (nfqws2). Останавливает активные zapret2-группы перед сборкой, откатывается на предыдущий коммит при неудачной сборке.</div>
+          <div id="z2verView" class="kv"><dd class="muted">загрузка…</dd></div>
+          <div class="row"><button id="z2Update">Обновить движок</button></div>
+          <div id="z2upMsg" class="msg"></div>
+          <details class="defaults"><summary>Лог обновления</summary><pre id="z2upLog" class="out"></pre></details>
+        </div>
       </section>
     </main>
   </div>
@@ -648,6 +664,35 @@
         if (r.ok) loadZver(); else { zupMsg.className='msg bad'; zupMsg.textContent='✗ '+(d.error||'ошибка'); }
       });
     };
+
+    // --- Движок ciadpi (версия + обновление) ---
+    function makeEngineCard(prefix, apiPath, confirmMsg) {
+      const verView = document.getElementById(prefix + 'verView');
+      const upMsg = document.getElementById(prefix + 'upMsg');
+      const upLog = document.getElementById(prefix + 'upLog');
+      const btn = document.getElementById(prefix + 'Update');
+      let timer = null;
+      function load() {
+        fetch('/api/' + apiPath + '/version').then(r => r.json()).then(d => {
+          verView.innerHTML = `<dt>Коммит</dt><dd>${esc(d.commit||'?')}</dd><dt>Описание</dt><dd>${esc(d.desc||'')}</dd>`;
+          btn.disabled = !!d.updating;
+          if (d.updating) { upMsg.className = 'msg'; upMsg.textContent = 'Обновление идёт…'; }
+          upLog.textContent = d.log_tail || '';
+          if (d.updating && !timer) timer = setInterval(load, 4000);
+          if (!d.updating && timer) { clearInterval(timer); timer = null; upMsg.className='msg good'; upMsg.textContent='✓ готово'; }
+        });
+      }
+      load();
+      btn.onclick = () => {
+        if (!confirm(confirmMsg)) return;
+        upMsg.className = 'msg'; upMsg.textContent = 'Запускаю обновление…';
+        fetch('/api/' + apiPath + '/update', { method:'POST' }).then(async r => { const d = await r.json();
+          if (r.ok) load(); else { upMsg.className='msg bad'; upMsg.textContent='✗ '+(d.error||'ошибка'); }
+        });
+      };
+    }
+    makeEngineCard('c', 'ciadpi', 'Обновить движок ciadpi из апстрима и пересобрать? Активные ciadpi-группы будут ненадолго остановлены на время сборки.');
+    makeEngineCard('z2', 'zapret2', 'Обновить движок zapret2 из апстрима и пересобрать? Активные zapret2-группы будут ненадолго остановлены на время сборки.');
 
     // --- Whitelist ---
     function renderWhitelist(list) {

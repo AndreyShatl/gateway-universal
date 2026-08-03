@@ -1,0 +1,12 @@
+[Unit]
+Description=Еженедельная проверка обновлений zapret2 (раз в неделю)
+
+[Timer]
+# Воскресенье 03:00 — после zapret (02:00) и ciadpi (02:30), не соревнуемся за
+# git/make/systemd-run, всё ещё до ночных brain-таймеров (04:00+).
+OnCalendar=Sun *-*-* 03:00:00
+RandomizedDelaySec=1200
+Persistent=true
+
+[Install]
+WantedBy=timers.target
