@@ -33,6 +33,9 @@ ciadpi/vps/direct), с накопительным score/confidence; service = г
   gwdb.py history-add STRATEGY_ID DOMAIN success|fail [LATENCY_MS]
                                                    # запись пробы (T-are); engine берётся из strategies
   gwdb.py service-touch DOMAIN STRATEGY_ID        # после подтверждённого успеха — обновить confidence/next_reeval_at
+  gwdb.py vps-touch DOMAIN success|fail           # то же самое, но для VPS-fallback доменов (T-vps-hysteresis) —
+                                                   # свой, более короткий цикл (макс. 3 дня, не 7), чтобы не
+                                                   # прозевать долго момент появления прямого обхода
   gwdb.py service-skip-list                       # домены, которых сегодня можно не трогать (T-are, гистерезис)
   gwdb.py services-list                           # domain\tstrategy_id\tengine\tstrategy_name\tconfidence\tlast_reeval_at\tnext_reeval_at
   gwdb.py strategies-explore --proto P --engine E [-n 10]  # N дольше всего не тестировавшихся (T-explore, гарантия покрытия)
@@ -152,6 +155,9 @@ def migrate(conn):
         scols = {r[1] for r in conn.execute("PRAGMA table_info(services)")}
         if "confidence" not in scols:
             conn.execute("ALTER TABLE services ADD COLUMN confidence INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        if "vps_streak" not in scols:
+            conn.execute("ALTER TABLE services ADD COLUMN vps_streak INTEGER NOT NULL DEFAULT 0")
             conn.commit()
 
 
@@ -475,6 +481,44 @@ def cmd_service_touch(args):
     print(f"ok: confidence={confidence} next_reeval={next_reeval}")
 
 
+def cmd_vps_touch(args):
+    """vps-touch DOMAIN success|fail — гистерезис для доменов, работающих через
+    VPS-fallback (T-vps-hysteresis, 2026-08-04). service-touch для них никогда
+    не вызывался (см. его докстринг) — brain-nightly.sh безусловно гонял ВСЕ
+    vps[]-домены каждую ночь навсегда, без пруна (только 30-дневная чистка
+    полностью неработающих no_bypass). При росте числа таких доменов (например
+    CDN плодит новые случайные UUID-поддомены) это давало неограниченно
+    растущую ночную очередь. Здесь свой, отдельный от service-touch streak
+    (колонка vps_streak, не завязан на history — тот таблица про попытки
+    ZAPRET/CIADPI-стратегий, для VPS семантически не то), и заметно короче
+    максимальный интервал (3 дня, не 7) — VPS-домен всё ещё стоит перепроверять
+    почаще: именно для него мы ждём момента, когда наконец заработает прямой
+    обход."""
+    domain, result = args[0], args[1]
+    conn = db()
+    row = conn.execute("SELECT vps_streak FROM services WHERE group_key=?", (domain,)).fetchone()
+    streak = (row[0] if row else 0) + 1 if result == "success" else 0
+    if streak >= 10:
+        confidence, interval_days = 100, 3
+    elif streak >= 5:
+        confidence, interval_days = 70, 1
+    elif streak >= 1:
+        confidence, interval_days = 30, 0.5
+    else:
+        confidence, interval_days = 0, 0
+    ts = time.time()
+    next_reeval = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts + interval_days * 86400))
+    conn.execute(
+        "INSERT INTO services(group_key, domains, current_strategy_id, confidence, vps_streak, last_reeval_at, next_reeval_at) "
+        "VALUES (?,?,NULL,?,?,?,?) "
+        "ON CONFLICT(group_key) DO UPDATE SET current_strategy_id=NULL, confidence=excluded.confidence, "
+        "vps_streak=excluded.vps_streak, last_reeval_at=excluded.last_reeval_at, next_reeval_at=excluded.next_reeval_at",
+        (domain, domain, confidence, streak, now(), next_reeval),
+    )
+    conn.commit()
+    print(f"ok: confidence={confidence} streak={streak} next_reeval={next_reeval}")
+
+
 def cmd_service_skip_list(args):
     """service-skip-list — домены, у которых next_reeval_at ещё не наступил
     (можно НЕ гонять сегодня даже дешёвый быстрый тест). Список ИСКЛЮЧЕНИЙ,
@@ -548,6 +592,7 @@ COMMANDS = {
     "strategy-remove": cmd_strategy_remove,
     "strategies-decay": cmd_strategies_decay,
     "service-touch": cmd_service_touch,
+    "vps-touch": cmd_vps_touch,
     "service-skip-list": cmd_service_skip_list,
     "services-list": cmd_services_list,
     "strategies-explore": cmd_strategies_explore,

@@ -16,6 +16,16 @@ AR=/etc/gateway/autoroute.json
 LOG=/var/log/gateway-brain.log
 GWDB=${GWDB:-/root/gateway-universal/scripts/gwdb.py}
 PROGRESS=/etc/gateway/brain-progress.json
+COLLAPSE=${COLLAPSE:-/opt/gateway-brain/autoroute-collapse.py}
+
+# T-collapse-uuid: до сборки vps[] схлопнуть накопившиеся дубли случайных
+# UUID-поддоменов с общим хвостом (см. autoroute-collapse.py) — иначе список
+# и, соответственно, ночная очередь растут без предела (у доменов, успешно
+# работающих через VPS, прунинга раньше не было вообще).
+if [ -x "$COLLAPSE" ] || [ -f "$COLLAPSE" ]; then
+  collapse_out=$(python3 "$COLLAPSE" --file "$AR" 2>&1)
+  echo "$(date '+%F %T') 🗜 $collapse_out" >> "$LOG"
+fi
 
 # bump_progress N — прибавить N к общему счётчику "поставлено сегодня" (T-progress-ui,
 # для прогресс-бара в gateway-ui). Сбрасывается в 0 в brain-worker.sh, когда очередь
@@ -85,13 +95,22 @@ for d in "${ents[@]}"; do
   # source=reeval — переоценка идёт без сигнатуры детектора, полный перебор пресетов.
   grep -qE "^${d//./\\.}($|	)" "$QUEUE" 2>/dev/null || { printf '%s\treeval\n' "$d" >> "$QUEUE"; n=$((n+1)); }
 done
+vps_skipped=0
 for d in "${vps[@]}"; do
   [ -n "$d" ] || continue
+  # T-vps-hysteresis: раньше vps[] гонялся ЦЕЛИКОМ и безусловно каждую ночь
+  # навсегда (единственная чистка — 30-дневный no_bypass-прун полностью
+  # неработающих). При росте числа подтверждённо-рабочих через VPS доменов
+  # (например CDN плодит новые случайные UUID-поддомены) очередь росла без
+  # предела. Теперь те же skip[] (см. gwdb.py vps-touch, brain-worker.sh) —
+  # домен, стабильно работающий через VPS несколько ночей подряд, можно не
+  # трогать сегодня (макс. интервал короче, чем у zapret/ciadpi: 3 дня, не 7).
+  if [ -n "${skip[$d]:-}" ]; then vps_skipped=$((vps_skipped+1)); continue; fi
   grep -qE "^${d//./\\.}($|	)" "$QUEUE" 2>/dev/null || { printf '%s\treeval\n' "$d" >> "$QUEUE"; n=$((n+1)); }
 done
 flock -u 9
 [ "$n" -gt 0 ] && bump_progress "$n"
-echo "$(date '+%F %T') 🌙 ночной проход: в очередь $n доменов (сущности=${#ents[@]}, vps=${#vps[@]}, пропущено по confidence=$skipped)" >> "$LOG"
+echo "$(date '+%F %T') 🌙 ночной проход: в очередь $n доменов (сущности=${#ents[@]}, vps=${#vps[@]}, пропущено по confidence=$skipped, пропущено vps по confidence=$vps_skipped)" >> "$LOG"
 
 # --- T55: no_bypass-статус для VPS-доменов + чистка устаревших записей ---
 # «Ничего не работает» (ни напрямую, ни через VPS) — раньше такого состояния не

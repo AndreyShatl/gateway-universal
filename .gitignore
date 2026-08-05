@@ -24,6 +24,8 @@ universal-dev-bootstrap.md
 # Сборка gateway-ui (бинарник — артефакт, в релиз кладём отдельно)
 /gateway-ui/gateway-ui
 /gateway-ui/dist/
+/gateway-ui/static/dist/
+/gateway-ui/web-src/node_modules/
 
 # IDE
 .idea/

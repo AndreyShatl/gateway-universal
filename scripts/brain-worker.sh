@@ -245,9 +245,16 @@ process_domain() {
       bash "$APPLY" remove "$domain" >/dev/null 2>&1
       log "⚪ $domain работает напрямую — убран из обхода (GC)" ;;
     VPS*|*)
-      bash "$APPLY" vps "$domain" >/dev/null 2>&1 \
-        && log "🔵 $domain → VPS (fallback, ни одна стратегия не пробила)" \
-        || log "⚠ $domain → VPS ошибка" ;;
+      if bash "$APPLY" vps "$domain" >/dev/null 2>&1; then
+        log "🔵 $domain → VPS (fallback, ни одна стратегия не пробила)"
+        # T-vps-hysteresis: подтверждённая работа через VPS — свой гистерезис
+        # (макс. 3 дня, короче чем у zapret/ciadpi), иначе список vps[] в
+        # brain-nightly.sh растёт без пруна и без пропуска навсегда (см. gwdb.py).
+        python3 "$GWDB" vps-touch "$domain" success >/dev/null 2>&1
+      else
+        log "⚠ $domain → VPS ошибка"
+        python3 "$GWDB" vps-touch "$domain" fail >/dev/null 2>&1
+      fi ;;
   esac
 }
 

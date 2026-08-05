@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -34,6 +35,21 @@ import (
 
 //go:embed static/*.html
 var staticFS embed.FS
+
+// distFSRaw — собранный React/Vite SPA (web-src/, T-shattl-gwui, 2026-08-05),
+// заменяет static/dashboard.html как основной интерфейс. Старая панель
+// оставлена на /legacy на время обкатки (см. регистрацию маршрутов ниже).
+//
+//go:embed all:static/dist
+var distFSRaw embed.FS
+
+func distFS() fs.FS {
+	sub, err := fs.Sub(distFSRaw, "static/dist")
+	if err != nil {
+		panic("gateway-ui: static/dist embed повреждён: " + err.Error())
+	}
+	return sub
+}
 
 //go:embed strategies.json
 var strategiesJSON []byte
@@ -158,7 +174,33 @@ func main() {
 	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
-	mux.HandleFunc("/", s.requireAuth(s.handleDashboard))
+
+	// T-shattl-gwui (2026-08-05): React/Vite SPA — новый интерфейс. Старая
+	// панель (dashboard.html) оставлена на /legacy на время обкатки, ссылка на
+	// неё есть в заглушках ComingSoon непортированных разделов SPA.
+	dist := distFS()
+	staticServer := http.FileServerFS(dist)
+	mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		staticServer.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		staticServer.ServeHTTP(w, r)
+	})
+	indexHTML, err := fs.ReadFile(dist, "index.html")
+	if err != nil {
+		log.Fatalf("gateway-ui: не удалось прочитать встроенный static/dist/index.html: %v", err)
+	}
+	mux.HandleFunc("/legacy", s.requireAuth(s.handleDashboard))
+	// GET "/" — subtree-паттерн в net/http.ServeMux: ловит и "/", и клиентские
+	// маршруты react-router (/domains, /whitelist, /monitor, /logs, /settings),
+	// у которых на сервере нет отдельного обработчика.
+	mux.HandleFunc("/", s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write(indexHTML)
+	}))
 
 	srv := &http.Server{
 		Addr:         *listen,

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -47,11 +48,31 @@ func (s Store) RouteOn() bool {
 
 // Entry — адрес + метаданные. Совместимо со схемой gateway-ui (поля round-trip).
 type Entry struct {
-	Addr   string `json:"addr"`
-	Added  string `json:"added,omitempty"`
-	Source string `json:"source,omitempty"`
-	DPort  int    `json:"port,omitempty"`  // порт блокировки (для точной перепроверки)
-	Clean  int    `json:"clean,omitempty"` // подряд чистых ночных проверок (2 -> удаление)
+	Addr            string `json:"addr"`
+	Added           string `json:"added,omitempty"`
+	Source          string `json:"source,omitempty"`
+	DPort           int    `json:"port,omitempty"`            // порт блокировки (для точной перепроверки)
+	Clean           int    `json:"clean,omitempty"`            // подряд чистых ночных проверок (2 -> удаление)
+	CollapsedSuffix string `json:"collapsed_suffix,omitempty"` // T-collapse-uuid: если есть — эта запись
+	// представитель ЦЕЛОЙ пачки случайных UUID-поддоменов с общим хвостом
+	// (см. collapseSuffix), новые "братья" не создают отдельных записей.
+}
+
+// uuidPrefixRe — CDN-провайдеры (замечено на *.fbcdn.net) иногда генерируют
+// per-сессионные поддомены вида "<uuid>-netseer-ipaddr-assoc.xz.fbcdn.net" —
+// кардинальность практически неограничена (новый UUID на почти каждый визит).
+// Без схлопывания это отдельная запись autoroute.json НАВСЕГДА (нет прунинга
+// для рабочих через VPS доменов) — список и ночная очередь растут без предела.
+var uuidPrefixRe = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(.+)$`)
+
+// collapseSuffix — хвост домена после случайного UUID-префикса, или "" если
+// домен под паттерн не подходит (обычные домены не трогаем).
+func collapseSuffix(host string) string {
+	m := uuidPrefixRe.FindStringSubmatch(strings.ToLower(host))
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }
 
 // UnmarshalJSON — принимает и объект, и старую строку (миграция формата).
@@ -147,26 +168,38 @@ func Sync(entries []Entry) {
 
 // Apply — добавить цель в авто-обход. source — чем поймано, port — порт блокировки.
 // Возвращает true, если реально добавлено (не было раньше и авто-обход включён).
+// Для случайных UUID-поддоменов (см. collapseSuffix) новая запись в JSON не
+// создаётся, если под тот же хвост уже есть представитель — но ipset ниже
+// всё равно получает IP этого конкретного домена, трафик не теряется, растёт
+// только список того, что нужно перепроверять по ночам, а не сама маршрутизация.
 func Apply(target, source string, port int) bool {
 	added := false
 	route := false
+	suffix := collapseSuffix(target)
 	withLock(func(s *Store) {
 		if !s.DetectOn() {
 			return // пополнение выключено — не добавляем
 		}
 		route = s.RouteOn()
+		collapsed := false
 		for _, e := range s.Entries {
 			if e.Addr == target {
 				return
 			}
+			if suffix != "" && e.CollapsedSuffix == suffix {
+				collapsed = true
+			}
 		}
-		s.Entries = append(s.Entries, Entry{
-			Addr:   target,
-			Added:  time.Now().UTC().Format(time.RFC3339),
-			Source: source,
-			DPort:  port,
-		})
-		save(s)
+		if !collapsed {
+			s.Entries = append(s.Entries, Entry{
+				Addr:            target,
+				Added:           time.Now().UTC().Format(time.RFC3339),
+				Source:          source,
+				DPort:           port,
+				CollapsedSuffix: suffix,
+			})
+			save(s)
+		}
 		added = true
 	})
 	if !added {
