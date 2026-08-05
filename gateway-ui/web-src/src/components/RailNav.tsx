@@ -1,4 +1,4 @@
-import { LayoutGrid, Globe, ShieldCheck, Activity, ScrollText, Settings, Boxes, TerminalSquare } from 'lucide-react'
+import { LayoutGrid, Globe, ShieldCheck, Activity, ScrollText, Settings, Boxes, TerminalSquare, Wifi, DownloadCloud } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
@@ -6,6 +6,8 @@ const items = [
   { to: '/', icon: LayoutGrid, label: 'Overview' },
   { to: '/services', icon: Boxes, label: 'Services' },
   { to: '/console', icon: TerminalSquare, label: 'Mission Console' },
+  { to: '/network', icon: Wifi, label: 'Network' },
+  { to: '/updates', icon: DownloadCloud, label: 'Updates' },
   { to: '/domains', icon: Globe, label: 'Domains' },
   { to: '/whitelist', icon: ShieldCheck, label: 'Whitelist' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },

@@ -4,6 +4,8 @@ import { RailNav } from './components/RailNav'
 import { Overview } from './pages/Overview'
 import { ServicesPage } from './pages/ServicesPage'
 import { ConsolePage } from './pages/ConsolePage'
+import { NetworkPage } from './pages/NetworkPage'
+import { UpdatesPage } from './pages/UpdatesPage'
 import { DomainsPage } from './pages/DomainsPage'
 import { WhitelistPage } from './pages/WhitelistPage'
 import { MonitorPage } from './pages/MonitorPage'
@@ -29,6 +31,8 @@ function AnimatedRoutes() {
           <Route path="/whitelist" element={<WhitelistPage />} />
           <Route path="/monitor" element={<MonitorPage />} />
           <Route path="/logs" element={<LogsPage />} />
+          <Route path="/network" element={<NetworkPage />} />
+          <Route path="/updates" element={<UpdatesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </motion.div>

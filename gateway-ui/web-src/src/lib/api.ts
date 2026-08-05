@@ -141,6 +141,7 @@ export interface MonitorResponse {
   brain_totals: BrainTotals
   brain_groups: BrainGroup[]
   reeval_schedule: ReevalEntry[]
+  ver: string
 }
 
 export const fetchMonitor = () => api<MonitorResponse>('/api/monitor')
@@ -267,6 +268,27 @@ export interface TimelineEvent {
 }
 
 export const fetchTimeline = () => api<TimelineEvent[]>('/api/timeline')
+
+export interface NetInterface {
+  name: string
+  up: boolean
+  speed_mbps: number
+  rx_bytes: number
+  tx_bytes: number
+  rx_errors: number
+  tx_errors: number
+  rx_dropped: number
+  tx_dropped: number
+}
+
+export interface NetworkResponse {
+  interfaces: NetInterface[]
+  default_route: string
+  dns_servers: string[]
+  lan_ip: string
+}
+
+export const fetchNetwork = () => api<NetworkResponse>('/api/network')
 
 export const fetchScanStatus = () => api<ScanStatus>('/api/scan')
 export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard') =>
