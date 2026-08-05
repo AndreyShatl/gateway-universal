@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gateway-ui</title>
+<script>
+  // Применяем тему до отрисовки, чтобы не мигало
+  (function () { try { document.documentElement.dataset.theme = localStorage.getItem('gw-theme') || 'dark'; } catch (e) { document.documentElement.dataset.theme = 'dark'; } })();
+</script>
+<style>
+  :root, [data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#0f1115; --panel:#191c23; --panel2:#161922; --border:#262a33;
+    --text:#e6e6e6; --muted:#9ca3af; --faint:#6b7280;
+    --accent:#3b82f6; --accent-h:#2f6fd6; --on-accent:#fff;
+    --pill-bg:#1f2937; --pill-tx:#9ca3af;
+    --good-bg:#064e3b; --good-tx:#6ee7b7; --bad-bg:#3f1d1d; --bad-tx:#f87171;
+    --code-bg:#0b0d11; --input-bg:#0f1115;
+  }
+  [data-theme="light"] {
+    color-scheme: light;
+    --bg:#f4f5f7; --panel:#ffffff; --panel2:#eef0f3; --border:#d9dce1;
+    --text:#1c2024; --muted:#5b6470; --faint:#9aa1ab;
+    --accent:#2563eb; --accent-h:#1d4ed8; --on-accent:#fff;
+    --pill-bg:#e5e7eb; --pill-tx:#4b5563;
+    --good-bg:#d1fae5; --good-tx:#047857; --bad-bg:#fee2e2; --bad-tx:#b91c1c;
+    --code-bg:#f3f4f6; --input-bg:#ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; justify-content:space-between;
+           padding:14px 20px; background:var(--panel); border-bottom:1px solid var(--border); }
+  header h1 { font-size:17px; margin:0; }
+  .hdr-right { display:flex; align-items:center; gap:14px; }
+  .icon-btn { background:none; border:1px solid var(--border); border-radius:8px; cursor:pointer;
+              font-size:15px; padding:4px 9px; color:var(--text); }
+  .icon-btn:hover { border-color:var(--accent); }
+  .logout { color:var(--muted); text-decoration:none; font-size:14px; }
+  .logout:hover { color:var(--text); }
+
+  .app { display:flex; align-items:flex-start; }
+  .sidebar { width:200px; flex-shrink:0; background:var(--panel2); border-right:1px solid var(--border);
+             padding:12px 8px; min-height:calc(100vh - 53px); position:sticky; top:0; }
+  .sidebar a { display:block; padding:10px 12px; margin-bottom:2px; border-radius:8px;
+               color:var(--muted); cursor:pointer; font-size:14px; text-decoration:none; user-select:none; }
+  .sidebar a:hover { background:var(--pill-bg); color:var(--text); }
+  .sidebar a.active { background:var(--accent); color:var(--on-accent); }
+  .nav-grp { font-size:11px; color:var(--faint); text-transform:uppercase; letter-spacing:.05em; padding:14px 12px 4px; }
+  main { flex:1; max-width:760px; margin:24px auto; padding:0 16px; width:100%; }
+  section[data-sec] > .card + .card { margin-top:16px; }
+
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 20px; }
+  .card h2 { font-size:15px; margin:0 0 8px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px;
+          background:var(--pill-bg); color:var(--pill-tx); }
+  .ok { background:var(--good-bg); color:var(--good-tx); }
+  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .row input { flex:1; padding:9px 10px; border:1px solid var(--border); border-radius:8px;
+               background:var(--input-bg); color:var(--text); }
+  .row button { padding:9px 16px; border:0; border-radius:8px; background:var(--accent);
+                color:var(--on-accent); font-weight:600; cursor:pointer; }
+  .row button:hover { background:var(--accent-h); }
+  .subtab { padding:7px 16px; border:0; border-radius:8px; background:var(--input-bg);
+            color:var(--muted); font-weight:600; cursor:pointer; font-size:13px; }
+  .subtab.active { background:var(--accent); color:var(--on-accent); }
+  button.secondary { background:var(--input-bg) !important; color:var(--muted) !important; }
+  @keyframes arflash { from { background:var(--good-tx); } to { background:transparent; } }
+  .list li.just-added { animation: arflash 3s ease-out; }
+  .msg { font-size:13px; margin-top:8px; min-height:16px; }
+  .msg.good { color:var(--good-tx); } .msg.bad { color:var(--bad-tx); }
+  .list { list-style:none; padding:0; margin:12px 0 0; max-height:280px; overflow:auto; }
+  .list li { display:flex; justify-content:space-between; align-items:center;
+             padding:6px 10px; border:1px solid var(--border); border-radius:8px; margin-bottom:6px;
+             font-family:ui-monospace,monospace; font-size:13px; }
+  .list .del { background:none; border:0; color:var(--bad-tx); cursor:pointer; font-size:16px; }
+  .empty { color:var(--faint); font-size:13px; margin-top:10px; }
+  .defaults { margin-top:12px; }
+  .defaults summary { cursor:pointer; color:var(--muted); font-size:13px; user-select:none; }
+  .defaults summary:hover { color:var(--text); }
+  .defaults .list { margin-top:10px; }
+  .list.ro li { color:var(--muted); }
+  .svc { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:4px; }
+  .svc .b { padding:3px 10px; border-radius:999px; font-size:12px; background:var(--pill-bg); color:var(--pill-tx); }
+  .svc .b.up { background:var(--good-bg); color:var(--good-tx); }
+  .st-badge { padding:2px 8px; border-radius:999px; font-size:11px; background:var(--pill-bg); color:var(--pill-tx); }
+  .svc .b.down { background:var(--bad-bg); color:var(--bad-tx); }
+  .svc-domains-details { border:1px solid var(--border); border-radius:8px; padding:8px 12px; }
+  .svc-domains-details summary { cursor:pointer; font-size:13px; color:var(--muted); user-select:none; }
+  .svc-domains-details summary:hover { color:var(--text); }
+  .svc-domains-details table { width:100%; border-collapse:collapse; font-size:13px; }
+  .svc-domains-details th, .svc-domains-details td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); }
+  .svc-domains-details th { color:var(--muted); font-weight:500; font-size:11px; text-transform:uppercase; }
+  .out { background:var(--code-bg); border:1px solid var(--border); border-radius:8px; padding:10px;
+         font-size:12px; white-space:pre-wrap; max-height:240px; overflow:auto; margin-top:10px; }
+  .out:empty { display:none; }
+  select { padding:9px 10px; border:1px solid var(--border); border-radius:8px; background:var(--input-bg); color:var(--text); }
+  textarea { width:100%; margin-top:12px; padding:10px; border:1px solid var(--border);
+             border-radius:8px; background:var(--input-bg); color:var(--text); font-family:ui-monospace,monospace;
+             font-size:13px; resize:vertical; }
+  .soon { color:var(--faint); font-size:13px; margin-top:8px; }
+  .kv { margin:12px 0 0; display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:13px; }
+  .kv dt { color:var(--muted); }
+  .kv dd { margin:0; font-family:ui-monospace,monospace; word-break:break-all; }
+  .strat { border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-top:12px; }
+  .strat .h { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px; }
+  .strat .tag { font-size:11px; padding:2px 8px; border-radius:999px; background:var(--pill-bg); color:var(--pill-tx); }
+  .strat .tag.q { background:var(--accent); color:var(--on-accent); }
+  .strat .params { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted); }
+  .strat .doms summary { cursor:pointer; color:var(--muted); font-size:12px; margin-top:8px; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  /* тумблер-переключатель */
+  .switch { position:relative; display:inline-block; width:48px; height:26px; flex-shrink:0; }
+  .switch input { opacity:0; width:0; height:0; }
+  .switch .slider { position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:26px; transition:.2s; }
+  .switch .slider:before { content:""; position:absolute; height:20px; width:20px; left:3px; top:3px;
+                           background:#fff; border-radius:50%; transition:.2s; }
+  .switch input:checked + .slider { background:var(--accent); }
+  .switch input:checked + .slider:before { transform:translateX(22px); }
+
+  @media (max-width:760px) {
+    .app { flex-direction:column; }
+    .sidebar { width:100%; min-height:0; position:static; display:flex; gap:4px;
+               overflow-x:auto; border-right:0; border-bottom:1px solid var(--border); padding:8px; }
+    .sidebar a { margin-bottom:0; white-space:nowrap; }
+    main { margin:16px auto; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>🛡️ gateway-ui <span class="muted">— панель шлюза</span></h1>
+    <div class="hdr-right">
+      <button id="themeBtn" class="icon-btn" title="Сменить тему">🌙</button>
+      <a class="logout" href="/logout">Выйти</a>
+    </div>
+  </header>
+
+  <div class="app">
+    <nav class="sidebar">
+      <a data-nav="overview">Обзор</a>
+      <a data-nav="connection">Подключение</a>
+      <a data-nav="vpsmode">Режим работы</a>
+      <a data-nav="domains">Домены</a>
+      <a data-nav="zapret-svc">Сервисы (VPS/zapret)</a>
+      <a data-nav="autoroute">Авто-обход</a>
+      <div class="nav-grp">Мозг</div>
+      <a data-nav="whitelist">Whitelist</a>
+      <a data-nav="presets">Пресеты</a>
+      <a data-nav="gamemode">Game Mode</a>
+      <a data-nav="adguard">Реклама (DNS)</a>
+      <div class="nav-grp">Система</div>
+      <a data-nav="monitor">Мониторинг</a>
+      <a data-nav="network">Сеть</a>
+      <a data-nav="services">Управление</a>
+    </nav>
+
+    <main>
+      <section data-sec="overview">
+        <div class="card">
+          <h2>Состояние</h2>
+          <div style="margin-bottom:10px">API: <span id="ping" class="pill">проверяю…</span></div>
+          <div id="svc" class="svc"></div>
+          <div class="row">
+            <button id="btnExit">Exit IP</button>
+            <button id="btnSmoke">Прогнать smoke</button>
+          </div>
+          <div id="mgmtMsg" class="msg"></div>
+          <pre id="mgmtOut" class="out"></pre>
+        </div>
+        <div class="card">
+          <h2>Движки обхода</h2>
+          <div class="muted" style="margin-bottom:6px">Сводка по каждому движку — сколько доменов сейчас через него идёт и сколько стратегий накоплено в базе, независимо от того, есть ли активные группы прямо сейчас.</div>
+          <div id="enginesSummary" class="row" style="gap:12px; flex-wrap:wrap"></div>
+        </div>
+      </section>
+
+      <section data-sec="connection">
+        <div class="card">
+          <h2>Текущее подключение</h2>
+          <div class="muted">Только для чтения — чтобы случайно ничего не сбить. Сменить можно вставкой новой ссылки ниже.</div>
+          <dl id="connView" class="kv"><dd class="muted">загрузка…</dd></dl>
+        </div>
+        <div class="card">
+          <h2>Сохранённые хосты</h2>
+          <div class="muted">Несколько VPS — переключайтесь между ними или удаляйте. Активный применён сейчас.</div>
+          <div id="connList"><div class="soon">загрузка…</div></div>
+        </div>
+        <div class="card">
+          <h2>Добавить хост</h2>
+          <div class="muted">Имя (для себя) + ссылка <code>vless://…</code> (Reality, gRPC), как в мобильных VPN-клиентах.</div>
+          <div class="row"><input id="connName" type="text" placeholder="Название (напр. VPS Амстердам)"></div>
+          <textarea id="connLink" rows="3" placeholder="vless://UUID@host:2083?type=grpc&security=reality&pbk=…&sid=…&sni=…"></textarea>
+          <div class="row"><button id="connAdd">Добавить</button></div>
+          <div id="connMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="vpsmode">
+        <div class="card">
+          <h2>Режим работы</h2>
+          <div class="muted">«VPS + DPI» — обычный режим: то, что DPI-обход (zapret/ciadpi/zapret2)
+            не смог обойти сам, уходит через VPS-туннель. «Только DPI» — VPS-туннель не
+            используется вообще (нет VPS или хотите работать без него) — что DPI-обход
+            не пробьёт, останется заблокированным как есть, без запасного канала.</div>
+          <div class="row">
+            <select id="vmMode">
+              <option value="on">VPS + DPI</option>
+              <option value="off">Только DPI (без VPS)</option>
+            </select>
+            <button id="vmApply">Применить</button>
+          </div>
+          <div id="vmMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="domains">
+        <div class="card">
+          <h2>Домены в обход</h2>
+          <div class="muted">Сайты, которые ходят через VPS. Можно пачкой — по одному в строке
+            или через запятую. Домен (example.com) или geosite:тег.</div>
+          <textarea id="domInput" rows="3" placeholder="example.com, geosite:netflix&#10;another-site.org"></textarea>
+          <div class="row"><button id="domAdd">Добавить</button></div>
+          <div id="domMsg" class="msg"></div>
+          <ul id="domList" class="list"></ul>
+          <details class="defaults">
+            <summary>Списки по умолчанию (<span id="defCount">…</span>) — идут через VPS</summary>
+            <ul id="defList" class="list ro"></ul>
+          </details>
+        </div>
+      </section>
+
+      <section data-sec="zapret-svc">
+        <div class="card">
+          <h2>Сервисы (zapret / VPS)</h2>
+          <div class="muted">Discord, Instagram, YouTube и общий трафик — можно вручную закрепить
+            за VPS (работает гарантированно, но грузит VPS-туннель) или оставить на zapret
+            (локальный DPI-обход, экономит VPS, но может не пробивать всегда). Ночной автоподбор
+            сам двигает домены между zapret/VPS — здесь можно прямо сейчас перекрыть весь сервис
+            на VPS, если что-то не работает.</div>
+          <div id="zapretSvcList"></div>
+          <div id="zapretSvcMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="autoroute">
+        <div class="row" id="arSubnav" style="gap:6px; margin-bottom:12px">
+          <button class="subtab active" data-sub="list">Список</button>
+          <button class="subtab" data-sub="recheck">Перепроверка</button>
+        </div>
+
+        <div data-subpane="list">
+        <div class="card">
+          <h2 style="margin:0 0 4px">Авто-обход <span class="st-badge">beta</span></h2>
+          <div class="muted" style="margin-bottom:10px">Отдельный список адресов через VPS — <b>не трогает основной</b>. Два независимых тумблера:</div>
+          <div class="row" style="gap:22px; flex-wrap:wrap">
+            <label class="row" style="gap:8px; align-items:center; cursor:pointer">
+              <span class="switch"><input type="checkbox" id="arDetect"><span class="slider"></span></span>
+              <span><b>Пополнять</b><br><span class="muted" style="font-size:.85em">детектор ловит блоки и добавляет в список</span></span>
+            </label>
+            <label class="row" style="gap:8px; align-items:center; cursor:pointer">
+              <span class="switch"><input type="checkbox" id="arRoute"><span class="slider"></span></span>
+              <span><b>Применять</b><br><span class="muted" style="font-size:.85em">список реально заворачивается через VPS</span></span>
+            </label>
+          </div>
+          <div id="arState" class="msg" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card">
+          <h2>Добавить вручную</h2>
+          <div class="muted">Домен (<code>example.com</code>, <code>geosite:тег</code>) или IP/подсеть (<code>1.2.3.4</code>, <code>1.2.3.0/24</code>). Пачкой — по одному в строке или через запятую.</div>
+          <textarea id="arInput" rows="2" placeholder="blocked-game.com&#10;185.60.216.0/22"></textarea>
+          <div class="row"><button id="arAdd">Добавить</button></div>
+          <div id="arMsg" class="msg"></div>
+        </div>
+
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h2 style="margin:0">Список авто-обхода (<span id="arCount">0</span>)</h2>
+            <div class="row" style="gap:8px; align-items:center">
+              <span id="arNew" class="st-badge" style="display:none; background:var(--good-tx); color:#fff"></span>
+              <button id="arRefresh" class="secondary" title="Обновить список" style="padding:6px 12px">↻ Обновить</button>
+            </div>
+          </div>
+          <div class="muted">Домены и IP, добавленные сюда (вручную или автоматически). Обновляется само каждые 15 c. Можно удалять.</div>
+          <div class="row" style="gap:8px; margin:8px 0; flex-wrap:wrap; align-items:center">
+            <input id="arFilter" type="search" placeholder="🔎 фильтр по имени…" style="flex:1; min-width:160px">
+            <select id="arSrcFilter" title="Источник">
+              <option value="">все источники</option>
+              <option value="manual">вручную</option>
+              <option value="syn-timeout">syn-timeout</option>
+              <option value="quic-no-response">quic</option>
+              <option value="rst-after-clienthello">rst</option>
+              <option value="no-response-after-clienthello">no-response</option>
+              <option value="legacy">старые</option>
+            </select>
+            <select id="arSort" title="Сортировка">
+              <option value="new">сначала новые</option>
+              <option value="old">сначала старые</option>
+              <option value="name">по имени</option>
+            </select>
+          </div>
+          <ul id="arList" class="list"></ul>
+        </div>
+        </div><!-- /subpane list -->
+
+        <div data-subpane="recheck" hidden>
+          <div class="card">
+            <div class="row" style="justify-content:space-between; align-items:center">
+              <h2 style="margin:0">Перепроверка списка</h2>
+              <label class="switch" title="Включить перепроверку">
+                <input type="checkbox" id="rcEnabled"><span class="slider"></span>
+              </label>
+            </div>
+            <div class="muted" style="margin-top:8px">Раз в заданное время пробит весь список <b>напрямую и через VPS</b>. Если адрес снова работает напрямую <b>два прогона подряд</b> — убирает из списка. Работает <b>независимо</b> от тумблера авто-обхода: даже если обход выключен, список чистится и сохраняется.</div>
+            <div id="rcState" class="msg" style="margin-top:8px"></div>
+          </div>
+
+          <div class="card">
+            <h2>Расписание</h2>
+            <div class="row" style="gap:14px; flex-wrap:wrap; align-items:flex-end">
+              <label>Время<br><input type="time" id="rcTime" value="04:00"></label>
+              <label>Как часто<br>
+                <select id="rcDays">
+                  <option value="daily">каждый день</option>
+                  <option value="Mon,Tue,Wed,Thu,Fri">по будням</option>
+                  <option value="Sat,Sun">по выходным</option>
+                  <option value="Mon">пн</option><option value="Tue">вт</option>
+                  <option value="Wed">ср</option><option value="Thu">чт</option>
+                  <option value="Fri">пт</option><option value="Sat">сб</option><option value="Sun">вс</option>
+                </select>
+              </label>
+              <label>Воркеров<br><input type="number" id="rcWorkers" min="1" max="200" value="30" style="width:80px"></label>
+            </div>
+            <div class="muted" style="margin-top:8px">Больше воркеров — быстрее большой список (30 хватает; 1000 адресов ≈ 2–4 мин).</div>
+            <div class="row" style="margin-top:10px; gap:8px">
+              <button id="rcSave">Сохранить</button>
+              <button id="rcRun" class="secondary">Запустить сейчас</button>
+            </div>
+            <div id="rcMsg" class="msg"></div>
+            <div id="rcNext" class="muted" style="margin-top:6px"></div>
+          </div>
+
+          <div class="card">
+            <h2>Последний прогон</h2>
+            <div id="rcStats" class="muted">ещё не запускалась</div>
+          </div>
+        </div><!-- /subpane recheck -->
+      </section>
+
+      <section data-sec="whitelist">
+        <div class="card">
+          <h2>Whitelist</h2>
+          <div class="muted">Домены, которые детектор вообще не анализирует (ни как кандидат на обход, ни тенью в лог).
+            Сид `.ru`/`.su`/`.рф` заводится автоматически при каждом старте UI. Курируемый список
+            (<code>xray/domains/*.txt</code>) приоритетнее — whitelist на такие домены не действует.</div>
+          <div style="overflow-x:auto"><table id="wlTable" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+          <div class="row" style="margin-top:10px">
+            <input id="wlPattern" placeholder="домен или суффикс, напр. example.com">
+            <select id="wlKind"><option value="suffix">suffix (домен + все поддомены)</option><option value="exact">exact (ровно этот)</option></select>
+            <input id="wlNote" placeholder="заметка (опц.)">
+            <button id="wlAdd">+ Добавить</button>
+          </div>
+          <div id="wlMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="presets">
+        <div class="card">
+          <h2>Пресеты zapret</h2>
+          <div class="muted">Стандартные (flowseal, 20 шт.) пробуются "мозгом" всегда первыми. Custom — свои,
+            добавленные вручную; пробуются, только если ни один стандартный не подошёл, доверенные и
+            успешные — первыми среди custom.</div>
+          <div id="prTable"></div>
+        </div>
+        <div class="card">
+          <h2>Добавить custom-пресет</h2>
+          <div class="row">
+            <input id="prName" placeholder="имя">
+            <select id="prProto"><option value="tcp">tcp</option><option value="udp">udp</option></select>
+            <select id="prEngine"><option value="zapret">zapret</option><option value="ciadpi">ciadpi</option><option value="vps">vps</option><option value="direct">direct</option></select>
+          </div>
+          <textarea id="prArgs" rows="2" placeholder="--dpi-desync=... аргументы nfqws"></textarea>
+          <div class="row"><button id="prAdd">+ Добавить пресет</button></div>
+          <div id="prMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="gamemode">
+        <div class="card">
+          <h2>Game Mode</h2>
+          <div class="muted">Бланкет-ACCEPT для эфемерных портов игровых серверов (1024-65535) —
+            трафик в этих портах вообще не анализируется и не десинхронизируется (без VPS, без zapret),
+            чтобы не добавлять задержку. UDP ограничен сверху 49999 — диапазон 50000-65535 закреплён
+            за голосом Discord (VPS-туннель) и Game Mode его не трогает.</div>
+          <div class="row">
+            <select id="gmMode">
+              <option value="off">Off</option>
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+              <option value="both">TCP+UDP</option>
+            </select>
+            <button id="gmApply">Применить</button>
+          </div>
+          <div id="gmMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="adguard">
+        <div class="card">
+          <h2>Реклама (AdGuard Home)</h2>
+          <div class="muted">DNS-блокировка рекламы/трекеров на самом шлюзе — работает на всех
+            устройствах дома автоматически, ничего ставить не нужно. Полная панель (фильтры,
+            список клиентов, журнал запросов) — отдельно, ссылка ниже.</div>
+          <div id="aghUnavailable" class="msg bad" hidden>AdGuard Home недоступен — проверьте сервис на шлюзе.</div>
+          <div id="aghBody" hidden>
+            <div class="row" id="aghStatsRow" style="gap:18px; flex-wrap:wrap; margin-top:8px"></div>
+            <h2 style="margin-top:16px">Топ заблокированных доменов</h2>
+            <div style="overflow-x:auto"><table id="aghBlocked" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+            <div class="row" style="margin-top:12px"><a id="aghLink" target="_blank"><button type="button">Открыть полную панель AdGuard Home ↗</button></a></div>
+          </div>
+        </div>
+      </section>
+
+      <section data-sec="monitor">
+        <div class="card">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <h2 style="margin:0">Мониторинг zapret</h2>
+            <span class="muted" style="font-size:.85em" id="monUpd"></span>
+          </div>
+          <div class="muted" style="margin-top:6px">Демоны nfqws, очереди трафика и сервисы. Обновляется каждые 3 c. Только просмотр.</div>
+        </div>
+        <div class="card" id="nightlyCard" hidden>
+          <h2>Ночная проверка — идёт сейчас</h2>
+          <div class="muted" style="margin-bottom:8px">Мозг разбирает очередь: своя группа → другая существующая → полный перебор (zapret → ciadpi → VPS).</div>
+          <div style="background:var(--muted-bg,#5552); border-radius:6px; overflow:hidden; height:22px; position:relative">
+            <div id="nightlyBar" style="background:var(--accent-bg,#59f9); height:100%; width:0%; transition:width .5s"></div>
+            <div id="nightlyBarText" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:.85em; font-weight:600"></div>
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:.85em">Живая лента (новые события сверху):</div>
+          <pre id="nightlyFeed" class="out" style="max-height:260px; overflow-y:auto; font-size:.8em"></pre>
+        </div>
+        <div class="card">
+          <h2>Мозг: группы по стратегии</h2>
+          <div class="muted" style="margin-bottom:6px">С 2026-07-23 (T-consolidate) — один демон обслуживает ВСЕ домены с одинаковой рабочей стратегией, не по домену на демон. Кликни группу, чтобы увидеть её домены.</div>
+          <div class="row" id="brainTotalsRow" style="gap:18px; flex-wrap:wrap"></div>
+          <div id="brainGroups" style="margin-top:10px"></div>
+        </div>
+        <div class="card">
+          <h2>Активные zapret-профили (<span id="monDCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Строка = сервис, внутри его каналы (TCP/UDP на своих очередях со своей стратегией). ⚙ = авто-сущность мозга. Кликни стратегию, чтобы развернуть.</div>
+          <div style="overflow-x:auto"><table id="monDaemons" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Демоны ciadpi (<span id="monCiadpiCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Второй движок десинхронизации (T-ciadpi) — REDIRECT в локальный ciadpi-процесс вместо NFQUEUE, метрики другие (нет глубины очереди), поэтому отдельная таблица.</div>
+          <div style="overflow-x:auto"><table id="monCiadpi" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Confidence-гистерезис (<span id="monReevalCount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">Раз домен подтвердил стабильную работу несколько ночей подряд — ночная переоценка перестаёт гонять его каждый раз, доверие растёт (0→30→70→100), следующая проверка отодвигается (1→3→7 суток).</div>
+          <div style="overflow-x:auto"><table id="monReeval" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Accept-only, без десинхронизации (<span id="monACount">0</span>)</h2>
+          <div class="muted" style="margin-bottom:6px">UDP-домены (T57), которым хватило снять наш собственный DROP на UDP/443 — nfqws не нужен, поэтому в «Активных профилях» их не видно.</div>
+          <div style="overflow-x:auto"><table id="monAcceptOnly" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Очереди NFQUEUE</h2>
+          <div style="overflow-x:auto"><table id="monQueues" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+        <div class="card">
+          <h2>Сервисы (<span id="monSCount">0</span>)</h2>
+          <div style="overflow-x:auto"><table id="monServices" style="width:100%; border-collapse:collapse; font-size:13px"></table></div>
+        </div>
+      </section>
+
+      <section data-sec="network">
+        <div class="card">
+          <h2>IP роутера</h2>
+          <div class="muted">Реальный шлюз вашей сети (для fix-gateway, чтобы машина не теряла интернет).</div>
+          <div class="row">
+            <input id="routerIp" type="text" placeholder="192.168.1.1" inputmode="numeric">
+            <button id="routerSave">Сохранить</button>
+          </div>
+          <div id="routerMsg" class="msg"></div>
+        </div>
+      </section>
+
+      <section data-sec="services">
+        <div class="card">
+          <h2>Управление сервисами</h2>
+          <div class="row">
+            <button id="reXray">Рестарт xray</button>
+            <button id="reZapret">Рестарт zapret</button>
+          </div>
+          <div id="svcMsg" class="msg"></div>
+        </div>
+        <div class="card">
+          <h2>Логи</h2>
+          <div class="row">
+            <select id="logSvc">
+              <option value="xray">xray</option>
+              <option value="zapret">zapret</option>
+              <option value="gateway-ui">gateway-ui (панель)</option>
+              <option value="AdGuardHome">AdGuardHome</option>
+              <option value="gateway-detector">детектор (eBPF)</option>
+              <option value="gateway-brain-worker">мозг (per-domain)</option>
+              <option value="gateway-brain-nightly">мозг: ночной проход</option>
+              <option value="gateway-brain-static-reeval">мозг: перепроверка youtube/discord/instagram</option>
+              <option value="gateway-brain-domain-actualize">мозг: актуализация списков доменов</option>
+              <option value="gateway-brain-healthcheck">мозг: healthcheck демонов</option>
+              <option value="gateway-zapret-autoupdate">автообновление движка zapret</option>
+            </select>
+            <button id="btnLogs">Показать</button>
+          </div>
+          <pre id="logOut" class="out"></pre>
+        </div>
+        <div class="card">
+          <h2>Движок zapret</h2>
+          <div class="muted">Обновление из апстрима bol-van/zapret (nfqws и т.д.). Стратегии и домены не трогаются.</div>
+          <div id="zverView" class="kv"><dd class="muted">загрузка…</dd></div>
+          <div class="row"><button id="zUpdate">Обновить движок</button></div>
+          <div id="zupMsg" class="msg"></div>
+          <details class="defaults"><summary>Лог обновления</summary><pre id="zupLog" class="out"></pre></details>
+        </div>
+        <div class="card">
+          <h2>Движок ciadpi</h2>
+          <div class="muted">Обновление из апстрима hufrea/byedpi. Останавливает активные ciadpi-группы перед сборкой, откатывается на предыдущий коммит при неудачной сборке.</div>
+          <div id="cverView" class="kv"><dd class="muted">загрузка…</dd></div>
+          <div class="row"><button id="cUpdate">Обновить движок</button></div>
+          <div id="cupMsg" class="msg"></div>
+          <details class="defaults"><summary>Лог обновления</summary><pre id="cupLog" class="out"></pre></details>
+        </div>
+        <div class="card">
+          <h2>Движок zapret2</h2>
+          <div class="muted">Обновление из апстрима bol-van/zapret2 (nfqws2). Останавливает активные zapret2-группы перед сборкой, откатывается на предыдущий коммит при неудачной сборке.</div>
+          <div id="z2verView" class="kv"><dd class="muted">загрузка…</dd></div>
+          <div class="row"><button id="z2Update">Обновить движок</button></div>
+          <div id="z2upMsg" class="msg"></div>
+          <details class="defaults"><summary>Лог обновления</summary><pre id="z2upLog" class="out"></pre></details>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    // Версия загруженного JS. Если сервер (после деплоя) сообщит другую —
+    // вкладка перезагрузится один раз сама, без ручного рефреша.
+    const BUILD_VER = "{{.Ver}}";
+    let verReloaded = false;
+    function checkVer(v) {
+      if (v && BUILD_VER && v !== BUILD_VER && !verReloaded) { verReloaded = true; location.reload(); }
+    }
+    // --- Тема ---
+    const themeBtn = document.getElementById('themeBtn');
+    function applyTheme(t) {
+      document.documentElement.dataset.theme = t;
+      themeBtn.textContent = t === 'light' ? '☀️' : '🌙';
+      try { localStorage.setItem('gw-theme', t); } catch (e) {}
+    }
+    applyTheme(document.documentElement.dataset.theme || 'dark');
+    themeBtn.onclick = () => applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+
+    // --- Подключение ---
+    const connView = document.getElementById('connView');
+    const connMsg = document.getElementById('connMsg');
+    function loadConnection() {
+      fetch('/api/connection').then(r => r.json()).then(d => {
+        if (!d.configured) { connView.innerHTML = '<dd class="muted">Не настроено — вставьте ссылку ниже.</dd>'; return; }
+        const rows = [
+          ['Адрес VPS', d.addr], ['Порт gRPC', d.port_grpc], ['Порт Vision', d.port_vision],
+          ['SNI', d.sni], ['Fingerprint', d.fingerprint],
+          ['UUID (gRPC)', d.uuid_grpc], ['Reality pubkey', d.pubkey], ['Short ID', d.short_id],
+        ];
+        connView.innerHTML = rows.filter(r => r[1]).map(r => `<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join('');
+      }).catch(() => { connView.innerHTML = '<dd class="bad">ошибка загрузки</dd>'; });
+    }
+    loadConnection();
+    // --- Сохранённые хосты (мультихост) ---
+    const connList = document.getElementById('connList');
+    let editConnId = null;
+    function loadConns() {
+      fetch('/api/connections').then(r => r.json()).then(d => {
+        const cs = d.connections || [];
+        connList.innerHTML = cs.length ? cs.map(c => `
+          <div class="strat">
+            <div class="row" style="align-items:center">
+              <span class="tag ${c.active?'q':''}">${c.active?'активен':'хост'}</span>
+              <b>${esc(c.name)}</b>
+            </div>
+            <div class="params">${esc(c.addr||'')}:${esc(c.port_grpc||'')} · uuid ${esc(c.uuid_grpc||'')}</div>
+            <div class="row">
+              ${c.active?'':`<button onclick="connActivate('${c.id}')">Сделать активным</button>`}
+              <button data-id="${c.id}" data-name="${esc(c.name)}" onclick="connEditStart(this)">Изменить</button>
+              <button class="del" onclick="connDelete('${c.id}')" title="Удалить">×</button>
+            </div>
+          </div>`).join('') : '<div class="soon">Нет сохранённых хостов — добавьте ниже.</div>';
+      }).catch(() => { connList.innerHTML = '<div class="msg bad">ошибка загрузки</div>'; });
+    }
+    loadConns();
+    window.connActivate = (id) => {
+      connMsg.className = 'msg'; connMsg.textContent = 'Переключаю + рестарт xray…';
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'activate', id }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { connMsg.className='msg good'; connMsg.textContent='✓ активен: ' + (d.addr||''); loadConns(); loadConnection(); }
+          else { connMsg.className='msg bad'; connMsg.textContent='✗ ' + (d.error||'ошибка'); }
+        }).catch(() => { connMsg.className='msg bad'; connMsg.textContent='✗ сеть'; });
+    };
+    window.connDelete = (id) => {
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams({ action:'delete', id }) }).then(() => loadConns());
+    };
+    window.connEditStart = (btn) => {
+      editConnId = btn.dataset.id;
+      document.getElementById('connName').value = btn.dataset.name || '';
+      const link = document.getElementById('connLink'); link.value = ''; link.placeholder = 'вставьте исправленную ссылку vless://…';
+      document.getElementById('connAdd').textContent = 'Сохранить изменения';
+      connMsg.className = 'msg'; connMsg.textContent = 'Редактирование «' + (btn.dataset.name||'') + '» — вставьте корректную ссылку и сохраните';
+      document.getElementById('connLink').scrollIntoView({ behavior:'smooth', block:'center' });
+    };
+    document.getElementById('connAdd').onclick = () => {
+      const link = document.getElementById('connLink').value.trim();
+      const name = document.getElementById('connName').value.trim();
+      if (!link) { connMsg.className='msg bad'; connMsg.textContent='вставьте ссылку'; return; }
+      const action = editConnId ? 'edit' : 'add';
+      const body = editConnId ? { action, id:editConnId, name, link } : { action, name, link };
+      connMsg.className = 'msg'; connMsg.textContent = editConnId ? 'Сохраняю…' : 'Добавляю…';
+      fetch('/api/connections', { method:'POST', body:new URLSearchParams(body) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) {
+            connMsg.className='msg good'; connMsg.textContent = editConnId ? '✓ хост изменён' : '✓ хост добавлен';
+            editConnId = null; document.getElementById('connAdd').textContent = 'Добавить';
+            document.getElementById('connLink').value=''; document.getElementById('connName').value='';
+            loadConns(); loadConnection();
+          } else { connMsg.className='msg bad'; connMsg.textContent='✗ ' + (d.error||'ошибка'); }
+        }).catch(() => { connMsg.className='msg bad'; connMsg.textContent='✗ сеть'; });
+    };
+
+    // --- utils ---
+    function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML; }
+
+    // --- Движок zapret (версия + обновление) ---
+    const zverView = document.getElementById('zverView');
+    const zupMsg = document.getElementById('zupMsg');
+    const zupLog = document.getElementById('zupLog');
+    let zupTimer = null;
+    function loadZver() {
+      fetch('/api/zapret/version').then(r => r.json()).then(d => {
+        zverView.innerHTML = `<dt>Коммит</dt><dd>${esc(d.commit||'?')}</dd><dt>Описание</dt><dd>${esc(d.desc||'')}</dd>`;
+        document.getElementById('zUpdate').disabled = !!d.updating;
+        if (d.updating) { zupMsg.className = 'msg'; zupMsg.textContent = 'Обновление идёт…'; }
+        zupLog.textContent = d.log_tail || '';
+        if (d.updating && !zupTimer) zupTimer = setInterval(loadZver, 4000);
+        if (!d.updating && zupTimer) { clearInterval(zupTimer); zupTimer = null; zupMsg.className='msg good'; zupMsg.textContent='✓ готово'; }
+      });
+    }
+    loadZver();
+    document.getElementById('zUpdate').onclick = () => {
+      if (!confirm('Обновить движок zapret из апстрима и пересобрать? Займёт ~минуту, zapret перезапустится.')) return;
+      zupMsg.className = 'msg'; zupMsg.textContent = 'Запускаю обновление…';
+      fetch('/api/zapret/update', { method:'POST' }).then(async r => { const d = await r.json();
+        if (r.ok) loadZver(); else { zupMsg.className='msg bad'; zupMsg.textContent='✗ '+(d.error||'ошибка'); }
+      });
+    };
+
+    // --- Движок ciadpi (версия + обновление) ---
+    function makeEngineCard(prefix, apiPath, confirmMsg) {
+      const verView = document.getElementById(prefix + 'verView');
+      const upMsg = document.getElementById(prefix + 'upMsg');
+      const upLog = document.getElementById(prefix + 'upLog');
+      const btn = document.getElementById(prefix + 'Update');
+      let timer = null;
+      function load() {
+        fetch('/api/' + apiPath + '/version').then(r => r.json()).then(d => {
+          verView.innerHTML = `<dt>Коммит</dt><dd>${esc(d.commit||'?')}</dd><dt>Описание</dt><dd>${esc(d.desc||'')}</dd>`;
+          btn.disabled = !!d.updating;
+          if (d.updating) { upMsg.className = 'msg'; upMsg.textContent = 'Обновление идёт…'; }
+          upLog.textContent = d.log_tail || '';
+          if (d.updating && !timer) timer = setInterval(load, 4000);
+          if (!d.updating && timer) { clearInterval(timer); timer = null; upMsg.className='msg good'; upMsg.textContent='✓ готово'; }
+        });
+      }
+      load();
+      btn.onclick = () => {
+        if (!confirm(confirmMsg)) return;
+        upMsg.className = 'msg'; upMsg.textContent = 'Запускаю обновление…';
+        fetch('/api/' + apiPath + '/update', { method:'POST' }).then(async r => { const d = await r.json();
+          if (r.ok) load(); else { upMsg.className='msg bad'; upMsg.textContent='✗ '+(d.error||'ошибка'); }
+        });
+      };
+    }
+    makeEngineCard('c', 'ciadpi', 'Обновить движок ciadpi из апстрима и пересобрать? Активные ciadpi-группы будут ненадолго остановлены на время сборки.');
+    makeEngineCard('z2', 'zapret2', 'Обновить движок zapret2 из апстрима и пересобрать? Активные zapret2-группы будут ненадолго остановлены на время сборки.');
+
+    // --- Whitelist ---
+    function renderWhitelist(list) {
+      const rows = (list || []).map(e => `<tr>
+        <td style="padding:5px 8px">${esc(e.pattern)}</td>
+        <td style="padding:5px 8px">${esc(e.kind)}</td>
+        <td style="padding:5px 8px" class="muted">${esc(e.note||'')}</td>
+        <td style="padding:5px 8px" class="muted">${esc(e.source)}</td>
+        <td style="padding:5px 8px"><button onclick="wlRemove(${e.id})" class="del" title="Убрать">×</button></td>
+      </tr>`).join('');
+      document.getElementById('wlTable').innerHTML =
+        '<tr><th style="text-align:left; padding:5px 8px">Паттерн</th><th style="text-align:left; padding:5px 8px">Тип</th>' +
+        '<th style="text-align:left; padding:5px 8px">Заметка</th><th style="text-align:left; padding:5px 8px">Источник</th><th></th></tr>' +
+        (rows || '<tr><td class="muted" style="padding:5px 8px" colspan="5">пусто</td></tr>');
+    }
+    function loadWhitelist() {
+      fetch('/api/whitelist').then(r => r.json()).then(d => renderWhitelist(d.whitelist)).catch(() => {});
+    }
+    window.wlRemove = (id) => {
+      fetch('/api/whitelist', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'action=remove&id='+id })
+        .then(loadWhitelist);
+    };
+    document.getElementById('wlAdd').onclick = () => {
+      const pattern = document.getElementById('wlPattern').value.trim();
+      const kind = document.getElementById('wlKind').value;
+      const note = document.getElementById('wlNote').value.trim();
+      const msg = document.getElementById('wlMsg');
+      if (!pattern) { msg.className = 'msg bad'; msg.textContent = 'впишите домен'; return; }
+      fetch('/api/whitelist', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'action=add&pattern='+encodeURIComponent(pattern)+'&kind='+encodeURIComponent(kind)+'&note='+encodeURIComponent(note) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ добавлено'; document.getElementById('wlPattern').value=''; document.getElementById('wlNote').value=''; loadWhitelist(); }
+          else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
+        }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
+    };
+    document.querySelector('.sidebar a[data-nav="whitelist"]').addEventListener('click', loadWhitelist);
+    loadWhitelist();
+
+    // --- Пресеты ---
+    function renderPresets(list) {
+      const rows = (list || []).map(p => `<tr>
+        <td style="padding:5px 8px">${esc(p.name)}</td>
+        <td style="padding:5px 8px"><span class="st-badge" style="background:var(--muted-bg,#5559)">${esc(p.engine||'zapret')}</span></td>
+        <td style="padding:5px 8px">${esc(p.proto)}</td>
+        <td style="padding:5px 8px">${p.source === 'custom' ? '<span class="st-badge">custom</span>' : '<span class="muted">standard</span>'}</td>
+        <td style="padding:5px 8px">${p.trusted ? '<span class="st-badge" style="background:var(--good-tx,#2a7)">trusted</span>' : ''}</td>
+        <td style="padding:5px 8px" class="muted">${p.success_count||0}</td>
+        <td style="padding:5px 8px" class="muted">${(p.score!==undefined?p.score:100).toFixed ? p.score.toFixed(0) : p.score}</td>
+        <td style="padding:5px 8px">${stratCellPr(p.args)}</td>
+      </tr>`).join('');
+      document.getElementById('prTable').innerHTML =
+        '<div style="overflow-x:auto"><table style="width:100%; border-collapse:collapse; font-size:13px">' +
+        '<tr><th style="text-align:left; padding:5px 8px">Имя</th><th style="text-align:left; padding:5px 8px">Движок</th><th style="text-align:left; padding:5px 8px">Протокол</th>' +
+        '<th style="text-align:left; padding:5px 8px">Тип</th><th style="text-align:left; padding:5px 8px">Доверенный</th>' +
+        '<th style="text-align:left; padding:5px 8px">Успехов</th><th style="text-align:left; padding:5px 8px">Score</th><th style="text-align:left; padding:5px 8px">Аргументы</th></tr>' +
+        (rows || '<tr><td class="muted" style="padding:5px 8px" colspan="8">пусто</td></tr>') + '</table></div>';
+    }
+    function stratCellPr(s) {
+      if (!s) return '—';
+      const short = s.length > 46 ? esc(s.slice(0, 46)) + '…' : esc(s);
+      return `<details><summary style="cursor:pointer; list-style:none"><code style="font-size:.85em">${short}</code></summary><code style="font-size:.85em; white-space:normal; word-break:break-word">${esc(s)}</code></details>`;
+    }
+    function loadPresets() {
+      fetch('/api/presets').then(r => r.json()).then(d => renderPresets(d.presets)).catch(() => {});
+    }
+    document.getElementById('prAdd').onclick = () => {
+      const name = document.getElementById('prName').value.trim();
+      const proto = document.getElementById('prProto').value;
+      const args = document.getElementById('prArgs').value.trim();
+      const engine = document.getElementById('prEngine').value;
+      const msg = document.getElementById('prMsg');
+      if (!name || !args) { msg.className = 'msg bad'; msg.textContent = 'имя и аргументы обязательны'; return; }
+      fetch('/api/presets', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'action=add&name='+encodeURIComponent(name)+'&proto='+encodeURIComponent(proto)+'&engine='+encodeURIComponent(engine)+'&args='+encodeURIComponent(args) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ добавлено'; document.getElementById('prName').value=''; document.getElementById('prArgs').value=''; loadPresets(); }
+          else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
+        }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
+    };
+    document.querySelector('.sidebar a[data-nav="presets"]').addEventListener('click', loadPresets);
+    loadPresets();
+
+    // --- Game Mode ---
+    function loadGameMode() {
+      fetch('/api/game-mode').then(r => r.json()).then(d => { document.getElementById('gmMode').value = d.mode || 'off'; }).catch(() => {});
+    }
+    document.getElementById('gmApply').onclick = () => {
+      const mode = document.getElementById('gmMode').value;
+      const msg = document.getElementById('gmMsg');
+      fetch('/api/game-mode', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'mode='+encodeURIComponent(mode) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ режим: '+d.mode; }
+          else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
+        }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
+    };
+    document.querySelector('.sidebar a[data-nav="gamemode"]').addEventListener('click', loadGameMode);
+    loadGameMode();
+
+    // --- Режим работы (VPS/zapret) ---
+    function loadVPSMode() {
+      fetch('/api/vps-mode').then(r => r.json()).then(d => { document.getElementById('vmMode').value = d.mode || 'on'; }).catch(() => {});
+    }
+    document.getElementById('vmApply').onclick = () => {
+      const mode = document.getElementById('vmMode').value;
+      const msg = document.getElementById('vmMsg');
+      fetch('/api/vps-mode', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'mode='+encodeURIComponent(mode) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { msg.className='msg good'; msg.textContent='✓ режим: '+(d.mode==='on'?'VPS + DPI':'только DPI'); }
+          else { msg.className='msg bad'; msg.textContent='✗ '+(d.error||'ошибка'); }
+        }).catch(() => { msg.className='msg bad'; msg.textContent='✗ сеть'; });
+    };
+    document.querySelector('.sidebar a[data-nav="vpsmode"]').addEventListener('click', loadVPSMode);
+    loadVPSMode();
+
+    // --- Сервисы (per-service zapret/VPS) ---
+    let zapretSvcCache = [];
+    let domainEngineCache = null; // domain(lower) -> {engine, group_id} — строится из /api/monitor.brain_groups
+    function domainEngineMap() {
+      if (domainEngineCache) return Promise.resolve(domainEngineCache);
+      return fetch('/api/monitor').then(r => r.json()).then(d => {
+        const map = {};
+        (d.brain_groups || []).forEach(g => {
+          (g.domains || []).forEach(dom => { map[dom.toLowerCase()] = { engine: g.engine, group_id: g.group_id }; });
+        });
+        domainEngineCache = map;
+        return map;
+      });
+    }
+    const svcDomainsTimers = {}; // id -> intervalId, живёт, только пока панель развёрнута
+    function renderZapretServices(list) {
+      const box = document.getElementById('zapretSvcList');
+      Object.values(svcDomainsTimers).forEach(clearInterval);
+      for (const k in svcDomainsTimers) delete svcDomainsTimers[k];
+      if (!list.length) { box.innerHTML = '<div class="muted">сервисов нет</div>'; return; }
+      box.innerHTML = list.map(s => `
+        <div class="card" style="margin-bottom:10px">
+          <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap">
+            <div><b>${esc(s.name || s.id)}</b>
+              <span class="muted" style="margin-left:8px">доменов: ${(s.domains||[]).length}</span></div>
+            <div class="row">
+              <select data-svc-mode="${esc(s.id)}">
+                <option value="vps" ${s.mode === 'vps' ? 'selected' : ''}>VPS</option>
+                <option value="zapret" ${s.mode !== 'vps' ? 'selected' : ''}>DPI (zapret/ciadpi/zapret2)</option>
+              </select>
+              <button data-svc-apply="${esc(s.id)}">Применить</button>
+            </div>
+          </div>
+          <details class="svc-domains-details" data-svc="${esc(s.id)}" style="margin-top:10px">
+            <summary>Домены и способ обхода →</summary>
+            <div class="svc-domains-body" style="margin-top:8px"><div class="muted">загрузка…</div></div>
+          </details>
+        </div>
+      `).join('');
+      box.querySelectorAll('[data-svc-apply]').forEach(btn => {
+        btn.onclick = () => applyZapretServiceMode(btn.dataset.svcApply);
+      });
+      box.querySelectorAll('.svc-domains-details').forEach(det => {
+        det.addEventListener('toggle', () => {
+          const id = det.dataset.svc;
+          if (det.open) {
+            renderServiceDomainsBody(id);
+            svcDomainsTimers[id] = setInterval(() => renderServiceDomainsBody(id, true), 3000);
+          } else if (svcDomainsTimers[id]) {
+            clearInterval(svcDomainsTimers[id]);
+            delete svcDomainsTimers[id];
+          }
+        });
+      });
+    }
+    function engineBadge(engine) {
+      const colors = { zapret: 'var(--muted-bg,#5559)', ciadpi: 'var(--accent-bg,#59f9)', zapret2: 'var(--bad-bg,#f959)', vps: 'var(--good-bg,#5f59)', direct: 'var(--faint-bg,#8885)' };
+      const labels = { zapret: 'zapret', ciadpi: 'ciadpi', zapret2: 'zapret2', vps: 'VPS', direct: 'direct' };
+      return `<span class="st-badge" style="background:${colors[engine]||'var(--muted-bg,#5559)'}">${labels[engine]||engine}</span>`;
+    }
+    function renderServiceDomainsBody(id, isRefresh) {
+      const svc = zapretSvcCache.find(s => s.id === id);
+      const det = document.querySelector(`.svc-domains-details[data-svc="${CSS.escape(id)}"]`);
+      if (!svc || !det) return;
+      const body = det.querySelector('.svc-domains-body');
+      if (isRefresh) domainEngineCache = null; // при живом автообновлении — свежие данные из /api/monitor
+      domainEngineMap().then(map => {
+        const rows = (svc.domains || []).slice().sort().map(d => {
+          const hit = map[d.toLowerCase()];
+          const engine = hit ? hit.engine : (svc.mode === 'vps' ? 'vps' : 'direct');
+          const group = hit ? esc(hit.group_id) : '<span class="muted">—</span>';
+          return [esc(d), engineBadge(engine), group];
+        });
+        body.innerHTML = '<table></table>';
+        tbl(body.querySelector('table'), ['Домен', 'Обход', 'Группа'], rows.length ? rows : [['<span class="muted">пусто</span>', '', '']]);
+      }).catch(() => { body.innerHTML = '<div class="msg bad">✗ не удалось загрузить</div>'; });
+    }
+    function loadZapretServices() {
+      domainEngineCache = null; // сбрасываем при каждом заходе на вкладку — данные могли устареть
+      fetch('/api/zapret/services').then(r => r.json()).then(d => {
+        // quic_fallback — не сервис с доменами, а стратегия по умолчанию для
+        // ВСЕГО непойманного QUIC/UDP-443 (domains всегда []); нечего тут
+        // переключать/показывать — просто шумит в списке карточек.
+        zapretSvcCache = (d.services || []).filter(s => s.id !== 'quic_fallback');
+        renderZapretServices(zapretSvcCache);
+      }).catch(() => {
+        const msg = document.getElementById('zapretSvcMsg');
+        msg.className = 'msg bad'; msg.textContent = '✗ не удалось загрузить сервисы';
+      });
+    }
+    function applyZapretServiceMode(id) {
+      const sel = document.querySelector(`[data-svc-mode="${CSS.escape(id)}"]`);
+      const mode = sel.value;
+      const msg = document.getElementById('zapretSvcMsg');
+      msg.className = 'msg'; msg.textContent = 'применяю…';
+      const updated = zapretSvcCache.map(s => s.id === id ? Object.assign({}, s, { mode }) : s);
+      fetch('/api/zapret/services', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) })
+        .then(async r => { const d = await r.json().catch(() => ({}));
+          if (r.ok) { msg.className = 'msg good'; msg.textContent = '✓ ' + id + ' → ' + (mode === 'vps' ? 'VPS' : 'zapret') + ' применено'; loadZapretServices(); }
+          else { msg.className = 'msg bad'; msg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { msg.className = 'msg bad'; msg.textContent = '✗ сеть'; });
+    }
+    document.querySelector('.sidebar a[data-nav="zapret-svc"]').addEventListener('click', loadZapretServices);
+
+    // --- Реклама (AdGuard Home) ---
+    function loadAdguard() {
+      fetch('/api/adguard').then(r => r.json()).then(d => {
+        document.getElementById('aghUnavailable').hidden = !!d.available;
+        document.getElementById('aghBody').hidden = !d.available;
+        if (!d.available) return;
+        const st = d.stats || {};
+        const queries = (st.num_dns_queries||0), blocked = (st.num_blocked_filtering||0)+(st.num_replaced_safebrowsing||0)+(st.num_replaced_parental||0);
+        const pct = queries ? (100*blocked/queries).toFixed(1) : '0';
+        document.getElementById('aghStatsRow').innerHTML = [
+          ['Запросов (24ч)', queries.toLocaleString()],
+          ['Заблокировано', blocked.toLocaleString()],
+          ['Доля блокировок', pct+'%'],
+        ].map(([label,val]) => `<div><div class="muted" style="font-size:.8em">${label}</div><div style="font-size:1.3em; font-weight:600">${val}</div></div>`).join('');
+        const top = (st.top_blocked_domains || []).slice(0, 15);
+        tbl(document.getElementById('aghBlocked'), ['Домен', 'Запросов'],
+          top.length ? top.map(o => { const k = Object.keys(o)[0]; return [esc(k), o[k]]; })
+                     : [['<span class="muted">пока пусто</span>', '']]);
+        document.getElementById('aghLink').href = d.ui_url || '#';
+      }).catch(() => {
+        document.getElementById('aghUnavailable').hidden = false;
+        document.getElementById('aghBody').hidden = true;
+      });
+    }
+    document.querySelector('.sidebar a[data-nav="adguard"]').addEventListener('click', loadAdguard);
+    loadAdguard();
+
+
+    // --- Навигация ---
+    const navItems = document.querySelectorAll('.sidebar a[data-nav]');
+    const sections = document.querySelectorAll('section[data-sec]');
+    function show(name) {
+      let found = false;
+      sections.forEach(s => { const on = s.dataset.sec === name; s.hidden = !on; if (on) found = true; });
+      if (!found) { name = 'overview'; sections.forEach(s => s.hidden = s.dataset.sec !== name); }
+      navItems.forEach(n => n.classList.toggle('active', n.dataset.nav === name));
+      try { localStorage.setItem('gw-sec', name); } catch (e) {}
+    }
+    navItems.forEach(n => n.addEventListener('click', () => show(n.dataset.nav)));
+    show((() => { try { return localStorage.getItem('gw-sec'); } catch (e) { return null; } })() || 'overview');
+
+    // --- Мониторинг zapret (read-only, авто-обновление 3с) ---
+    const monSec = document.querySelector('section[data-sec="monitor"]');
+    function tbl(el, headers, rows) {
+      const th = '<tr>' + headers.map(h => `<th style="text-align:left; padding:5px 8px; border-bottom:1px solid var(--border,#333); opacity:.7">${h}</th>`).join('') + '</tr>';
+      const tr = rows.map(r => '<tr>' + r.map(c => `<td style="padding:5px 8px; border-bottom:1px solid var(--border,#2222)">${c}</td>`).join('') + '</tr>').join('');
+      el.innerHTML = th + tr;
+    }
+    const svcBadge = m => `<span class="st-badge">${({vps:'VPS', ciadpi:'ciadpi'})[m] || 'zapret'}</span>`;
+    function stratCell(s) {
+      if (!s) return '—';
+      const short = s.length > 46 ? esc(s.slice(0, 46)) + '…' : esc(s);
+      return `<details><summary style="cursor:pointer; list-style:none"><code style="font-size:.85em">${short}</code></summary><code style="font-size:.85em; white-space:normal; word-break:break-word">${esc(s)}</code></details>`;
+    }
+    function renderMonitor(d) {
+      checkVer(d.ver); // авто-обновление вкладки после деплоя
+      const bt = d.brain_totals || {groups:0, domains:0, daemons:0, memory_mb:0};
+      document.getElementById('brainTotalsRow').innerHTML = [
+        ['Групп', bt.groups], ['Доменов', bt.domains], ['Демонов nfqws', bt.daemons], ['Память', bt.memory_mb.toFixed(1)+' МБ']
+      ].map(([label,val]) => `<div><div class="muted" style="font-size:.8em">${label}</div><div style="font-size:1.3em; font-weight:600">${val}</div></div>`).join('');
+      const groups = (d.brain_groups || []).slice().sort((a,b)=>b.count-a.count);
+      const engColors = {ciadpi:'var(--accent-bg,#59f9)', zapret2:'var(--bad-bg,#f959)'};
+      const engBadge = e => `<span class="st-badge" style="background:${engColors[e]||'var(--muted-bg,#5559)'}">${esc(e||'zapret')}</span>`;
+      document.getElementById('brainGroups').innerHTML = groups.length ? groups.map(g => `
+        <details style="margin:4px 0">
+          <summary style="cursor:pointer">${engBadge(g.engine)} <span class="st-badge">${esc(g.proto)}</span> ${g.queue!=null?'очередь '+g.queue:(g.port!=null?'порт '+g.port:'accept-only')} — <b>${g.count}</b> ${g.count===1?'домен':'доменов'}</summary>
+          <div class="muted" style="margin:6px 0 0 16px; font-size:.85em">${g.domains.map(esc).join(', ')}</div>
+        </details>`).join('') : '<span class="muted">пусто</span>';
+      // группируем профили по сервису: строка = сервис, внутри его каналы (proto·очередь·стратегия)
+      const bySvc = {};
+      for (const p of (d.profiles || [])) { (bySvc[p.service||'—'] ||= []).push(p); }
+      const svcNames = Object.keys(bySvc).sort();
+      document.getElementById('monDCount').textContent = svcNames.length;
+      tbl(document.getElementById('monDaemons'), ['Сервис', 'Каналы (протокол · очередь · стратегия)'],
+        svcNames.map(name => {
+          const chans = bySvc[name].sort((a,b)=>a.qnum-b.qnum).map(p =>
+            `<div style="margin:2px 0"><span class="st-badge">${p.proto}</span> <span class="muted">очередь ${p.qnum}${p.l7?' · '+esc(p.l7):''}</span> ${stratCell(p.strategy)}</div>`
+          ).join('');
+          return [`<b>${esc(name)}</b>`, chans];
+        }));
+      const cp = (d.ciadpi_profiles || []);
+      document.getElementById('monCiadpiCount').textContent = cp.length;
+      tbl(document.getElementById('monCiadpi'), ['Домены', 'Порт', 'PID', 'RSS', 'Стратегия'],
+        cp.length ? cp.map(x => [esc(x.domains || '—'), x.port, x.pid, (x.rss_kb ? (x.rss_kb/1024).toFixed(1)+' МБ' : '—'), stratCell(x.strategy)])
+                   : [['<span class="muted">пусто</span>', '', '', '', '']]);
+      const rs = (d.reeval_schedule || []).slice().sort((a,b) => (b.confidence||0) - (a.confidence||0));
+      document.getElementById('monReevalCount').textContent = rs.length;
+      const confBadge = c => {
+        const color = c >= 100 ? 'var(--good-tx,#2a7)' : c >= 70 ? 'var(--accent-bg,#59f9)' : c >= 30 ? 'var(--muted-bg,#5559)' : 'var(--bad-bg,#f559)';
+        return `<span class="st-badge" style="background:${color}">${c}</span>`;
+      };
+      const fmtDate = s => s ? new Date(s).toLocaleString() : '—';
+      tbl(document.getElementById('monReeval'), ['Домен', 'Движок', 'Стратегия', 'Confidence', 'Последняя проверка', 'Следующая проверка'],
+        rs.length ? rs.map(x => [esc(x.domain), esc(x.engine||'—'), esc(x.strategy_name||'—'), confBadge(x.confidence||0), fmtDate(x.last_reeval_at), fmtDate(x.next_reeval_at)])
+                   : [['<span class="muted">пусто</span>', '', '', '', '', '']]);
+      const ao = (d.accept_only || []);
+      document.getElementById('monACount').textContent = ao.length;
+      tbl(document.getElementById('monAcceptOnly'), ['Домен', 'Протокол'],
+        ao.length ? ao.map(x => [esc(x.domain), `<span class="st-badge">${esc(x.proto)}</span>`])
+                   : [['<span class="muted">пусто</span>', '']]);
+      const qs = (d.queues || []).sort((a, b) => a.qnum - b.qnum);
+      tbl(document.getElementById('monQueues'), ['Очередь', 'Пакетов', 'В очереди', 'Дропов', 'User-drop'],
+        qs.map(x => [x.qnum, (x.packets||0).toLocaleString(), x.queued, x.dropped ? `<span style="color:var(--bad-tx)">${x.dropped}</span>` : 0, x.user_dropped || 0]));
+      const sv = (d.services || []);
+      document.getElementById('monSCount').textContent = sv.length;
+      tbl(document.getElementById('monServices'), ['Сервис', 'Режим', 'Доменов', 'Каналы (очереди)'],
+        sv.map(x => [esc(x.name || x.id), svcBadge(x.mode), x.domains,
+          (x.channels && x.channels.length) ? x.channels.map(c => `<code style="font-size:.82em">${esc(c)}</code>`).join('<br>') : '<span class="muted">— (через VPS)</span>']));
+      document.getElementById('monUpd').textContent = 'обновлено ' + new Date().toLocaleTimeString();
+    }
+    function loadMonitor() {
+      fetch('/api/monitor').then(r => r.json()).then(renderMonitor).catch(() => {});
+    }
+    setInterval(() => { if (document.visibilityState === 'visible' && monSec && !monSec.hidden) loadMonitor(); }, 3000);
+    document.querySelector('.sidebar a[data-nav="monitor"]').addEventListener('click', loadMonitor);
+
+    // --- Прогресс ночной проверки (T-progress-ui) — карточка появляется, только
+    // когда есть что показывать (running=true), обновление каждые 2с для ощущения
+    // "в реальном времени".
+    function loadNightlyProgress() {
+      fetch('/api/nightly-progress').then(r => r.json()).then(p => {
+        const card = document.getElementById('nightlyCard');
+        if (!p.running) { card.hidden = true; return; }
+        card.hidden = false;
+        const pct = p.total > 0 ? Math.min(100, Math.round(p.done / p.total * 100)) : 0;
+        document.getElementById('nightlyBar').style.width = pct + '%';
+        document.getElementById('nightlyBarText').textContent = `${p.done} / ${p.total} (${pct}%)`;
+        document.getElementById('nightlyFeed').textContent = (p.feed || []).join('\n');
+      }).catch(() => {});
+    }
+    setInterval(() => { if (document.visibilityState === 'visible' && monSec && !monSec.hidden) loadNightlyProgress(); }, 2000);
+    document.querySelector('.sidebar a[data-nav="monitor"]').addEventListener('click', loadNightlyProgress);
+    loadNightlyProgress();
+
+    // --- Обзор: ping ---
+    fetch('/api/ping').then(r => r.json()).then(d => {
+      const el = document.getElementById('ping');
+      el.textContent = d.status; el.classList.add('ok');
+    }).catch(() => { document.getElementById('ping').textContent = 'ошибка'; });
+
+    // --- Сеть: IP роутера ---
+    const rIp = document.getElementById('routerIp');
+    const rMsg = document.getElementById('routerMsg');
+    fetch('/api/router-ip').then(r => r.json()).then(d => { if (d.router_ip) rIp.value = d.router_ip; });
+    document.getElementById('routerSave').onclick = () => {
+      rMsg.className = 'msg'; rMsg.textContent = 'Применяю…';
+      const body = new URLSearchParams({ router_ip: rIp.value.trim() });
+      fetch('/api/router-ip', { method:'POST', body }).then(async r => {
+        const d = await r.json();
+        if (r.ok) { rMsg.className = 'msg good'; rMsg.textContent = '✓ ' + (d.output || 'сохранено'); }
+        else { rMsg.className = 'msg bad'; rMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+      }).catch(() => { rMsg.className = 'msg bad'; rMsg.textContent = '✗ сеть'; });
+    };
+
+    // --- Домены ---
+    const dInput = document.getElementById('domInput');
+    const dMsg = document.getElementById('domMsg');
+    const dList = document.getElementById('domList');
+    function renderDomains(list) {
+      dList.innerHTML = '';
+      if (!list || !list.length) { dList.innerHTML = '<div class="empty">Пока пусто — добавь сайт выше.</div>'; return; }
+      for (const d of list) {
+        const li = document.createElement('li');
+        const span = document.createElement('span'); span.textContent = d;
+        const btn = document.createElement('button'); btn.className = 'del'; btn.textContent = '×';
+        btn.title = 'Удалить'; btn.onclick = () => domRemove(d);
+        li.append(span, btn); dList.append(li);
+      }
+    }
+    function domRemove(domain) {
+      dMsg.className = 'msg'; dMsg.textContent = 'Удаляю…';
+      fetch('/api/domains', { method:'POST', body:new URLSearchParams({ action:'remove', domain }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { dMsg.className = 'msg good'; dMsg.textContent = '✓ удалено'; renderDomains(d.domains); }
+          else { dMsg.className = 'msg bad'; dMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        }).catch(() => { dMsg.className = 'msg bad'; dMsg.textContent = '✗ сеть'; });
+    }
+    document.getElementById('domAdd').onclick = () => {
+      if (!dInput.value.trim()) return;
+      dMsg.className = 'msg'; dMsg.textContent = 'Применяю…';
+      fetch('/api/domains', { method:'POST', body:new URLSearchParams({ action:'add', domain:dInput.value }) })
+        .then(async r => {
+          const d = await r.json();
+          if (!r.ok) { dMsg.className = 'msg bad'; dMsg.textContent = '✗ ' + (d.error || 'ошибка'); return; }
+          const parts = [];
+          if (d.added?.length) parts.push('добавлено ' + d.added.length);
+          if (d.skipped_present?.length) parts.push('уже было ' + d.skipped_present.length);
+          if (d.skipped_default?.length) parts.push('в списках по умолчанию ' + d.skipped_default.length);
+          if (d.invalid?.length) parts.push('невалидно ' + d.invalid.length + ' (' + d.invalid.join(', ') + ')');
+          dMsg.className = 'msg ' + (d.invalid?.length ? 'bad' : 'good');
+          dMsg.textContent = (d.added?.length ? '✓ ' : '') + (parts.join(' · ') || 'без изменений');
+          renderDomains(d.domains);
+          if (d.added?.length) dInput.value = '';
+        }).catch(() => { dMsg.className = 'msg bad'; dMsg.textContent = '✗ сеть'; });
+    };
+    const defList = document.getElementById('defList');
+    const defCount = document.getElementById('defCount');
+    function renderDefaults(list) {
+      list = list || [];
+      defCount.textContent = list.length;
+      defList.innerHTML = '';
+      for (const d of list) { const li = document.createElement('li'); li.textContent = d; defList.append(li); }
+    }
+    fetch('/api/domains').then(r => r.json()).then(d => { renderDomains(d.domains); renderDefaults(d.defaults); });
+
+    // --- Авто-обход (отдельный список + тумблер) ---
+    const arDetect = document.getElementById('arDetect');
+    const arRoute = document.getElementById('arRoute');
+    const arState = document.getElementById('arState');
+    const arInput = document.getElementById('arInput');
+    const arMsg = document.getElementById('arMsg');
+    const arList = document.getElementById('arList');
+    const arCount = document.getElementById('arCount');
+    const isIP = v => /^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v);
+    const arFilter = document.getElementById('arFilter');
+    const arSrcFilter = document.getElementById('arSrcFilter');
+    const arSort = document.getElementById('arSort');
+    let arEntries = [];
+    let arSeen = null;            // множество известных addr (null = ещё не загружали)
+    let arNewSet = new Set();     // addr, подсветить как новые в этом рендере
+    const srcLabel = { manual:'вручную', 'syn-timeout':'syn', 'quic-no-response':'quic',
+      'rst-after-clienthello':'rst', 'no-response-after-clienthello':'no-resp', legacy:'старое' };
+    function relTime(iso) {
+      if (!iso) return '';
+      const t = Date.parse(iso); if (isNaN(t)) return '';
+      const s = Math.max(0, (Date.now() - t) / 1000);
+      if (s < 60) return 'только что';
+      if (s < 3600) return Math.floor(s/60) + ' мин назад';
+      if (s < 86400) return Math.floor(s/3600) + ' ч назад';
+      return Math.floor(s/86400) + ' дн назад';
+    }
+    function renderAutoroute(d) {
+      if (d) {
+        arDetect.checked = !!d.detect;
+        arRoute.checked = !!d.route;
+        const on = d.detect || d.route;
+        arState.className = 'msg ' + (on ? 'good' : '');
+        arState.textContent =
+          d.detect && d.route ? '✓ пополняется и применяется' :
+          d.detect ? '◐ пополняется, но НЕ применяется (только собираем список)' :
+          d.route ? '◐ применяется, но НЕ пополняется (список зафиксирован)' :
+          'выключено — список сохранён, но не активен';
+        arEntries = (d.entries || []).map(e => typeof e === 'string' ? { addr:e } : e);
+      }
+      const q = arFilter.value.trim().toLowerCase();
+      const src = arSrcFilter.value;
+      let list = arEntries.filter(e =>
+        (!q || (e.addr||'').toLowerCase().includes(q)) &&
+        (!src || (e.source||'legacy') === src));
+      const sort = arSort.value;
+      list.sort((a, b) => sort === 'name' ? (a.addr||'').localeCompare(b.addr||'')
+        : (sort === 'old' ? 1 : -1) * ((Date.parse(b.added)||0) - (Date.parse(a.added)||0)));
+      arCount.textContent = arEntries.length + (list.length !== arEntries.length ? ` · показано ${list.length}` : '');
+      arList.innerHTML = '';
+      for (const e of list) {
+        const li = document.createElement('li');
+        if (arNewSet.has(e.addr)) li.className = 'just-added';
+        const badge = isIP(e.addr) ? 'IP' : 'домен';
+        const src = e.source ? `<span class="st-badge" title="источник">${esc(srcLabel[e.source]||e.source)}</span>` : '';
+        const when = e.added ? `<span class="muted" style="font-size:.85em" title="${esc(e.added)}">· ${relTime(e.added)}</span>` : '';
+        li.innerHTML = `<span><span class="st-badge">${badge}</span> ${src} ${esc(e.addr)} ${when}</span>`;
+        const del = document.createElement('button');
+        del.className = 'del'; del.textContent = '×'; del.title = 'Удалить';
+        del.onclick = () => arPost({ action:'remove', value:e.addr });
+        li.append(del);
+        arList.append(li);
+      }
+      if (!list.length) arList.innerHTML = `<li class="muted">${arEntries.length ? 'ничего не найдено' : 'пусто'}</li>`;
+    }
+    arFilter.oninput = () => renderAutoroute();
+    arSrcFilter.onchange = () => renderAutoroute();
+    arSort.onchange = () => renderAutoroute();
+    function arPost(params) {
+      return fetch('/api/autoroute', { method:'POST', body:new URLSearchParams(params) })
+        .then(async r => { const d = await r.json();
+          if (!r.ok) { arMsg.className='msg bad'; arMsg.textContent='✗ '+(d.error||'ошибка'); return; }
+          renderAutoroute(d);
+        }).catch(() => { arMsg.className='msg bad'; arMsg.textContent='✗ сеть'; });
+    }
+    const arSetMode = () => arPost({ action:'mode', detect: arDetect.checked, route: arRoute.checked });
+    arDetect.onchange = arSetMode;
+    arRoute.onchange = arSetMode;
+    document.getElementById('arAdd').onclick = () => {
+      const v = arInput.value.trim(); if (!v) return;
+      arMsg.className='msg'; arMsg.textContent='Добавляю…';
+      arPost({ action:'add', value:v }).then(() => { arInput.value=''; if (arMsg.textContent==='Добавляю…'){arMsg.className='msg good';arMsg.textContent='✓ добавлено';} });
+    };
+    const arNew = document.getElementById('arNew');
+    function loadAutoroute() {
+      return fetch('/api/autoroute').then(r => {
+        const ct = r.headers.get('content-type') || '';
+        if (r.redirected || !ct.includes('json')) throw 'auth';
+        return r.json();
+      }).then(d => {
+        const addrs = (d.entries || []).map(e => typeof e === 'string' ? e : e.addr);
+        arNewSet = new Set();
+        if (arSeen) for (const a of addrs) if (!arSeen.has(a)) arNewSet.add(a);
+        arSeen = new Set(addrs);
+        if (arNewSet.size) {
+          arNew.textContent = '+' + arNewSet.size + ' новое';
+          arNew.style.display = '';
+          clearTimeout(arNew._t); arNew._t = setTimeout(() => { arNew.style.display = 'none'; }, 8000);
+        }
+        renderAutoroute(d);
+      }).catch(e => {
+        if (e === 'auth') { arState.className = 'msg bad'; arState.textContent = 'сессия истекла — обновите страницу и войдите'; }
+      });
+    }
+    document.getElementById('arRefresh').onclick = loadAutoroute;
+    loadAutoroute();
+    // авто-обновление списка, только когда вкладка видима и список открыт
+    setInterval(() => {
+      if (document.visibilityState === 'visible' && arList.offsetParent) loadAutoroute();
+    }, 15000);
+
+    // --- под-вкладки Авто-обхода: Список / Перепроверка ---
+    document.querySelectorAll('#arSubnav .subtab').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('#arSubnav .subtab').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('[data-subpane]').forEach(p => p.hidden = p.getAttribute('data-subpane') !== btn.dataset.sub);
+        if (btn.dataset.sub === 'recheck') loadRecheck();
+      };
+    });
+
+    // --- Перепроверка (расписание + запуск) ---
+    const rcEnabled = document.getElementById('rcEnabled');
+    const rcState = document.getElementById('rcState');
+    const rcTime = document.getElementById('rcTime');
+    const rcDays = document.getElementById('rcDays');
+    const rcWorkers = document.getElementById('rcWorkers');
+    const rcMsg = document.getElementById('rcMsg');
+    const rcNext = document.getElementById('rcNext');
+    const rcStats = document.getElementById('rcStats');
+    function renderRecheck(d) {
+      const c = d.cfg || {};
+      rcEnabled.checked = !!c.enabled;
+      rcState.className = 'msg ' + (c.enabled ? 'good' : '');
+      rcState.textContent = c.enabled ? '✓ включена — список чистится по расписанию' : 'выключена — список остаётся, но не проверяется';
+      if (c.time) rcTime.value = c.time;
+      if (c.days) rcDays.value = c.days;
+      if (c.workers) rcWorkers.value = c.workers;
+      rcNext.textContent = (c.enabled && d.next && d.next !== '0' && d.next.length > 5) ? 'Следующий запуск: ' + d.next : '';
+      if (c.last_run) {
+        rcStats.innerHTML = `Запущена <b>${relTime(c.last_run)}</b> · проверено ${c.last_checked||0}` +
+          ` · снято ${c.last_removed||0}` + (c.last_pending ? ` · помечено ${c.last_pending}` : '') +
+          ` · за ${c.last_duration_sec||0}с`;
+      } else {
+        rcStats.textContent = 'ещё не запускалась';
+      }
+    }
+    function loadRecheck() {
+      fetch('/api/recheck').then(r => r.json()).then(renderRecheck).catch(() => {});
+    }
+    function rcPost(params) {
+      rcMsg.className = 'msg'; rcMsg.textContent = '…';
+      return fetch('/api/recheck', { method:'POST', body:new URLSearchParams(params) })
+        .then(async r => { const d = await r.json();
+          if (!r.ok) { rcMsg.className='msg bad'; rcMsg.textContent='✗ '+(d.error||'ошибка'); return; }
+          renderRecheck(d); rcMsg.className='msg good'; rcMsg.textContent='✓ сохранено';
+        }).catch(() => { rcMsg.className='msg bad'; rcMsg.textContent='✗ сеть'; });
+    }
+    rcEnabled.onchange = () => saveRecheck();
+    document.getElementById('rcSave').onclick = () => saveRecheck();
+    function saveRecheck() {
+      rcPost({ action:'save', enabled: rcEnabled.checked, time: rcTime.value, days: rcDays.value, workers: rcWorkers.value });
+    }
+    document.getElementById('rcRun').onclick = () => {
+      rcMsg.className='msg'; rcMsg.textContent='Запускаю… (обновите через минуту)';
+      fetch('/api/recheck', { method:'POST', body:new URLSearchParams({ action:'run' }) })
+        .then(() => { rcMsg.className='msg good'; rcMsg.textContent='✓ запущена — статистика обновится по завершении'; })
+        .catch(() => { rcMsg.className='msg bad'; rcMsg.textContent='✗ сеть'; });
+    };
+
+    // --- Обзор: статус + exit IP + smoke ---
+    const svcEl = document.getElementById('svc');
+    const mMsg = document.getElementById('mgmtMsg');
+    const mOut = document.getElementById('mgmtOut');
+    function loadStatus() {
+      fetch('/api/status').then(r => r.json()).then(d => {
+        svcEl.innerHTML = '';
+        for (const [name, st] of Object.entries(d.services || {})) {
+          const b = document.createElement('span');
+          b.className = 'b ' + (st === 'active' ? 'up' : (st === 'inactive' ? '' : 'down'));
+          b.textContent = name + ': ' + st;
+          svcEl.append(b);
+        }
+        const n = document.createElement('span'); n.className = 'b'; n.textContent = 'nfqws: ' + d.nfqws;
+        svcEl.append(n);
+      });
+    }
+    loadStatus();
+
+    // --- Обзор: сводка по движкам (T-ciadpi) — не зависит от того, есть ли
+    // активные группы прямо сейчас: тянет /api/presets (стратегии по движку),
+    // /api/monitor (живые группы/доходы zapret+ciadpi), /api/autoroute (VPS).
+    function loadEnginesSummary() {
+      Promise.all([
+        fetch('/api/presets').then(r => r.json()).catch(() => ({presets:[]})),
+        fetch('/api/monitor').then(r => r.json()).catch(() => ({})),
+        fetch('/api/autoroute').then(r => r.json()).catch(() => ({entries:[]})),
+      ]).then(([pr, mon, ar]) => {
+        const presets = pr.presets || [];
+        const groups = mon.brain_groups || [];
+        const countBy = (eng) => {
+          const gs = groups.filter(g => (g.engine || 'zapret') === eng);
+          const domains = gs.reduce((s,g) => s + (g.count||0), 0);
+          return { groups: gs.length, domains };
+        };
+        const z = countBy('zapret'), c = countBy('ciadpi'), z2 = countBy('zapret2');
+        const zStrats = presets.filter(p => (p.engine||'zapret') === 'zapret').length;
+        const cStrats = presets.filter(p => p.engine === 'ciadpi').length;
+        const z2Strats = presets.filter(p => p.engine === 'zapret2').length;
+        const vDomains = (ar.entries || []).length;
+        const daemonsN = mon.brain_totals ? mon.brain_totals.daemons : 0;
+        const cDaemons = (mon.ciadpi_profiles || []).length;
+        const z2Daemons = z2.groups; // zapret2: 1 группа = 1 демон (как zapret1), нет отдельного profiles-эндпоинта
+        const card = (title, color, rows) => `
+          <div style="flex:1; min-width:160px; border:1px solid var(--border,#333); border-radius:8px; padding:10px 12px">
+            <div style="font-weight:600; margin-bottom:6px"><span class="st-badge" style="background:${color}">${title}</span></div>
+            ${rows.map(([label,val]) => `<div class="muted" style="font-size:.85em; display:flex; justify-content:space-between"><span>${label}</span><b style="color:var(--fg,inherit)">${val}</b></div>`).join('')}
+          </div>`;
+        document.getElementById('enginesSummary').innerHTML =
+          card('zapret', 'var(--muted-bg,#5559)', [['доменов', z.domains], ['групп', z.groups], ['демонов nfqws', daemonsN - cDaemons - z2Daemons], ['стратегий в базе', zStrats]]) +
+          card('ciadpi', 'var(--accent-bg,#59f9)', [['доменов', c.domains], ['групп', c.groups], ['демонов', cDaemons], ['стратегий в базе', cStrats]]) +
+          card('zapret2', 'var(--bad-bg,#f959)', [['доменов', z2.domains], ['групп', z2.groups], ['демонов', z2Daemons], ['стратегий в базе', z2Strats]]) +
+          card('VPS', 'var(--bad-bg,#f559)', [['доменов (автообход)', vDomains]]);
+      }).catch(() => {});
+    }
+    loadEnginesSummary();
+    setInterval(loadEnginesSummary, 10000);
+
+    document.getElementById('btnExit').onclick = () => {
+      mMsg.className = 'msg'; mMsg.textContent = 'Проверяю exit IP…'; mOut.textContent = '';
+      fetch('/api/exit-ip').then(r => r.json()).then(d => {
+        mMsg.className = 'msg good';
+        mMsg.textContent = `Провайдер: ${d.provider || '?'} · через VPS: ${d.vps || '?'}`;
+      });
+    };
+    document.getElementById('btnSmoke').onclick = () => {
+      mMsg.className = 'msg'; mMsg.textContent = 'Прогон smoke…'; mOut.textContent = '';
+      fetch('/api/smoke').then(r => r.json()).then(d => {
+        mMsg.className = 'msg ' + (d.pass ? 'good' : 'bad');
+        mMsg.textContent = d.pass ? '✓ SMOKE PASS' : '✗ SMOKE FAIL';
+        mOut.textContent = d.output || '';
+      });
+    };
+
+    // --- Сервисы: рестарт + логи ---
+    const sMsg = document.getElementById('svcMsg');
+    function restart(svc) {
+      sMsg.className = 'msg'; sMsg.textContent = 'Рестарт ' + svc + '…';
+      fetch('/api/restart', { method:'POST', body:new URLSearchParams({ service: svc }) })
+        .then(async r => { const d = await r.json();
+          if (r.ok) { sMsg.className = 'msg good'; sMsg.textContent = '✓ ' + svc + ': ' + d.state; loadStatus(); }
+          else { sMsg.className = 'msg bad'; sMsg.textContent = '✗ ' + (d.error || 'ошибка'); }
+        });
+    }
+    document.getElementById('reXray').onclick = () => restart('xray');
+    document.getElementById('reZapret').onclick = () => restart('zapret');
+    const logOut = document.getElementById('logOut');
+    document.getElementById('btnLogs').onclick = () => {
+      const svc = document.getElementById('logSvc').value;
+      logOut.textContent = 'Загрузка…';
+      fetch('/api/logs?lines=50&service=' + encodeURIComponent(svc))
+        .then(r => r.json()).then(d => { logOut.textContent = d.log || d.error || '(пусто)'; });
+    };
+  </script>
+</body>
+</html>
