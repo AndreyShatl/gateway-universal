@@ -64,6 +64,7 @@ func (s *server) handleConnection(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось: " + err.Error(), "output": out})
 			return
 		}
+		s.timeline.Record("config.updated", "VPS connection updated")
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "addr": fields["VPS_ADDR"]})
 
 	default:

@@ -1,6 +1,8 @@
 import { TopBar } from '../components/TopBar'
 import { EngineCard } from '../components/EngineCard'
 import { ModesPanel } from '../components/ModesPanel'
+import { MissionTimeline } from '../components/MissionTimeline'
+import { HealthPanel } from '../components/HealthPanel'
 import { usePoll } from '../hooks/usePoll'
 import { fetchStatus, fetchConnection, fetchZapretVersion, fetchCiadpiVersion, fetchZapret2Version } from '../lib/api'
 
@@ -80,7 +82,13 @@ export function Overview() {
             <Field label="SNI" value={conn?.sni || '—'} />
           </Panel>
           <ModesPanel />
+          <HealthPanel />
         </div>
+      </div>
+
+      <div className="mb-(--section-gap)">
+        <SectionHead title="Хронология" />
+        <MissionTimeline />
       </div>
 
       <div>

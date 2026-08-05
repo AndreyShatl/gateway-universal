@@ -217,6 +217,33 @@ export interface ScanStatus {
   owner?: string
 }
 
+export interface HostMetrics {
+  uptime_s: number
+  cpu_pct: number
+  memory_pct: number
+  mem_total_mb: number
+  swap_pct: number
+  swap_total_mb: number
+  disk_pct: number
+  disk_total_gb: number
+  cpu_temp_c: number
+  load_avg_1: number
+  load_avg_5: number
+  load_avg_15: number
+  cpu_cores: number
+  cpu_mhz: number
+}
+
+export const fetchHostMetrics = () => api<HostMetrics>('/api/host-metrics')
+
+export interface TimelineEvent {
+  at: string
+  kind: string
+  message: string
+}
+
+export const fetchTimeline = () => api<TimelineEvent[]>('/api/timeline')
+
 export const fetchScanStatus = () => api<ScanStatus>('/api/scan')
 export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard') =>
   api<{ ok?: boolean; error?: string }>('/api/scan/start', {

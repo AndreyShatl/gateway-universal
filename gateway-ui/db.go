@@ -88,12 +88,14 @@ func (s *server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 				return
 			}
+			s.timeline.Record("config.updated", "Whitelist updated")
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		case "remove":
 			if out, err := s.gwdb("whitelist-remove", r.FormValue("id")); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 				return
 			}
+			s.timeline.Record("config.updated", "Whitelist updated")
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "action: add|remove"})

@@ -79,6 +79,7 @@ type server struct {
 	autorouteFile  string // /etc/gateway/autoroute.json (список авто-обхода)
 	recheckFile    string // /etc/gateway/recheck.json (расписание перепроверки авто-обхода)
 	ver            string // версия сборки (mtime бинаря) — для автоперезагрузки вкладки
+	timeline       *timelineLog
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -100,6 +101,7 @@ func main() {
 	dbPath := flag.String("db", "/etc/gateway/gateway.db", "БД whitelist+strategies (T48)")
 	autorouteFile := flag.String("autoroute-file", "/etc/gateway/autoroute.json", "файл списка авто-обхода")
 	recheckFile := flag.String("recheck-file", "/etc/gateway/recheck.json", "файл расписания перепроверки авто-обхода")
+	timelineFile := flag.String("timeline-file", "/etc/gateway/timeline.jsonl", "файл журнала событий Mission Timeline")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -112,6 +114,7 @@ func main() {
 		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
 		connsFile: *connsFile, dbPath: *dbPath,
 		autorouteFile: *autorouteFile, recheckFile: *recheckFile,
+		timeline: newTimelineLog(*timelineFile),
 	}
 	s.ver = buildVersion()
 	if err := s.loadOrInitPassword(*conf); err != nil {
@@ -136,6 +139,13 @@ func main() {
 	// (до 4с таймаут на домен) — при сотнях записей это блокировало бы старт
 	// HTTP-сервера на минуты (замечено при ребут-тесте: :8088 не слушал 47+с).
 	go s.syncAutoroute(s.readAutoRoute())
+
+	// system.boot — proxy для "физической" загрузки шлюза: gateway-ui сама
+	// стартует через systemd вместе с системой при ребуте (не boot-enabled
+	// таймер, а постоянный сервис), поэтому старт процесса — надёжный сигнал
+	// "устройство только что загрузилось" для ленты Mission Timeline.
+	s.timeline.Record("system.boot", "System boot completed")
+	go s.vpnWatchLoop()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +184,8 @@ func main() {
 	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
+	mux.HandleFunc("/api/timeline", s.requireAuth(s.handleTimeline))
+	mux.HandleFunc("/api/host-metrics", s.requireAuth(s.handleHostMetrics))
 
 	// T-shattl-gwui (2026-08-05): React/Vite SPA — новый интерфейс. Старая
 	// панель (dashboard.html) оставлена на /legacy на время обкатки, ссылка на

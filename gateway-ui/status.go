@@ -66,6 +66,7 @@ func (s *server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, _ := runCmd("systemctl", "is-active", svc+".service")
+	s.timeline.Record("service.restart", svc+" restarted")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": svc, "state": strings.TrimSpace(state)})
 }
 
