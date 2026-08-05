@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { RailNav } from './components/RailNav'
 import { Overview } from './pages/Overview'
+import { ServicesPage } from './pages/ServicesPage'
+import { ConsolePage } from './pages/ConsolePage'
 import { DomainsPage } from './pages/DomainsPage'
 import { WhitelistPage } from './pages/WhitelistPage'
 import { MonitorPage } from './pages/MonitorPage'
@@ -21,6 +23,8 @@ function AnimatedRoutes() {
       >
         <Routes location={location}>
           <Route path="/" element={<Overview />} />
+          <Route path="/services" element={<ServicesPage />} />
+          <Route path="/console" element={<ConsolePage />} />
           <Route path="/domains" element={<DomainsPage />} />
           <Route path="/whitelist" element={<WhitelistPage />} />
           <Route path="/monitor" element={<MonitorPage />} />

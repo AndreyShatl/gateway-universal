@@ -4,6 +4,8 @@ import { fetchTimeline } from '../lib/api'
 const kindDot: Record<string, string> = {
   'vpn.up': 'bg-success',
   'vpn.down': 'bg-danger',
+  'dns.up': 'bg-success',
+  'dns.down': 'bg-danger',
   'service.restart': 'bg-accent',
   'config.updated': 'bg-accent',
   'system.boot': 'bg-text-muted',

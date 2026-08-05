@@ -146,6 +146,7 @@ func main() {
 	// "устройство только что загрузилось" для ленты Mission Timeline.
 	s.timeline.Record("system.boot", "System boot completed")
 	go s.vpnWatchLoop()
+	go s.dnsWatchLoop()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +187,9 @@ func main() {
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
 	mux.HandleFunc("/api/timeline", s.requireAuth(s.handleTimeline))
 	mux.HandleFunc("/api/host-metrics", s.requireAuth(s.handleHostMetrics))
+	mux.HandleFunc("/api/services/detail", s.requireAuth(s.handleServicesDetail))
+	mux.HandleFunc("/api/services/stop", s.requireAuth(s.handleStop))
+	mux.HandleFunc("/ws/console", s.requireAuth(s.handleConsole))
 
 	// T-shattl-gwui (2026-08-05): React/Vite SPA — новый интерфейс. Старая
 	// панель (dashboard.html) оставлена на /legacy на время обкатки, ссылка на

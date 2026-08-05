@@ -1,10 +1,14 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { usePoll } from '../hooks/usePoll'
 import { fetchLogs, LOGGABLE_SERVICES } from '../lib/api'
 
 export function LogsPage() {
-  const [service, setService] = useState<string>(LOGGABLE_SERVICES[0])
+  const [params] = useSearchParams()
+  const fromQuery = params.get('service')
+  const initial = fromQuery && (LOGGABLE_SERVICES as readonly string[]).includes(fromQuery) ? fromQuery : LOGGABLE_SERVICES[0]
+  const [service, setService] = useState<string>(initial)
   const [lines, setLines] = useState(100)
   const { data, error } = usePoll(() => fetchLogs(service, lines), 4000, [service, lines])
 

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -105,6 +107,35 @@ func (s *server) vpnWatchLoop() {
 			}
 		}
 		prev = state
+		time.Sleep(interval)
+	}
+}
+
+// dnsWatchLoop — то же самое для DNS (T-shattl-dns-flap, 2026-08-05): линк
+// сетевой карты уже видели физически падавшим (dmesg: enp2s0 Link is Down на
+// 44с), но не каждое падение DNS сопровождается таким событием — короткие
+// сбои резолвера проходят мимо dmesg. Этот watcher ловит именно момент и
+// длительность падения, чтобы не приходилось ловить его вживую по жалобе
+// пользователя постфактум.
+func (s *server) dnsWatchLoop() {
+	const interval = 5 * time.Second
+	const timeout = 3 * time.Second
+	prevOK := true
+	var downSince time.Time
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		_, err := net.DefaultResolver.LookupHost(ctx, "cloudflare.com")
+		cancel()
+		ok := err == nil
+
+		if ok && !prevOK {
+			dur := time.Since(downSince).Round(time.Second)
+			s.timeline.Record("dns.up", "DNS resolution restored (down for "+dur.String()+")")
+		} else if !ok && prevOK {
+			downSince = time.Now()
+			s.timeline.Record("dns.down", "DNS resolution failed")
+		}
+		prevOK = ok
 		time.Sleep(interval)
 	}
 }

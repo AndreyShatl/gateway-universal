@@ -236,6 +236,30 @@ export interface HostMetrics {
 
 export const fetchHostMetrics = () => api<HostMetrics>('/api/host-metrics')
 
+export interface ServiceDetail {
+  name: string
+  state: string
+  uptime_s: number
+  memory_mb: number
+  cpu_pct: number
+  loggable: boolean
+  stoppable: boolean
+}
+
+export const fetchServicesDetail = () => api<ServiceDetail[]>('/api/services/detail')
+export const restartService = (service: string) =>
+  api<{ ok?: boolean; error?: string; state?: string }>('/api/restart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `service=${encodeURIComponent(service)}`,
+  })
+export const stopService = (service: string) =>
+  api<{ ok?: boolean; error?: string; state?: string }>('/api/services/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `service=${encodeURIComponent(service)}`,
+  })
+
 export interface TimelineEvent {
   at: string
   kind: string
