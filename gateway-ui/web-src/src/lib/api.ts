@@ -88,6 +88,36 @@ export const setConnectionLink = (link: string) =>
     body: `link=${encodeURIComponent(link)}`,
   })
 
+export interface SavedConnection {
+  id: string
+  name: string
+  active: boolean
+  addr: string
+  port_grpc: string
+  uuid_grpc: string
+  pubkey: string
+}
+
+export const fetchConnections = () => api<{ connections: SavedConnection[] }>('/api/connections')
+export const addConnection = (link: string, name: string) =>
+  api<{ ok?: boolean; error?: string }>('/api/connections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `action=add&link=${encodeURIComponent(link)}&name=${encodeURIComponent(name)}`,
+  })
+export const activateConnection = (id: string) =>
+  api<{ ok?: boolean; error?: string; addr?: string }>('/api/connections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `action=activate&id=${encodeURIComponent(id)}`,
+  })
+export const deleteConnection = (id: string) =>
+  api<{ ok?: boolean; error?: string }>('/api/connections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `action=delete&id=${encodeURIComponent(id)}`,
+  })
+
 export const fetchRouterIP = () => api<{ router_ip: string }>('/api/router-ip')
 export const setRouterIP = (ip: string) =>
   api<{ ok?: boolean; error?: string }>('/api/router-ip', {
