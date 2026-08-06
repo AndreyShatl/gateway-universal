@@ -290,6 +290,15 @@ export interface NetworkResponse {
 
 export const fetchNetwork = () => api<NetworkResponse>('/api/network')
 
+export interface InternetChecks {
+  dns_ok: boolean
+  https_ok: boolean
+  local_gateway_ok: boolean
+  vps_ok: boolean
+}
+
+export const fetchInternetChecks = () => api<InternetChecks>('/api/internet-checks')
+
 export const fetchScanStatus = () => api<ScanStatus>('/api/scan')
 export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard') =>
   api<{ ok?: boolean; error?: string }>('/api/scan/start', {

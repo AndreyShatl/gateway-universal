@@ -3,6 +3,7 @@ import { EngineCard } from '../components/EngineCard'
 import { ModesPanel } from '../components/ModesPanel'
 import { MissionTimeline } from '../components/MissionTimeline'
 import { HealthPanel } from '../components/HealthPanel'
+import { InternetPanel } from '../components/InternetPanel'
 import { usePoll } from '../hooks/usePoll'
 import { fetchStatus, fetchConnection, fetchZapretVersion, fetchCiadpiVersion, fetchZapret2Version } from '../lib/api'
 
@@ -92,6 +93,7 @@ export function Overview() {
           </Panel>
           <ModesPanel />
           <HealthPanel />
+          <InternetPanel />
         </div>
       </div>
 
