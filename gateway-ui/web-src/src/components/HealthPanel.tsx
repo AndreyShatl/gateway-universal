@@ -56,26 +56,29 @@ function fmtCapacity(cores?: number, mhz?: number) {
   return parts.join(' @ ')
 }
 
-// Полоски загрузки по ядрам (htop-стиль, но лаконично под токены Shattl —
-// ТЗ 2026-08-06). Количество полосок = число потоков CPU.
-function coreBarColor(pct: number) {
+// Горизонтальные полоски-прогрессбары (ТЗ 2026-08-06, второй заход — первая
+// версия была вертикальной по ядрам, попросили горизонтальные и "в сторону
+// процентов" для CPU/RAM/Swap/Disk).
+function barColor(pct: number) {
   if (pct >= 85) return 'bg-danger'
   if (pct >= 60) return 'bg-warning'
   return 'bg-accent'
 }
 
-function CoreBars({ cores }: { cores?: number[] | null }) {
-  if (!cores || cores.length === 0) return null
+function MetricBar({ label, pct, value }: { label: string; pct?: number; value: string }) {
+  const p = pct === undefined ? 0 : Math.max(0, Math.min(100, pct))
   return (
-    <div className="flex items-end gap-[3px] pb-2.5" style={{ height: 22 }}>
-      {cores.map((pct, i) => (
-        <div key={i} className="relative w-[5px] flex-1 max-w-[9px] overflow-hidden rounded-[1.5px] bg-border" style={{ height: '100%' }}>
-          <div
-            className={`absolute bottom-0 left-0 w-full rounded-[1.5px] transition-[height] duration-500 ${coreBarColor(pct)}`}
-            style={{ height: `${Math.max(4, Math.min(100, pct))}%` }}
-          />
-        </div>
-      ))}
+    <div className="border-b border-border py-2.5 text-[12.5px] last:border-b-0">
+      <div className="mb-1.5 flex justify-between">
+        <span className="text-text-muted">{label}</span>
+        <span className="font-mono tabular-nums">{value}</span>
+      </div>
+      <div className="h-[5px] overflow-hidden rounded-full bg-border">
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ${barColor(p)}`}
+          style={{ width: `${p}%` }}
+        />
+      </div>
     </div>
   )
 }
@@ -92,11 +95,10 @@ export function HealthPanel() {
         </div>
         <span className="font-mono text-[10.5px] text-text-muted">{fmtCapacity(data?.cpu_cores, data?.cpu_mhz)}</span>
       </div>
-      <Field label="CPU" value={data ? `${Math.round(data.cpu_pct)}%` : '—'} />
-      <CoreBars cores={data?.per_core_pct} />
-      <Field label="RAM" value={fmtUsedOfTotalMB(data?.memory_pct, data?.mem_total_mb)} />
-      <Field label="Swap" value={fmtUsedOfTotalMB(data?.swap_pct, data?.swap_total_mb)} />
-      <Field label="Disk" value={fmtUsedOfTotalGB(data?.disk_pct, data?.disk_total_gb)} />
+      <MetricBar label="CPU" pct={data?.cpu_pct} value={data ? `${Math.round(data.cpu_pct)}%` : '—'} />
+      <MetricBar label="RAM" pct={data?.memory_pct} value={fmtUsedOfTotalMB(data?.memory_pct, data?.mem_total_mb)} />
+      <MetricBar label="Swap" pct={data?.swap_pct} value={fmtUsedOfTotalMB(data?.swap_pct, data?.swap_total_mb)} />
+      <MetricBar label="Disk" pct={data?.disk_pct} value={fmtUsedOfTotalGB(data?.disk_pct, data?.disk_total_gb)} />
       <Field label="Load" value={fmtLoad3(data?.load_avg_1, data?.load_avg_5, data?.load_avg_15)} />
       <Field label="Temperature" value={data?.cpu_temp_c ? `${Math.round(data.cpu_temp_c)}°C` : '—'} />
       <Field label="Uptime" value={fmtUptime(data?.uptime_s)} />
