@@ -4,19 +4,29 @@ import { TopBar } from '../components/TopBar'
 import { usePoll } from '../hooks/usePoll'
 import { fetchServicesDetail, restartService, stopService, type ServiceDetail } from '../lib/api'
 
+// Тот же формат, что и gmp-server/web-src/src/lib/format.ts fmtUptime.
 function fmtUptime(s: number) {
-  if (!s) return '—'
+  if (!s && s !== 0) return '—'
   const d = Math.floor(s / 86400)
   const h = Math.floor((s % 86400) / 3600)
-  const m = Math.floor((s % 3600) / 60)
   if (d > 0) return `${d}d ${h}h`
-  if (h > 0) return `${h}h ${m}m`
-  return `${m}m`
+  const m = Math.floor((s % 3600) / 60)
+  return `${h}h ${m}m`
 }
 
 const stateDot: Record<string, string> = {
   active: 'bg-success',
   failed: 'bg-danger',
+}
+
+// Та же формулировка, что и Overview/gmp-server Dashboard — не сырой
+// systemd-статус (active/failed/inactive).
+const stateLabel: Record<string, string> = {
+  active: 'Running',
+  failed: 'Failed',
+}
+function fmtState(state: string) {
+  return stateLabel[state] ?? 'Stopped'
 }
 
 function ServiceCard({ svc }: { svc: ServiceDetail }) {
@@ -40,7 +50,7 @@ function ServiceCard({ svc }: { svc: ServiceDetail }) {
         <span className="text-sm font-medium">{svc.name}</span>
         <span className={`flex items-center gap-1.5 font-mono text-[11px] ${svc.state === 'active' ? 'text-success' : 'text-danger'}`}>
           <span className={`h-[7px] w-[7px] rounded-full ${stateDot[svc.state] ?? 'bg-text-muted'}`} />
-          {svc.state}
+          {fmtState(svc.state)}
         </span>
       </div>
       <div className="mb-3 grid grid-cols-3 gap-2 text-[11.5px]">

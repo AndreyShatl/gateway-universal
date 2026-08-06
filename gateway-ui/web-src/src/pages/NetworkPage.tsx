@@ -47,7 +47,7 @@ export function NetworkPage() {
             <div className="py-1 text-[12.5px] text-text-muted">не настроено</div>
           )}
         </Panel>
-        <Panel title="VPN">
+        <Panel title="Подключение (VPS)">
           <Field label="Настроено" value={conn?.configured ? 'да' : 'нет'} />
           <Field label="Адрес" value={conn?.addr || '—'} />
           <Field label="SNI" value={conn?.sni || '—'} />

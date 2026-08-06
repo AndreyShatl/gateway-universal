@@ -26,6 +26,15 @@ const dotClass: Record<string, string> = {
   offline: 'bg-text-muted',
 }
 
+// "Running"/"Failed"/"Stopped" — та же формулировка, что и у gmp-server
+// Dashboard (ServiceRow там же): сырые systemd-статусы (active/failed/…)
+// на двух похожих панелях одного шлюза читались как расхождение.
+const stateLabel: Record<string, string> = {
+  online: 'Running',
+  degraded: 'Failed',
+  offline: 'Stopped',
+}
+
 function ServiceRow({ name, state }: { name: string; state: string }) {
   const variant = statusVariant(state)
   return (
@@ -34,7 +43,7 @@ function ServiceRow({ name, state }: { name: string; state: string }) {
         <span className={`h-[7px] w-[7px] rounded-full ${dotClass[variant]}`} />
         <span>{name}</span>
       </div>
-      <span className="font-mono text-[11px] text-text-muted">{state}</span>
+      <span className="font-mono text-[11px] text-text-muted">{stateLabel[variant]}</span>
     </div>
   )
 }
