@@ -65,19 +65,42 @@ function barColor(pct: number) {
   return 'bg-accent'
 }
 
+function Bar({ pct }: { pct: number }) {
+  const p = Math.max(0, Math.min(100, pct))
+  return (
+    <div className="h-[5px] overflow-hidden rounded-full bg-border">
+      <div className={`h-full rounded-full transition-[width] duration-500 ${barColor(p)}`} style={{ width: `${p}%` }} />
+    </div>
+  )
+}
+
 function MetricBar({ label, pct, value }: { label: string; pct?: number; value: string }) {
-  const p = pct === undefined ? 0 : Math.max(0, Math.min(100, pct))
   return (
     <div className="border-b border-border py-2.5 text-[12.5px] last:border-b-0">
       <div className="mb-1.5 flex justify-between">
         <span className="text-text-muted">{label}</span>
         <span className="font-mono tabular-nums">{value}</span>
       </div>
-      <div className="h-[5px] overflow-hidden rounded-full bg-border">
-        <div
-          className={`h-full rounded-full transition-[width] duration-500 ${barColor(p)}`}
-          style={{ width: `${p}%` }}
-        />
+      <Bar pct={pct ?? 0} />
+    </div>
+  )
+}
+
+// CPU — отдельная полоска на каждый поток (не одна общая), по числу
+// элементов per_core_pct с бэкенда.
+function CPUBars({ label, cores, value }: { label: string; cores?: number[] | null; value: string }) {
+  return (
+    <div className="border-b border-border py-2.5 text-[12.5px] last:border-b-0">
+      <div className="mb-1.5 flex justify-between">
+        <span className="text-text-muted">{label}</span>
+        <span className="font-mono tabular-nums">{value}</span>
+      </div>
+      <div className="space-y-1">
+        {cores && cores.length > 0 ? (
+          cores.map((pct, i) => <Bar key={i} pct={pct} />)
+        ) : (
+          <Bar pct={0} />
+        )}
       </div>
     </div>
   )
@@ -95,7 +118,7 @@ export function HealthPanel() {
         </div>
         <span className="font-mono text-[10.5px] text-text-muted">{fmtCapacity(data?.cpu_cores, data?.cpu_mhz)}</span>
       </div>
-      <MetricBar label="CPU" pct={data?.cpu_pct} value={data ? `${Math.round(data.cpu_pct)}%` : '—'} />
+      <CPUBars label="CPU" cores={data?.per_core_pct} value={data ? `${Math.round(data.cpu_pct)}%` : '—'} />
       <MetricBar label="RAM" pct={data?.memory_pct} value={fmtUsedOfTotalMB(data?.memory_pct, data?.mem_total_mb)} />
       <MetricBar label="Swap" pct={data?.swap_pct} value={fmtUsedOfTotalMB(data?.swap_pct, data?.swap_total_mb)} />
       <MetricBar label="Disk" pct={data?.disk_pct} value={fmtUsedOfTotalGB(data?.disk_pct, data?.disk_total_gb)} />
