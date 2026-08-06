@@ -3,6 +3,7 @@ import { ModesPanel } from '../components/ModesPanel'
 import { MissionTimeline } from '../components/MissionTimeline'
 import { HealthPanel } from '../components/HealthPanel'
 import { InternetPanel } from '../components/InternetPanel'
+import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import { fetchStatus, fetchConnection } from '../lib/api'
 
@@ -57,10 +58,13 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-      <div className="mb-2 text-[10.5px] uppercase tracking-wide text-text-muted">{title}</div>
+      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-text-muted">
+        {title}
+        {hint && <InfoTip text={hint} />}
+      </div>
       {children}
     </div>
   )
@@ -77,14 +81,20 @@ export function Overview() {
       <div className="mb-(--section-gap)">
         <SectionHead title="Состояние сервисов" />
         <div className="grid grid-cols-[repeat(auto-fit,minmax(var(--grid-min),1fr))] gap-(--grid-gap)">
-          <Panel title="Демоны">
+          <Panel
+            title="Демоны"
+            hint="Ключевые сервисы шлюза: xray (VPS-туннель), zapret (обход по DPI-стратегиям), fix-gateway (чинит default route при загрузке — нужен, не трогайте), discord-tproxy (голос Discord через VPS — опционален, выключен по умолчанию)."
+          >
             {status ? (
               Object.entries(status.services).map(([name, state]) => <ServiceRow key={name} name={name} state={state} />)
             ) : (
               <div className="text-[12.5px] text-text-muted">загрузка…</div>
             )}
           </Panel>
-          <Panel title="Подключение (VPS)">
+          <Panel
+            title="Подключение (VPS)"
+            hint="Параметры VLESS Reality gRPC-туннеля до вашего VPS — тот канал, через который идёт трафик в режиме vps (Instagram/Discord и т.п.) и весь трафик при включённом VPS-режиме."
+          >
             <Field label="Настроено" value={conn?.configured ? 'да' : 'нет'} />
             <Field label="Адрес" value={conn?.addr || '—'} />
             <Field label="Порт gRPC" value={conn?.port_grpc || '—'} />

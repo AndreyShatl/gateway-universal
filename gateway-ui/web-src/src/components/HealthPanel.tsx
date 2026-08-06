@@ -1,5 +1,6 @@
 import { usePoll } from '../hooks/usePoll'
 import { fetchHostMetrics } from '../lib/api'
+import { InfoTip } from './InfoTip'
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -61,7 +62,10 @@ export function HealthPanel() {
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-[10.5px] uppercase tracking-wide text-text-muted">Health</div>
+        <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-text-muted">
+          Health
+          <InfoTip text="Аппаратные метрики самого шлюза (не VPS) — собираются локально, читаются напрямую из /proc, не зависят от других сервисов." />
+        </div>
         <span className="font-mono text-[10.5px] text-text-muted">{fmtCapacity(data?.cpu_cores, data?.cpu_mhz)}</span>
       </div>
       <Field label="CPU" value={data ? `${Math.round(data.cpu_pct)}%` : '—'} />

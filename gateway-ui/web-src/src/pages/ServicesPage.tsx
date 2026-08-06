@@ -1,8 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
+import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import { fetchServicesDetail, restartService, stopService, type ServiceDetail } from '../lib/api'
+
+// Что делает каждый сервис — по фидбегу 2026-08-06 ("fix-gateway вообще
+// нужен? discord-tproxy выключен, он не нужен?").
+const serviceHints: Record<string, string> = {
+  xray: 'VLESS Reality-туннель до VPS — через него идёт весь трафик в режиме vps и в VPS-режиме целиком.',
+  zapret: 'Основной движок обхода по DPI-стратегиям (nfqws) — большинство доменов идёт через него.',
+  'fix-gateway': 'Нужен, не отключайте: одноразово чинит default route при загрузке (иначе возможна DHCP-петля). "Running" сразу после старта и остаётся так — это нормально, не демон, а разовый фикс.',
+  'discord-tproxy': 'Опционально, по умолчанию выключен. Туннелирует голосовой UDP-трафик Discord через VPS — включайте, только если понадобится обход именно для голоса Discord.',
+}
 
 // Тот же формат, что и gmp-server/web-src/src/lib/format.ts fmtUptime.
 function fmtUptime(s: number) {
@@ -47,7 +57,10 @@ function ServiceCard({ svc }: { svc: ServiceDetail }) {
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-sm font-medium">{svc.name}</span>
+        <span className="flex items-center gap-1.5 text-sm font-medium">
+          {svc.name}
+          {serviceHints[svc.name] && <InfoTip text={serviceHints[svc.name]} />}
+        </span>
         <span className={`flex items-center gap-1.5 font-mono text-[11px] ${svc.state === 'active' ? 'text-success' : 'text-danger'}`}>
           <span className={`h-[7px] w-[7px] rounded-full ${stateDot[svc.state] ?? 'bg-text-muted'}`} />
           {fmtState(svc.state)}

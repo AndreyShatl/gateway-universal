@@ -14,7 +14,12 @@ export function UpdatesPage() {
 
   return (
     <div>
-      <TopBar title="Updates" subtitle="версии движков и сборки шлюза" live={!error} />
+      <TopBar
+        title="Updates"
+        subtitle="версии движков и сборки шлюза"
+        live={!error}
+        hint="Движки zapret/ciadpi/zapret2 обновляются автоматически по воскресеньям (ночной таймер) — кнопка ниже нужна только для немедленного обновления, не ждать до воскресенья."
+      />
 
       <div className="mb-(--section-gap) rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
         <div className="mb-2 text-[10.5px] uppercase tracking-wide text-text-muted">Shattl Gateway</div>

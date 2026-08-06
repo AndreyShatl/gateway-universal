@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { InfoTip } from './InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import {
   fetchGameMode,
@@ -69,17 +70,26 @@ export function ModesPanel() {
       <div className="mb-2 text-[10.5px] uppercase tracking-wide text-text-muted">Режимы</div>
 
       <div className="flex items-center justify-between border-b border-border py-2.5 text-[12.5px]">
-        <span className="text-text-muted">Game mode</span>
+        <span className="flex items-center gap-1.5 text-text-muted">
+          Game mode
+          <InfoTip text="Приоритизация игрового трафика (низкая задержка) для UDP игровых серверов через VPS — off выключено, tcp/udp/both выбирают какой протокол ускорять." />
+        </span>
         <Pills options={gameModes} value={(gm?.mode as (typeof gameModes)[number]) || 'off'} onChange={onGameMode} disabled={busy} />
       </div>
 
       <div className="flex items-center justify-between border-b border-border py-2.5 text-[12.5px]">
-        <span className="text-text-muted">VPS-режим (весь трафик)</span>
+        <span className="flex items-center gap-1.5 text-text-muted">
+          VPS-режим (весь трафик)
+          <InfoTip text="on — абсолютно весь трафик LAN идёт через VPS-туннель (не только курируемые сервисы). Полезно как аварийный рубильник, но повышает нагрузку на VPS и задержку для всего." />
+        </span>
         <Pills options={vpsModes} value={vm?.mode === 'on' ? 'on' : 'off'} onChange={onVPSMode} disabled={busy} />
       </div>
 
       <div className="flex items-center justify-between py-2.5 text-[12.5px]">
-        <span className="text-text-muted">AdGuard Home</span>
+        <span className="flex items-center gap-1.5 text-text-muted">
+          AdGuard Home
+          <InfoTip text="Локальный DNS-сервер с блокировкой рекламы/трекеров для всей сети. Если недоступен — значит не настроен или сервис выключен, обход блокировок при этом не страдает." />
+        </span>
         {ag?.available ? (
           <span className="font-mono text-[11px] text-text-secondary">
             {ag.stats?.num_blocked_filtering ?? 0} заблокировано / {ag.stats?.num_dns_queries ?? 0} запросов

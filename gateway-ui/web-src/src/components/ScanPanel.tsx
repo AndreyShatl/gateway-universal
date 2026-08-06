@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { usePoll } from '../hooks/usePoll'
 import { fetchScanStatus, startScan, stopScan } from '../lib/api'
+import { InfoTip } from './InfoTip'
 
 export function ScanPanel() {
   const { data } = usePoll(fetchScanStatus, 3000)
@@ -41,7 +42,10 @@ export function ScanPanel() {
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-[10.5px] uppercase tracking-wide text-text-muted">Поиск стратегии (blockcheck)</span>
+        <span className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-text-muted">
+          Поиск стратегии (blockcheck)
+          <InfoTip text="Только диагностика: перебирает стратегии обхода для указанных доменов и показывает, что сработало. Ничего не применяет и никуда не отправляет автоматически — дальше нужно применить вручную." />
+        </span>
         {running && (
           <span className="rounded-md bg-warning/[.12] px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-warning">
             идёт

@@ -49,7 +49,12 @@ export function WhitelistPage() {
 
   return (
     <div>
-      <TopBar title="Whitelist" subtitle="домены, никогда не идущие в обход" live={!error} />
+      <TopBar
+        title="Whitelist"
+        subtitle="домены, никогда не идущие в обход"
+        live={!error}
+        hint="Детектор блокировок вообще не анализирует эти домены (даже в тени) — используйте для доменов, которые заведомо не заблокированы (например .ru/.su/.рф) и не должны создавать лишнюю нагрузку на проверку."
+      />
 
       <div className="mb-(--section-gap) rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
         <div className="mb-3 flex flex-wrap gap-2">

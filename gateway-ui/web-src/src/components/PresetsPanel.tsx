@@ -1,5 +1,6 @@
 import { usePoll } from '../hooks/usePoll'
 import { fetchPresets } from '../lib/api'
+import { InfoTip } from './InfoTip'
 
 export function PresetsPanel() {
   const { data } = usePoll(fetchPresets, 10000)
@@ -9,7 +10,10 @@ export function PresetsPanel() {
   return (
     <div>
       <div className="mb-3.5 flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-text-muted">Пресеты zapret/ciadpi</span>
+        <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+          Пресеты zapret/ciadpi
+          <InfoTip text="Комбинации параметров DPI-обхода, найденные автоматически ('мозгом') или поиском стратегии — trusted означает подтверждена успешными применениями, score — рейтинг эффективности." />
+        </span>
         <span className="font-mono text-[11px] text-text-muted">
           {presets.length} всего · {trusted} доверенных
         </span>

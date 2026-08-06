@@ -1,5 +1,6 @@
 import { usePoll } from '../hooks/usePoll'
 import { fetchTimeline } from '../lib/api'
+import { InfoTip } from './InfoTip'
 
 const kindDot: Record<string, string> = {
   'vpn.up': 'bg-success',
@@ -28,7 +29,10 @@ export function MissionTimeline() {
 
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-      <div className="mb-2 text-[10.5px] uppercase tracking-wide text-text-muted">Mission Timeline</div>
+      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-text-muted">
+        Mission Timeline
+        <InfoTip text="Локальная лента событий шлюза: загрузка, рестарты сервисов, изменения конфигурации, обрывы/восстановления VPN и DNS. Хранится на самом шлюзе, не зависит от интернета." />
+      </div>
       {!data || data.length === 0 ? (
         <div className="py-2 text-[12.5px] text-text-muted">пока пусто</div>
       ) : (

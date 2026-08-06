@@ -3,16 +3,27 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
+import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, type ZService } from '../lib/api'
 
-function SectionHead({ title, count }: { title: string; count?: number }) {
+function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
     <div className="mb-3.5 flex items-center justify-between">
-      <h2 className="m-0 text-[11px] font-medium uppercase tracking-wider text-text-muted">{title}</h2>
+      <h2 className="m-0 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+        {title}
+        {hint && <InfoTip text={hint} />}
+      </h2>
       {count !== undefined && <span className="font-mono text-[11px] text-text-muted">{count}</span>}
     </div>
   )
+}
+
+// quic_fallback — не список доменов, а спец-обработчик "прочего" UDP/443
+// QUIC-трафика для сайтов, которых нет в остальных сервисах. 0 доменов —
+// правильно и всегда так будет.
+const serviceHints: Record<string, string> = {
+  quic_fallback: 'Не список доменов — обрабатывает весь остальной QUIC-трафик (UDP/443), не попавший в другие сервисы. 0 доменов здесь — норма, не баг.',
 }
 
 const modes = [
@@ -44,7 +55,10 @@ function ServiceRow({ svc, onModeChange }: { svc: ZService; onModeChange: (id: s
   return (
     <div className="flex items-center justify-between border-b border-border py-3 text-[12.5px] last:border-b-0">
       <div>
-        <div className="font-medium">{svc.name}</div>
+        <div className="flex items-center gap-1.5 font-medium">
+          {svc.name}
+          {serviceHints[svc.id] && <InfoTip text={serviceHints[svc.id]} />}
+        </div>
         <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
       </div>
       <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} />
@@ -169,8 +183,9 @@ export function DomainsPage() {
 
       <div className="mb-(--section-gap)">
         <div className="mb-3.5 flex items-center justify-between">
-          <h2 className="m-0 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+          <h2 className="m-0 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
             Сервисы ({services.length})
+            <InfoTip text="Курируемые группы доменов с готовыми стратегиями обхода. Режим на каждую: zapret (свой DPI-обход), vps (форс через VPS-туннель) или direct (без обхода вообще)." />
           </h2>
           {localServices && (
             <button

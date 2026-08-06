@@ -1,4 +1,5 @@
 import { TopBar } from '../components/TopBar'
+import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import { fetchNetwork, fetchConnection } from '../lib/api'
 
@@ -11,10 +12,13 @@ function Field({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-      <div className="mb-2 text-[10.5px] uppercase tracking-wide text-text-muted">{title}</div>
+      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-text-muted">
+        {title}
+        {hint && <InfoTip text={hint} />}
+      </div>
       {children}
     </div>
   )
@@ -36,11 +40,11 @@ export function NetworkPage() {
       <TopBar title="Network" subtitle="интерфейсы, маршрутизация, DNS" live={!error} />
 
       <div className="mb-(--section-gap) grid grid-cols-[repeat(auto-fit,minmax(var(--grid-min),1fr))] gap-(--grid-gap)">
-        <Panel title="Routing">
+        <Panel title="Routing" hint="Свой IP в локальной сети и маршрут по умолчанию (через какой роутер/интерфейс уходит трафик в интернет).">
           <Field label="LAN IP" value={data?.lan_ip || '—'} />
           <Field label="Default route" value={data?.default_route || '—'} />
         </Panel>
-        <Panel title="DNS">
+        <Panel title="DNS" hint="DNS-серверы, которые реально использует система (/etc/resolv.conf) — не обязательно совпадают с AdGuard Home, если он настроен отдельно.">
           {data?.dns_servers.length ? (
             data.dns_servers.map((d) => <Field key={d} label="Nameserver" value={d} />)
           ) : (
@@ -54,7 +58,10 @@ export function NetworkPage() {
         </Panel>
       </div>
 
-      <div className="mb-3.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">Interfaces</div>
+      <div className="mb-3.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+        Interfaces
+        <InfoTip text="Loopback (lo) не показывается — его статус в Linux всегда 'unknown' и не несёт диагностической пользы. Errors/Dropped > 0 подсвечены — это признак проблем на физическом уровне (кабель/порт)." />
+      </div>
       <div className="overflow-x-auto rounded-[--card-radius] border border-border">
         <table className="w-full min-w-[720px] text-[12px]">
           <thead>

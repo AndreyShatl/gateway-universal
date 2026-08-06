@@ -1,5 +1,6 @@
 import { usePoll } from '../hooks/usePoll'
 import { fetchInternetChecks } from '../lib/api'
+import { InfoTip } from './InfoTip'
 
 // Тот же CheckRow, что и на Dashboard gmp-server (GatewayDetail.tsx) —
 // панель "Internet" там уже есть для удалённого вида этого же шлюза, тут её
@@ -21,7 +22,10 @@ export function InternetPanel() {
 
   return (
     <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-      <div className="mb-2 text-[10.5px] uppercase tracking-wide text-text-muted">Internet</div>
+      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] uppercase tracking-wide text-text-muted">
+        Internet
+        <InfoTip text="4 независимых сигнала — один Down не значит что остальные тоже: VPN может быть жив, а DNS уже умер, и наоборот." />
+      </div>
       <CheckRow label="DNS" ok={data?.dns_ok} />
       <CheckRow label="HTTPS" ok={data?.https_ok} />
       <CheckRow label="Local gateway reachable" ok={data?.local_gateway_ok} />

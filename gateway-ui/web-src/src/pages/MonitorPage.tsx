@@ -3,6 +3,7 @@ import { usePoll } from '../hooks/usePoll'
 import { fetchMonitor } from '../lib/api'
 import { AnimatedNumber } from '../components/AnimatedNumber'
 import { ScanPanel } from '../components/ScanPanel'
+import { InfoTip } from '../components/InfoTip'
 
 function MetricCell({ label, value, suffix }: { label: string; value?: number; suffix?: string }) {
   return (
@@ -38,7 +39,12 @@ export function MonitorPage() {
 
   return (
     <div>
-      <TopBar title="Monitor" subtitle="мозг: группы, домены, confidence-гистерезис" live={!error} />
+      <TopBar
+        title="Monitor"
+        subtitle="мозг: группы, домены, confidence-гистерезис"
+        live={!error}
+        hint="'Мозг' — автоматическая система подбора и перепроверки стратегий обхода. Confidence-гистерезис ниже показывает, насколько уверенно подобрана стратегия по каждому домену и когда его перепроверят снова."
+      />
 
       <div className="mb-(--section-gap) grid grid-cols-2 overflow-hidden rounded-[--card-radius] border border-border bg-surface md:grid-cols-4">
         <MetricCell label="Группы" value={data?.brain_totals.groups} />
@@ -72,7 +78,10 @@ export function MonitorPage() {
 
       <div>
         <div className="mb-3.5 flex items-center justify-between">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-text-muted">Confidence-гистерезис</span>
+          <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+            Confidence-гистерезис
+            <InfoTip text="Confidence 0/30/70/100 — насколько уверенно домену подобрана стратегия: чем выше, тем реже перепроверка (экономит ресурсы на стабильных доменах, быстрее реагирует на нестабильные)." />
+          </span>
           <span className="font-mono text-[11px] text-text-muted">{schedule.length} доменов</span>
         </div>
         <div className="max-h-[420px] overflow-y-auto rounded-[--card-radius] border border-border">

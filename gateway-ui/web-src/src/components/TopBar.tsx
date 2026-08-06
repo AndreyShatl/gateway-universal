@@ -1,4 +1,5 @@
 import { useDensity, useTheme, type Density } from '../hooks/useSettings'
+import { InfoTip } from './InfoTip'
 
 const densities: { value: Density; label: string }[] = [
   { value: 'compact', label: 'Compact' },
@@ -6,14 +7,27 @@ const densities: { value: Density; label: string }[] = [
   { value: 'spacious', label: 'Spacious' },
 ]
 
-export function TopBar({ title, subtitle, live }: { title: string; subtitle?: string; live?: boolean }) {
+export function TopBar({
+  title,
+  subtitle,
+  live,
+  hint,
+}: {
+  title: string
+  subtitle?: string
+  live?: boolean
+  hint?: string
+}) {
   const [theme, setTheme] = useTheme()
   const [density, setDensity] = useDensity()
 
   return (
     <div className="mb-7 flex flex-wrap items-baseline justify-between gap-6">
       <div>
-        <h1 className="m-0 text-[19px] font-medium tracking-tight">{title}</h1>
+        <h1 className="m-0 flex items-center gap-2 text-[19px] font-medium tracking-tight">
+          {title}
+          {hint && <InfoTip text={hint} />}
+        </h1>
         {subtitle && <div className="mt-0.5 font-mono text-[12.5px] text-text-muted">{subtitle}</div>}
       </div>
 
