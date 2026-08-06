@@ -14,7 +14,12 @@ export function LogsPage() {
 
   return (
     <div>
-      <TopBar title="Logs" subtitle="journalctl по сервисам шлюза" live={!error} />
+      <TopBar
+        title="Logs"
+        subtitle="journalctl по сервисам шлюза"
+        live={!error}
+        hint="Пустой лог у сервиса — часто норма: одноразовые скрипты (fix-gateway) и таймер-сервисы (gateway-brain-*, gateway-zapret-autoupdate) между запусками журнал не пишут. 'gateway-brain' — не systemd-юнит, а реальный файл активности 'мозга' (ночные проходы, decay, схлопывание доменов)."
+      />
 
       <div className="mb-(--grid-gap) flex flex-wrap items-center gap-2.5">
         <select

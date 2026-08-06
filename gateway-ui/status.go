@@ -25,7 +25,13 @@ var loggable = map[string]bool{
 	"gateway-brain-worker": true, "gateway-brain-nightly": true,
 	"gateway-brain-static-reeval": true, "gateway-brain-domain-actualize": true,
 	"gateway-brain-healthcheck": true, "gateway-zapret-autoupdate": true,
+	"gateway-brain": true, // виртуальный источник — файл, не systemd-юнит, см. handleLogs
 }
+
+// gatewayBrainLog — реальная активность "мозга" (ночной проход, схлопывание,
+// decay и т.п.) пишется в этот файл, а не в journalctl конкретного юнита —
+// без отдельной записи в loggable (2026-08-06) её вообще не было видно в UI.
+const gatewayBrainLog = "/var/log/gateway-brain.log"
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	svc := map[string]string{}
@@ -84,6 +90,10 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	n := 50
 	if v, err := strconv.Atoi(r.URL.Query().Get("lines")); err == nil && v > 0 && v <= 200 {
 		n = v
+	}
+	if svc == "gateway-brain" {
+		writeJSON(w, http.StatusOK, map[string]any{"log": tailFile(gatewayBrainLog, n)})
+		return
 	}
 	out, _ := runCmd("journalctl", "-u", svc+".service", "-n", strconv.Itoa(n), "--no-pager")
 	writeJSON(w, http.StatusOK, map[string]any{"log": out})

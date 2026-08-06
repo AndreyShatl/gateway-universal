@@ -161,6 +161,7 @@ export interface MonitorResponse {
 export const fetchMonitor = () => api<MonitorResponse>('/api/monitor')
 
 export const LOGGABLE_SERVICES = [
+  'gateway-brain',
   'xray',
   'zapret',
   'fix-gateway',
