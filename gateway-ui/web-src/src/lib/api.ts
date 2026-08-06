@@ -125,6 +125,15 @@ export const setRouterIP = (ip: string) =>
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `router_ip=${encodeURIComponent(ip)}`,
   })
+export interface GMPStatus {
+  installed: boolean
+  registered: boolean
+  server_url: string
+  gateway_id: string
+}
+
+export const fetchGMPStatus = () => api<GMPStatus>('/api/gmp-status')
+
 export const fetchZapretVersion = () => api<EngineVersion>('/api/zapret/version')
 export const fetchCiadpiVersion = () => api<EngineVersion>('/api/ciadpi/version')
 export const fetchZapret2Version = () => api<EngineVersion>('/api/zapret2/version')

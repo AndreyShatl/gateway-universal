@@ -192,6 +192,7 @@ func main() {
 	mux.HandleFunc("/ws/console", s.requireAuth(s.handleConsole))
 	mux.HandleFunc("/api/network", s.requireAuth(s.handleNetwork))
 	mux.HandleFunc("/api/internet-checks", s.requireAuth(s.handleInternetChecks))
+	mux.HandleFunc("/api/gmp-status", s.requireAuth(s.handleGMPStatus))
 
 	// T-shattl-gwui (2026-08-05): React/Vite SPA — новый интерфейс. Старая
 	// панель (dashboard.html) оставлена на /legacy на время обкатки, ссылка на

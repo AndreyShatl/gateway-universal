@@ -10,6 +10,7 @@ import {
   addConnection,
   activateConnection,
   deleteConnection,
+  fetchGMPStatus,
   type SavedConnection,
 } from '../lib/api'
 
@@ -211,11 +212,47 @@ function VPSConnectionPanel() {
   )
 }
 
+function GMPStatusPanel() {
+  const { data } = usePoll(fetchGMPStatus, 15000)
+
+  return (
+    <Panel
+      title="Подключение к GMP"
+      hint="Это НЕ то же самое, что подключение к VPS выше. GMP — удалённый мониторинг: если этот шлюз зарегистрирован, его метрики видны на чужом Dashboard (у того, кто выдал токен при установке). Отдельный механизм от xray-туннеля."
+    >
+      {!data?.installed ? (
+        <div className="text-[12.5px] text-text-muted">gmp-agent не установлен на этом шлюзе.</div>
+      ) : (
+        <>
+          <div className="flex justify-between border-b border-border py-2.5 text-[12.5px] last:border-b-0">
+            <span className="text-text-muted">Статус</span>
+            <span className={`flex items-center gap-1.5 font-mono text-[11.5px] ${data.registered ? 'text-success' : 'text-text-muted'}`}>
+              <span className={`h-[7px] w-[7px] rounded-full ${data.registered ? 'bg-success' : 'bg-text-muted'}`} />
+              {data.registered ? 'Зарегистрирован' : 'Не зарегистрирован'}
+            </span>
+          </div>
+          <div className="flex justify-between border-b border-border py-2.5 text-[12.5px] last:border-b-0">
+            <span className="text-text-muted">Сервер</span>
+            <span className="font-mono">{data.server_url || '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-border py-2.5 text-[12.5px] last:border-b-0">
+            <span className="text-text-muted">Gateway ID</span>
+            <span className="max-w-[220px] truncate font-mono text-[11px]" title={data.gateway_id}>
+              {data.gateway_id || '—'}
+            </span>
+          </div>
+        </>
+      )}
+    </Panel>
+  )
+}
+
 export function SettingsPage() {
   return (
     <div>
       <TopBar title="Settings" />
       <VPSConnectionPanel />
+      <GMPStatusPanel />
       <RouterIPPanel />
       <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad) text-[12.5px] text-text-secondary">
         Тема и плотность интерфейса — в верхней панели на каждой странице.
