@@ -1,0 +1,7 @@
+[Unit]
+Description=Gateway brain — дежурная проверка живости nfqws/ciadpi/nfqws2-демонов (read-only, чинит только если реально что-то умерло)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-healthcheck.sh

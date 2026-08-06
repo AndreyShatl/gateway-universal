@@ -88,12 +88,14 @@ func (s *server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 				return
 			}
+			s.timeline.Record("config.updated", "Whitelist updated")
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		case "remove":
 			if out, err := s.gwdb("whitelist-remove", r.FormValue("id")); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 				return
 			}
+			s.timeline.Record("config.updated", "Whitelist updated")
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		default:
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "action: add|remove"})
@@ -105,24 +107,30 @@ func (s *server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 }
 
 type presetRow struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Proto        string `json:"proto"`
-	Args         string `json:"args"`
-	Source       string `json:"source"`
-	Trusted      bool   `json:"trusted"`
-	SuccessCount int    `json:"success_count"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Proto        string  `json:"proto"`
+	Args         string  `json:"args"`
+	Source       string  `json:"source"`
+	Trusted      bool    `json:"trusted"`
+	SuccessCount int     `json:"success_count"`
+	Engine       string  `json:"engine"`
+	Score        float64 `json:"score"`
+	Confidence   int     `json:"confidence"`
 }
 
 func (s *server) handlePresets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		args := []string{"presets-list"}
+		args := []string{"strategies-list"}
 		if tier := r.URL.Query().Get("tier"); tier != "" {
 			args = append(args, "--tier", tier)
 		}
 		if proto := r.URL.Query().Get("proto"); proto != "" {
 			args = append(args, "--proto", proto)
+		}
+		if engine := r.URL.Query().Get("engine"); engine != "" {
+			args = append(args, "--engine", engine)
 		}
 		out, err := s.gwdb(args...)
 		if err != nil {
@@ -135,14 +143,17 @@ func (s *server) handlePresets(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			f := strings.Split(ln, "\t")
-			if len(f) != 7 {
+			if len(f) != 10 {
 				continue
 			}
 			id, _ := strconv.ParseInt(f[0], 10, 64)
 			sc, _ := strconv.Atoi(f[6])
+			score, _ := strconv.ParseFloat(f[8], 64)
+			confidence, _ := strconv.Atoi(f[9])
 			list = append(list, presetRow{
 				ID: id, Name: f[1], Proto: f[2], Args: f[3], Source: f[4],
-				Trusted: f[5] == "1", SuccessCount: sc,
+				Trusted: f[5] == "1", SuccessCount: sc, Engine: f[7],
+				Score: score, Confidence: confidence,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"presets": list})
@@ -155,11 +166,15 @@ func (s *server) handlePresets(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(r.FormValue("name"))
 		proto := r.FormValue("proto")
 		presetArgs := strings.TrimSpace(r.FormValue("args"))
+		engine := r.FormValue("engine")
+		if engine == "" {
+			engine = "zapret"
+		}
 		if name == "" || presetArgs == "" || (proto != "tcp" && proto != "udp") {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name + proto=tcp|udp + args обязательны"})
 			return
 		}
-		if out, err := s.gwdb("preset-add", name, proto, presetArgs); err != nil {
+		if out, err := s.gwdb("strategy-add", name, proto, presetArgs, "--engine", engine); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
 			return
 		}

@@ -14,6 +14,42 @@ LOCK=/etc/gateway/brain-queue.lock
 STATE=/etc/gateway/brain-services.json
 AR=/etc/gateway/autoroute.json
 LOG=/var/log/gateway-brain.log
+GWDB=${GWDB:-/root/gateway-universal/scripts/gwdb.py}
+PROGRESS=/etc/gateway/brain-progress.json
+COLLAPSE=${COLLAPSE:-/opt/gateway-brain/autoroute-collapse.py}
+
+# T-collapse-uuid: до сборки vps[] схлопнуть накопившиеся дубли случайных
+# UUID-поддоменов с общим хвостом (см. autoroute-collapse.py) — иначе список
+# и, соответственно, ночная очередь растут без предела (у доменов, успешно
+# работающих через VPS, прунинга раньше не было вообще).
+if [ -x "$COLLAPSE" ] || [ -f "$COLLAPSE" ]; then
+  collapse_out=$(python3 "$COLLAPSE" --file "$AR" 2>&1)
+  echo "$(date '+%F %T') 🗜 $collapse_out" >> "$LOG"
+fi
+
+# bump_progress N — прибавить N к общему счётчику "поставлено сегодня" (T-progress-ui,
+# для прогресс-бара в gateway-ui). Сбрасывается в 0 в brain-worker.sh, когда очередь
+# опустела (см. main loop) — новый цикл enqueue снова стартует с чистого total.
+bump_progress() {
+  python3 -c "
+import json, time
+f='$PROGRESS'
+try:
+    d = json.load(open(f))
+except Exception:
+    d = {}
+if d.get('total', 0) <= 0:
+    d = {'total': 0, 'started_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+d['total'] = d.get('total', 0) + $1
+json.dump(d, open(f, 'w'))
+"
+}
+
+# --- T-are: угасание score стратегий (раз в сутки, см. cmd_strategies_decay
+# в gwdb.py) — без этого давно неподтверждённая стратегия навсегда котируется
+# выше свежепроверенной, мозг никогда не "забывает" устаревшее.
+decay_out=$(python3 "$GWDB" strategies-decay --factor 0.995 2>&1)
+echo "$(date '+%F %T') 📉 $decay_out" >> "$LOG"
 
 # домены brain-групп — тоже переоцениваем (T-consolidate: состояние теперь
 # групповое, читаем domains[] из КАЖДОЙ группы, не x['domain']).
@@ -41,16 +77,40 @@ if os.path.exists(f):
       print(a)
 " 2>/dev/null)
 
+# --- T-are: confidence-гистерезис — домены с ДАВНО стабильно работающей
+# стратегией (service-touch копит streak успехов в history) можно сегодня не
+# трогать вообще, не гоняя даже дешёвый --test-args. Применяется ТОЛЬКО к ents[]
+# (домены УЖЕ в рабочей zapret/ciadpi-группе) — vps[] всегда проверяем заново,
+# там как раз хотим поймать момент, когда обход наконец-то заработает.
+declare -A skip
+mapfile -t skip_list < <(python3 "$GWDB" service-skip-list 2>/dev/null)
+for d in "${skip_list[@]}"; do [ -n "$d" ] && skip["$d"]=1; done
+
 exec 9>"$LOCK"; flock 9
-n=0
-for d in "${ents[@]}" "${vps[@]}"; do
+n=0; skipped=0
+for d in "${ents[@]}"; do
   [ -n "$d" ] || continue
+  if [ -n "${skip[$d]:-}" ]; then skipped=$((skipped+1)); continue; fi
   # дедуп по домену (первое поле до табуляции, T50 — строки вида "domain\tsource");
   # source=reeval — переоценка идёт без сигнатуры детектора, полный перебор пресетов.
   grep -qE "^${d//./\\.}($|	)" "$QUEUE" 2>/dev/null || { printf '%s\treeval\n' "$d" >> "$QUEUE"; n=$((n+1)); }
 done
+vps_skipped=0
+for d in "${vps[@]}"; do
+  [ -n "$d" ] || continue
+  # T-vps-hysteresis: раньше vps[] гонялся ЦЕЛИКОМ и безусловно каждую ночь
+  # навсегда (единственная чистка — 30-дневный no_bypass-прун полностью
+  # неработающих). При росте числа подтверждённо-рабочих через VPS доменов
+  # (например CDN плодит новые случайные UUID-поддомены) очередь росла без
+  # предела. Теперь те же skip[] (см. gwdb.py vps-touch, brain-worker.sh) —
+  # домен, стабильно работающий через VPS несколько ночей подряд, можно не
+  # трогать сегодня (макс. интервал короче, чем у zapret/ciadpi: 3 дня, не 7).
+  if [ -n "${skip[$d]:-}" ]; then vps_skipped=$((vps_skipped+1)); continue; fi
+  grep -qE "^${d//./\\.}($|	)" "$QUEUE" 2>/dev/null || { printf '%s\treeval\n' "$d" >> "$QUEUE"; n=$((n+1)); }
+done
 flock -u 9
-echo "$(date '+%F %T') 🌙 ночной проход: в очередь $n доменов (сущности=${#ents[@]}, vps=${#vps[@]})" >> "$LOG"
+[ "$n" -gt 0 ] && bump_progress "$n"
+echo "$(date '+%F %T') 🌙 ночной проход: в очередь $n доменов (сущности=${#ents[@]}, vps=${#vps[@]}, пропущено по confidence=$skipped, пропущено vps по confidence=$vps_skipped)" >> "$LOG"
 
 # --- T55: no_bypass-статус для VPS-доменов + чистка устаревших записей ---
 # «Ничего не работает» (ни напрямую, ни через VPS) — раньше такого состояния не

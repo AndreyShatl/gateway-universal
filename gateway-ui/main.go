@@ -18,10 +18,10 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -36,9 +36,26 @@ import (
 //go:embed static/*.html
 var staticFS embed.FS
 
+// distFSRaw — собранный React/Vite SPA (web-src/, T-shattl-gwui, 2026-08-05),
+// заменяет static/dashboard.html как основной интерфейс. Старая панель
+// оставлена на /legacy на время обкатки (см. регистрацию маршрутов ниже).
+//
+//go:embed all:static/dist
+var distFSRaw embed.FS
+
+func distFS() fs.FS {
+	sub, err := fs.Sub(distFSRaw, "static/dist")
+	if err != nil {
+		panic("gateway-ui: static/dist embed повреждён: " + err.Error())
+	}
+	return sub
+}
+
+//go:embed strategies.json
+var strategiesJSON []byte
+
 const sessionCookie = "gwsess"
 const sessionTTL = 12 * time.Hour
-const sessionsFile = "/etc/gateway/ui-sessions.json" // сессии переживают рестарт UI
 
 type server struct {
 	// Пароль. Новый формат — bcrypt-хеш в pwHash (legacy=false).
@@ -53,14 +70,16 @@ type server struct {
 	userDomainsDir string // /etc/gateway/domains (домены из UI)
 	xrayConfig     string // /opt/xray/config.json (рабочий конфиг)
 	xrayBin        string // /opt/xray/xray
-	scanDir        string // /etc/gateway/scan (поиск стратегий убран, оставлен только для пути zupdate.log = Dir(scanDir))
-	blockcheck     string // /opt/zapret/blockcheck.sh (репо zapret — для версии/апдейта движка)
-	servicesFile   string // /etc/gateway/zapret-services.json (читает Монитор; UI-редактор убран, см. DECISIONS)
+	scanDir        string // /etc/gateway/scan (состояние поиска стратегий)
+	blockcheck     string // /opt/zapret/blockcheck.sh
+	overrides      string // (устар.) оверрайды стратегий
+	servicesFile   string // /etc/gateway/zapret-services.json (динамические сервисы)
 	connsFile      string // /etc/gateway/connections.json (сохранённые VPS-хосты)
-	autorouteFile  string // /etc/gateway/autoroute.json (авто-обход: список + тумблер)
-	recheckFile    string // /etc/gateway/recheck.json (перепроверка: расписание + статистика)
+	dbPath         string // /etc/gateway/gateway.db (whitelist+strategies/services/history, доступ через scripts/gwdb.py)
+	autorouteFile  string // /etc/gateway/autoroute.json (список авто-обхода)
+	recheckFile    string // /etc/gateway/recheck.json (расписание перепроверки авто-обхода)
 	ver            string // версия сборки (mtime бинаря) — для автоперезагрузки вкладки
-	dbPath         string // /etc/gateway/gateway.db (T48: whitelist + presets, доступ через scripts/gwdb.py)
+	timeline       *timelineLog
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -76,11 +95,13 @@ func main() {
 	xrayBin := flag.String("xray-bin", "/opt/xray/xray", "бинарник xray")
 	scanDir := flag.String("scan-dir", "/etc/gateway/scan", "каталог состояния поиска стратегий")
 	blockcheck := flag.String("blockcheck", "/opt/zapret/blockcheck.sh", "путь к blockcheck.sh")
+	overrides := flag.String("zapret-overrides", "/etc/gateway/zapret-overrides.env", "(устар.) файл оверрайдов")
 	servicesFile := flag.String("zapret-services", "/etc/gateway/zapret-services.json", "файл сервисов zapret")
 	connsFile := flag.String("connections", "/etc/gateway/connections.json", "файл сохранённых VPS-хостов")
-	autorouteFile := flag.String("autoroute", "/etc/gateway/autoroute.json", "файл авто-обхода (список + тумблер)")
-	recheckFile := flag.String("recheck", "/etc/gateway/recheck.json", "файл перепроверки (расписание + статистика)")
-	dbPath := flag.String("db", "/etc/gateway/gateway.db", "БД whitelist+presets (T48)")
+	dbPath := flag.String("db", "/etc/gateway/gateway.db", "БД whitelist+strategies (T48)")
+	autorouteFile := flag.String("autoroute-file", "/etc/gateway/autoroute.json", "файл списка авто-обхода")
+	recheckFile := flag.String("recheck-file", "/etc/gateway/recheck.json", "файл расписания перепроверки авто-обхода")
+	timelineFile := flag.String("timeline-file", "/etc/gateway/timeline.jsonl", "файл журнала событий Mission Timeline")
 	initPwd := flag.Bool("init-password", false, "создать ui.conf из env GATEWAY_UI_PASSWORD и выйти")
 	flag.Parse()
 
@@ -90,15 +111,12 @@ func main() {
 	s := &server{
 		sessions: map[string]time.Time{}, repoDir: *repo, configEnv: *configEnv,
 		userDomainsDir: *userDomains, xrayConfig: *xrayConfig, xrayBin: *xrayBin,
-		scanDir: *scanDir, blockcheck: *blockcheck, servicesFile: *servicesFile,
-		connsFile: *connsFile, autorouteFile: *autorouteFile, recheckFile: *recheckFile,
-		dbPath: *dbPath,
+		scanDir: *scanDir, blockcheck: *blockcheck, overrides: *overrides, servicesFile: *servicesFile,
+		connsFile: *connsFile, dbPath: *dbPath,
+		autorouteFile: *autorouteFile, recheckFile: *recheckFile,
+		timeline: newTimelineLog(*timelineFile),
 	}
-	s.loadSessions() // восстановить входы, чтобы рестарт UI не разлогинивал
 	s.ver = buildVersion()
-	if err := s.initGWDB(); err != nil {
-		log.Printf("gateway-ui: инициализация gateway.db: %v (продолжаю без неё)", err)
-	}
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
 	}
@@ -107,6 +125,28 @@ func main() {
 		return
 	}
 	s.tmpl = template.Must(template.ParseFS(staticFS, "static/*.html"))
+	if err := s.initGWDB(); err != nil {
+		log.Printf("gateway-ui: initGWDB: %v", err)
+	}
+	s.ensureAutorouteInfra()
+	// syncAutoroute при старте — восстанавливает состояние детектора после ребута
+	// (gateway-detector.service НЕ boot-enabled намеренно, им управляет только
+	// тумблер «Авто-обход» через systemctl start/stop, см. autoroute.go). Без
+	// этого вызова после ребута детектор остаётся выключенным, даже если тумблер
+	// был включён — ipset/iptables-инфра восстановится (ensureAutorouteInfra
+	// выше), а сам процесс пополнения списка — нет.
+	// В ГОРУТИНЕ: syncAutoroute резолвит КАЖДЫЙ домен списка последовательно
+	// (до 4с таймаут на домен) — при сотнях записей это блокировало бы старт
+	// HTTP-сервера на минуты (замечено при ребут-тесте: :8088 не слушал 47+с).
+	go s.syncAutoroute(s.readAutoRoute())
+
+	// system.boot — proxy для "физической" загрузки шлюза: gateway-ui сама
+	// стартует через systemd вместе с системой при ребуте (не boot-enabled
+	// таймер, а постоянный сервис), поэтому старт процесса — надёжный сигнал
+	// "устройство только что загрузилось" для ленты Mission Timeline.
+	s.timeline.Record("system.boot", "System boot completed")
+	go s.vpnWatchLoop()
+	go s.dnsWatchLoop()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -118,23 +158,67 @@ func main() {
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/connections", s.requireAuth(s.handleConnections))
-	mux.HandleFunc("/api/autoroute", s.requireAuth(s.handleAutoRoute))
-	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
-	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
 	mux.HandleFunc("/api/domains", s.requireAuth(s.handleDomains))
-	mux.HandleFunc("/api/whitelist", s.requireAuth(s.handleWhitelist))
-	mux.HandleFunc("/api/presets", s.requireAuth(s.handlePresets))
-	mux.HandleFunc("/api/game-mode", s.requireAuth(s.handleGameMode))
-	mux.HandleFunc("/api/vps-mode", s.requireAuth(s.handleVPSMode))
-	mux.HandleFunc("/api/adguard", s.requireAuth(s.handleAdguard))
+	mux.HandleFunc("/api/zapret", s.requireAuth(s.handleZapret))
+	mux.HandleFunc("/api/zapret/services", s.requireAuth(s.handleServices))
+	mux.HandleFunc("/api/strategies", s.requireAuth(s.handleStrategies))
 	mux.HandleFunc("/api/zapret/version", s.requireAuth(s.handleZapretVersion))
 	mux.HandleFunc("/api/zapret/update", s.requireAuth(s.handleZapretUpdate))
+	mux.HandleFunc("/api/ciadpi/version", s.requireAuth(s.handleCiadpiVersion))
+	mux.HandleFunc("/api/ciadpi/update", s.requireAuth(s.handleCiadpiUpdate))
+	mux.HandleFunc("/api/zapret2/version", s.requireAuth(s.handleZapret2Version))
+	mux.HandleFunc("/api/zapret2/update", s.requireAuth(s.handleZapret2Update))
+	mux.HandleFunc("/api/scan", s.requireAuth(s.handleScan))
+	mux.HandleFunc("/api/scan/start", s.requireAuth(s.handleScanStart))
+	mux.HandleFunc("/api/scan/stop", s.requireAuth(s.handleScanStop))
 	mux.HandleFunc("/api/status", s.requireAuth(s.handleStatus))
 	mux.HandleFunc("/api/exit-ip", s.requireAuth(s.handleExitIP))
 	mux.HandleFunc("/api/restart", s.requireAuth(s.handleRestart))
 	mux.HandleFunc("/api/smoke", s.requireAuth(s.handleSmoke))
 	mux.HandleFunc("/api/logs", s.requireAuth(s.handleLogs))
-	mux.HandleFunc("/", s.requireAuth(s.handleDashboard))
+	mux.HandleFunc("/api/whitelist", s.requireAuth(s.handleWhitelist))
+	mux.HandleFunc("/api/presets", s.requireAuth(s.handlePresets))
+	mux.HandleFunc("/api/game-mode", s.requireAuth(s.handleGameMode))
+	mux.HandleFunc("/api/vps-mode", s.requireAuth(s.handleVPSMode))
+	mux.HandleFunc("/api/adguard", s.requireAuth(s.handleAdguard))
+	mux.HandleFunc("/api/autoroute", s.requireAuth(s.handleAutoRoute))
+	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
+	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
+	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
+	mux.HandleFunc("/api/timeline", s.requireAuth(s.handleTimeline))
+	mux.HandleFunc("/api/host-metrics", s.requireAuth(s.handleHostMetrics))
+	mux.HandleFunc("/api/services/detail", s.requireAuth(s.handleServicesDetail))
+	mux.HandleFunc("/api/services/stop", s.requireAuth(s.handleStop))
+	mux.HandleFunc("/ws/console", s.requireAuth(s.handleConsole))
+	mux.HandleFunc("/api/network", s.requireAuth(s.handleNetwork))
+	mux.HandleFunc("/api/internet-checks", s.requireAuth(s.handleInternetChecks))
+
+	// T-shattl-gwui (2026-08-05): React/Vite SPA — новый интерфейс. Старая
+	// панель (dashboard.html) оставлена на /legacy на время обкатки, ссылка на
+	// неё есть в заглушках ComingSoon непортированных разделов SPA.
+	dist := distFS()
+	staticServer := http.FileServerFS(dist)
+	mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		staticServer.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		staticServer.ServeHTTP(w, r)
+	})
+	indexHTML, err := fs.ReadFile(dist, "index.html")
+	if err != nil {
+		log.Fatalf("gateway-ui: не удалось прочитать встроенный static/dist/index.html: %v", err)
+	}
+	mux.HandleFunc("/legacy", s.requireAuth(s.handleDashboard))
+	// GET "/" — subtree-паттерн в net/http.ServeMux: ловит и "/", и клиентские
+	// маршруты react-router (/domains, /whitelist, /monitor, /logs, /settings),
+	// у которых на сервере нет отдельного обработчика.
+	mux.HandleFunc("/", s.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write(indexHTML)
+	}))
 
 	srv := &http.Server{
 		Addr:         *listen,
@@ -142,9 +226,6 @@ func main() {
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
-	// Восстановить авто-обход после (пере)загрузки: ipset/iptables не persistent,
-	// gateway-ui сам приводит их к сохранённому состоянию autoroute.json.
-	go s.syncAutoroute(s.readAutoRoute())
 	log.Printf("gateway-ui слушает %s", *listen)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -206,7 +287,6 @@ func (s *server) newSession() string {
 	s.mu.Lock()
 	s.sessions[tok] = time.Now().Add(sessionTTL)
 	s.mu.Unlock()
-	s.persistSessions()
 	return tok
 }
 
@@ -221,44 +301,7 @@ func (s *server) validSession(tok string) bool {
 		delete(s.sessions, tok)
 		return false
 	}
-	s.sessions[tok] = time.Now().Add(sessionTTL) // продлеваем активную сессию (sliding)
 	return true
-}
-
-// loadSessions — восстановить сессии с диска при старте (переживают рестарт UI).
-func (s *server) loadSessions() {
-	data, err := os.ReadFile(sessionsFile)
-	if err != nil {
-		return
-	}
-	m := map[string]time.Time{}
-	if json.Unmarshal(data, &m) != nil {
-		return
-	}
-	now := time.Now()
-	s.mu.Lock()
-	for tok, exp := range m {
-		if exp.After(now) {
-			s.sessions[tok] = exp
-		}
-	}
-	s.mu.Unlock()
-}
-
-// persistSessions — сохранить сессии на диск (снимок под локом, запись атомарно).
-func (s *server) persistSessions() {
-	s.mu.Lock()
-	m := make(map[string]time.Time, len(s.sessions))
-	for k, v := range s.sessions {
-		m[k] = v
-	}
-	s.mu.Unlock()
-	if b, err := json.Marshal(m); err == nil {
-		tmp := sessionsFile + ".tmp"
-		if os.WriteFile(tmp, b, 0o600) == nil {
-			os.Rename(tmp, sessionsFile)
-		}
-	}
 }
 
 func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -298,7 +341,6 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
-		s.persistSessions()
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)

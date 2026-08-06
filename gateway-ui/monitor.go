@@ -53,23 +53,114 @@ var (
 
 func (s *server) handleMonitor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"profiles":     nfqProfiles(),
-		"queues":       queueStats(),
-		"services":     svcList(s),
-		"accept_only":  acceptOnlyEntities(), // T57: UDP-сущности без десинхронизации — нет процесса, invisible в profiles
-		"brain_groups": brainGroupSummaries(),
-		"brain_totals": brainTotals(),
-		"ver":          s.ver, // авто-обновление вкладки после деплоя (checkVer в JS) — раньше это делал /api/scan
+		"profiles":        nfqProfiles(),
+		"queues":          queueStats(),
+		"services":        svcList(s),
+		"accept_only":     acceptOnlyEntities(), // T57: UDP-сущности без десинхронизации — нет процесса, invisible в profiles
+		"brain_groups":    brainGroupSummaries(),
+		"brain_totals":    brainTotals(),
+		"ciadpi_profiles": ciadpiProfiles(),
+		"reeval_schedule": s.reevalSchedule(), // T-are: confidence/next_reeval_at по домену (gwdb services-list)
+		"ver":             s.ver,              // авто-обновление вкладки после деплоя (checkVer в JS) — раньше это делал /api/scan
 	})
+}
+
+// reevalScheduleEntry — одна строка confidence-гистерезиса (T-are): домен, его
+// текущая стратегия (движок+имя), confidence (0/30/70/100) и когда его в
+// следующий раз проверит ночной перебор (или "" — ещё ни разу не тронут).
+type reevalScheduleEntry struct {
+	Domain       string `json:"domain"`
+	Engine       string `json:"engine"`
+	StrategyName string `json:"strategy_name"`
+	Confidence   int    `json:"confidence"`
+	LastReevalAt string `json:"last_reeval_at"`
+	NextReevalAt string `json:"next_reeval_at"`
+}
+
+func (s *server) reevalSchedule() []reevalScheduleEntry {
+	out := []reevalScheduleEntry{}
+	raw, err := s.gwdb("services-list")
+	if err != nil {
+		return out
+	}
+	for _, ln := range strings.Split(raw, "\n") {
+		if ln == "" {
+			continue
+		}
+		f := strings.Split(ln, "\t")
+		if len(f) != 7 {
+			continue
+		}
+		conf, _ := strconv.Atoi(f[4])
+		out = append(out, reevalScheduleEntry{
+			Domain: f[0], Engine: f[2], StrategyName: f[3],
+			Confidence: conf, LastReevalAt: f[5], NextReevalAt: f[6],
+		})
+	}
+	return out
+}
+
+// ciadpiProfile — один живой ciadpi-процесс (T-ciadpi): в отличие от nfqws у него
+// нет очереди/дропов (REDIRECT, не NFQUEUE) — метрики другие, поэтому отдельная
+// структура/таблица, не натягиваем на nfqProfile.
+type ciadpiProfile struct {
+	PID      int    `json:"pid"`
+	Port     int    `json:"port"`
+	Domains  string `json:"domains"`
+	Strategy string `json:"strategy"`
+	RSSKB    int    `json:"rss_kb"`
+}
+
+var reCiadpiPort = regexp.MustCompile(`-p\s+(\d+)`)
+
+func ciadpiProfiles() []ciadpiProfile {
+	portDomains := map[int]string{}
+	for _, g := range readCiadpiGroups() {
+		if g.Port != nil {
+			portDomains[*g.Port] = strings.Join(g.Domains, ", ")
+		}
+	}
+	out, _ := exec.Command("pgrep", "-a", "ciadpi").Output()
+	var ps []ciadpiProfile
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if ln == "" {
+			continue
+		}
+		fields := strings.SplitN(ln, " ", 2)
+		pid, _ := strconv.Atoi(fields[0])
+		cmd := ""
+		if len(fields) > 1 {
+			cmd = fields[1]
+		}
+		port := 0
+		if m := reCiadpiPort.FindStringSubmatch(cmd); m != nil {
+			port, _ = strconv.Atoi(m[1])
+		}
+		strat := cmd
+		if i := strings.Index(cmd, "-E"); i >= 0 {
+			strat = strings.TrimSpace(cmd[i+2:])
+		}
+		rss := 0
+		if out2, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output(); err == nil {
+			rss, _ = strconv.Atoi(strings.TrimSpace(string(out2)))
+		}
+		ps = append(ps, ciadpiProfile{PID: pid, Port: port, Domains: portDomains[port], Strategy: strat, RSSKB: rss})
+	}
+	return ps
 }
 
 // brainGroupSummary — одна группа для карточки «Мозг» (T-consolidate, 2026-07-23):
 // не расписываем 113 доменов в одну строку (было в profiles/service — нечитаемо),
-// даём count + сам список отдельно (UI разворачивает по клику).
+// даём count + сам список отдельно (UI разворачивает по клику). Engine различает
+// zapret (Queue — очередь nfqws) от ciadpi (Port — REDIRECT-порт, T-ciadpi) —
+// раньше ciadpi-группы тут не показывались вообще (brain-services-ciadpi.json
+// не читался), из-за чего в UI их не было видно нигде, только vps/zapret.
 type brainGroupSummary struct {
 	GroupID string   `json:"group_id"`
+	Engine  string   `json:"engine"`
 	Proto   string   `json:"proto"`
-	Queue   *int     `json:"queue"`
+	Queue   *int     `json:"queue,omitempty"`
+	Port    *int     `json:"port,omitempty"`
 	Count   int      `json:"count"`
 	Domains []string `json:"domains"`
 }
@@ -77,9 +168,46 @@ type brainGroupSummary struct {
 func brainGroupSummaries() []brainGroupSummary {
 	out := []brainGroupSummary{}
 	for _, g := range readBrainGroups() {
-		out = append(out, brainGroupSummary{GroupID: g.GroupID, Proto: g.Proto, Queue: g.Queue, Count: len(g.Domains), Domains: g.Domains})
+		out = append(out, brainGroupSummary{GroupID: g.GroupID, Engine: "zapret", Proto: g.Proto, Queue: g.Queue, Count: len(g.Domains), Domains: g.Domains})
+	}
+	for _, g := range readCiadpiGroups() {
+		out = append(out, brainGroupSummary{GroupID: g.GroupID, Engine: "ciadpi", Proto: g.Proto, Port: g.Port, Count: len(g.Domains), Domains: g.Domains})
+	}
+	for _, g := range readZapret2Groups() {
+		out = append(out, brainGroupSummary{GroupID: g.GroupID, Engine: "zapret2", Proto: g.Proto, Queue: g.Queue, Count: len(g.Domains), Domains: g.Domains})
 	}
 	return out
+}
+
+// readZapret2Groups — группы zapret2-адаптера (T-zapret2, brain-apply.sh), тот же
+// формат, что у zapret1 (queue, не port — NFQUEUE, не REDIRECT), файл отдельный.
+func readZapret2Groups() []brainGroup {
+	data, err := os.ReadFile("/etc/gateway/brain-services-zapret2.json")
+	if err != nil {
+		return nil
+	}
+	var raw []brainGroup
+	json.Unmarshal(data, &raw)
+	return raw
+}
+
+// ciadpiGroup — группа ciadpi-адаптера (T-ciadpi, brain-apply.sh), формат
+// /etc/gateway/brain-services-ciadpi.json: {group_id, proto, strategy, port, domains}.
+type ciadpiGroup struct {
+	GroupID string   `json:"group_id"`
+	Proto   string   `json:"proto"`
+	Port    *int     `json:"port"`
+	Domains []string `json:"domains"`
+}
+
+func readCiadpiGroups() []ciadpiGroup {
+	data, err := os.ReadFile("/etc/gateway/brain-services-ciadpi.json")
+	if err != nil {
+		return nil
+	}
+	var raw []ciadpiGroup
+	json.Unmarshal(data, &raw)
+	return raw
 }
 
 type brainTotalsInfo struct {
@@ -91,15 +219,33 @@ type brainTotalsInfo struct {
 
 func brainTotals() brainTotalsInfo {
 	groups := readBrainGroups()
+	cgroups := readCiadpiGroups()
+	zgroups := readZapret2Groups()
 	domains := 0
 	for _, g := range groups {
 		domains += len(g.Domains)
 	}
-	daemons, _ := runCmd("bash", "-c", "pgrep -c nfqws")
+	for _, g := range cgroups {
+		domains += len(g.Domains)
+	}
+	for _, g := range zgroups {
+		domains += len(g.Domains)
+	}
+	// -x (точное совпадение имени процесса) обязателен: без него "nfqws" по
+	// подстроке матчит и nfqws2, задваивая счётчик демонов zapret1.
+	daemons, _ := runCmd("bash", "-c", "pgrep -c -x nfqws")
+	cdaemons, _ := runCmd("bash", "-c", "pgrep -c ciadpi")
+	zdaemons, _ := runCmd("bash", "-c", "pgrep -c -x nfqws2")
 	mem, _ := runCmd("bash", "-c", `ps -o rss= -C nfqws | awk '{s+=$1} END{printf "%.1f", s/1024}'`)
+	cmem, _ := runCmd("bash", "-c", `ps -o rss= -C ciadpi | awk '{s+=$1} END{printf "%.1f", s/1024}'`)
+	zmem, _ := runCmd("bash", "-c", `ps -o rss= -C nfqws2 | awk '{s+=$1} END{printf "%.1f", s/1024}'`)
 	n, _ := strconv.Atoi(strings.TrimSpace(daemons))
+	cn, _ := strconv.Atoi(strings.TrimSpace(cdaemons))
+	zn, _ := strconv.Atoi(strings.TrimSpace(zdaemons))
 	m, _ := strconv.ParseFloat(strings.TrimSpace(mem), 64)
-	return brainTotalsInfo{Groups: len(groups), Domains: domains, Daemons: n, MemoryMB: m}
+	cm, _ := strconv.ParseFloat(strings.TrimSpace(cmem), 64)
+	zm, _ := strconv.ParseFloat(strings.TrimSpace(zmem), 64)
+	return brainTotalsInfo{Groups: len(groups) + len(cgroups) + len(zgroups), Domains: domains, Daemons: n + cn + zn, MemoryMB: m + cm + zm}
 }
 
 // acceptOnlyEntities — сущности мозга без очереди/nfqws (T57: UDP-домен, которому

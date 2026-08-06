@@ -163,6 +163,7 @@ func (s *server) handleDomainsAdd(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось, откатано: " + err.Error(), "output": out})
 			return
 		}
+		s.timeline.Record("config.updated", "Domains list updated")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "added": add, "skipped_present": dupPresent,
@@ -186,6 +187,7 @@ func (s *server) handleDomainsRemove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение не удалось, откатано: " + err.Error(), "output": out})
 			return
 		}
+		s.timeline.Record("config.updated", "Domains list updated")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "domains": s.listDomains()})
 }

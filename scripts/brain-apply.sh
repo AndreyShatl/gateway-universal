@@ -256,6 +256,435 @@ PY
   fi
 }
 
+# --- ciadpi (byedpi) — T-ciadpi: второй десинхронизирующий движок, параллельно
+# zapret/nfqws, полностью изолирован от него (свой state-файл, свой ipset-префикс,
+# свой пул портов) — нулевой риск для существующих zapret-групп при ошибке здесь.
+# Модель — та же группа-по-стратегии, что и zapret, но вместо NFQUEUE+nfqws —
+# REDIRECT в локальный ciadpi-инстанс с -E (transparent, читает SO_ORIGINAL_DST
+# как обычный REDIRECT-таргет, см. хелп ciadpi). Пока только TCP — ciadpi transparent
+# режим не задокументирован для UDP, а глобальный UDP/443 DROP уже покрыт zapret-веткой.
+CIADPI_BIN=${CIADPI_BIN:-/opt/byedpi/ciadpi}
+CSTATE=/etc/gateway/brain-services-ciadpi.json
+CPORT_BASE=15000; CPORT_POOL=500
+GWDB=${GWDB:-/root/gateway-universal/scripts/gwdb.py}
+CIADPI_AUTO_N=${CIADPI_AUTO_N:-3}   # лидер + до (N-1) fallback-групп через -A
+
+cgroup_id() { echo -n "$1|$2" | md5sum | cut -c1-10 | sed 's/^/grpc_/'; }
+
+# build_auto_chain <leader-args> — собрать команду ciadpi из ЛИДЕРА (та стратегия,
+# что реально выиграла в solve.sh/применена вручную) + до CIADPI_AUTO_N-1 следующих
+# по score стратегий из БД, соединённых через -At,r,s,n (torst,redirect,ssl_err,none
+# — см. хелп ciadpi). ciadpi сам переключается между группами на лету по IP
+# (свой кеш ~28ч) — закрывает вариативность CDN-edge (T-ciadpi: разные edge одного
+# домена иногда требуют разных флагов) без ожидания ночной переоценки мозгом.
+# ВАЖНО: в CSTATE/score-учёте участвует только ЛИДЕР — группа/score считается на
+# него, независимо от того, какой конкретно -A-блок реально сработал внутри
+# ciadpi (осознанный компромисс — см. обсуждение с пользователем, вариант 3).
+build_auto_chain() {
+  local leader="$1"
+  local combined="$leader"
+  local extra
+  extra=$(python3 "$GWDB" strategies-list --proto tcp --engine ciadpi 2>/dev/null \
+    | awk -F'\t' -v lead="$leader" '$4!=lead' \
+    | sort -t$'\t' -k9,9 -rn \
+    | head -n $((CIADPI_AUTO_N-1)) \
+    | cut -f4)
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    combined="$combined -At,r,s,n $s"
+  done <<< "$extra"
+  echo "$combined"
+}
+
+alloc_port() {
+  local used p
+  used=$(iptables -t nat -S PREROUTING 2>/dev/null | grep -oE 'to-ports [0-9]+' | awk '{print $2}')
+  used="$used $(pgrep -a ciadpi 2>/dev/null | grep -oE -- '-p ?[0-9]+' | grep -oE '[0-9]+')"
+  used="$used $(python3 -c "import json,os;f='$CSTATE';print(' '.join(str(x['port']) for x in (json.load(open(f)) if os.path.exists(f) else []) if x.get('port') is not None))" 2>/dev/null)"
+  for p in $(seq $CPORT_BASE $((CPORT_BASE+CPORT_POOL))); do echo "$used" | tr ' ' '\n' | grep -qx "$p" || { echo "$p"; return 0; }; done
+  echo "alloc_port: пул исчерпан ($CPORT_BASE..$((CPORT_BASE+CPORT_POOL)))" >&2
+  return 1
+}
+
+# REDIRECT — терминальный таргет в nat-таблице: если наше правило раньше в
+# PREROUTING, чем боевой REDIRECT xray (:12345) или zapret-RETURN, пакет уйдёт
+# к ciadpi и дальше цепочка для НЕГО не обходится (в отличие от zapret, RETURN
+# тут не нужен — REDIRECT сам всё решает).
+csvc_rules() { # <op:-A|-D> <proto:tcp> <ipset> <port>
+  local op=$1 proto=$2 ipset=$3 port=$4
+  if [ "$proto" != "tcp" ]; then
+    echo "ciadpi: только tcp поддерживается на данный момент" >&2
+    return 1
+  fi
+  local rule=(-s $LAN -p tcp -m multiport --dports 80,443 -m addrtype ! --src-type LOCAL -m set --match-set $ipset dst -j REDIRECT --to-ports $port)
+  if [ "$op" = "-A" ]; then
+    iptables -t nat -C PREROUTING "${rule[@]}" 2>/dev/null || iptables -t nat -I PREROUTING 1 "${rule[@]}"
+  else
+    iptables -t nat -D PREROUTING "${rule[@]}" 2>/dev/null
+  fi
+}
+
+start_ciadpi_daemon() { # <group_id> <port> <strategy-args...>
+  local gid=$1 port=$2; shift 2; local strat="$*"
+  local unit=brain-ciadpi-$gid
+  systemctl reset-failed "$unit" 2>/dev/null
+  # -i 0.0.0.0 (не 127.0.0.1!) — REDIRECT в nat PREROUTING подменяет dst-адрес на
+  # адрес ВХОДЯЩЕГО интерфейса (LAN-адрес шлюза для реальных клиентов), не на
+  # loopback (та же причина, по которой xray-dokodemo слушает *:12345, не 127.0.0.1).
+  systemd-run --unit="$unit" --collect "$CIADPI_BIN" -i 0.0.0.0 -p "$port" -E $strat >/dev/null 2>&1
+}
+stop_ciadpi_daemon() { systemctl stop "brain-ciadpi-$1" 2>/dev/null; systemctl reset-failed "brain-ciadpi-$1" 2>/dev/null; }
+
+cstate_load() { python3 -c "import json,os;f='$CSTATE';print(json.dumps(json.load(open(f)) if os.path.exists(f) else []))"; }
+
+cstate_find_group_by_id() { # <group_id> -> "proto<TAB>strategy<TAB>port"
+  python3 - "$CSTATE" "$1" <<'PY'
+import json,os,sys
+f,gid=sys.argv[1],sys.argv[2]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if g["group_id"]==gid:
+        p=g.get("port")
+        print(f"{g.get('proto','tcp')}\t{g.get('strategy','')}\t{p if p is not None else ''}")
+        break
+PY
+}
+
+cstate_find_group_for_domain() { # <domain> -> "group_id<TAB>proto<TAB>strategy<TAB>port" или пусто
+  python3 - "$CSTATE" "$1" <<'PY'
+import json,os,sys
+f,d=sys.argv[1],sys.argv[2]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if d in g.get("domains",[]):
+        p=g.get("port")
+        print(f"{g['group_id']}\t{g.get('proto','tcp')}\t{g.get('strategy','')}\t{p if p is not None else ''}")
+        break
+PY
+}
+
+cstate_upsert_group() { # <group_id> <proto> <strategy> <port>
+  python3 - "$CSTATE" "$1" "$2" "$3" "$4" <<'PY'
+import json,os,sys,time
+f,gid,proto,strat,praw=sys.argv[1:6]
+port=int(praw) if praw else None
+data=json.load(open(f)) if os.path.exists(f) else []
+data=[g for g in data if g["group_id"]!=gid]
+data.append({"group_id":gid,"proto":proto,"strategy":strat,"port":port,"domains":[],
+             "last_active":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())})
+json.dump(data,open(f,"w"),ensure_ascii=False,indent=1)
+PY
+}
+
+cstate_remove_group() { python3 -c "import json,os;f='$CSTATE';d=[g for g in (json.load(open(f)) if os.path.exists(f) else []) if g['group_id']!='$1'];json.dump(d,open(f,'w'),ensure_ascii=False,indent=1)"; }
+
+ensure_cgroup() { # <proto> <strategy> -> "group_id<TAB>port"
+  local proto=$1 strat=$2 gid port
+  gid=$(cgroup_id "$proto" "$strat")
+  local existing; existing=$(cstate_find_group_by_id "$gid")
+  if [ -n "$existing" ]; then
+    port=$(echo "$existing" | cut -f3)
+    echo -e "$gid\t$port"
+    return 0
+  fi
+  local ipset=brainc_$gid
+  ipset create $ipset hash:ip family inet -exist
+  port=$(alloc_port) || { echo "❌ ciadpi-группа $gid: не удалось выделить порт" >&2; return 1; }
+  csvc_rules -A "$proto" $ipset "$port" || return 1
+  local chain; chain=$(build_auto_chain "$strat")
+  start_ciadpi_daemon "$gid" "$port" $chain
+  cstate_upsert_group "$gid" "$proto" "$strat" "$port"
+  echo -e "$gid\t$port"
+}
+
+do_ciadpi() { # <domain> <proto> <strategy-args...>
+  local d=$1 proto=$2; shift 2; local strat="$*"
+  local res gid port
+  res=$(ensure_cgroup "$proto" "$strat") || return 1
+  gid=$(echo "$res" | cut -f1); port=$(echo "$res" | cut -f2)
+
+  local prev; prev=$(cstate_find_group_for_domain "$d")
+  if [ -n "$prev" ] && [ "$(echo "$prev" | cut -f1)" != "$gid" ]; then
+    _detach_domain_from_cgroup "$d" "$(echo "$prev" | cut -f1)"
+  fi
+
+  python3 - "$CSTATE" "$gid" "$d" <<'PY'
+import json,os,sys
+f,gid,d=sys.argv[1],sys.argv[2],sys.argv[3]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if g["group_id"]==gid:
+        if d not in g["domains"]: g["domains"].append(d)
+        break
+json.dump(data,open(f,"w"),ensure_ascii=False,indent=1)
+PY
+  local domains; domains=$(python3 -c "import json;print(' '.join(next(g['domains'] for g in json.load(open('$CSTATE')) if g['group_id']=='$gid')))")
+  rebuild_group_ipset "brainc_$gid" $domains
+  echo "✅ $d -> ciadpi-группа $gid ($proto, порт $port, доменов: $(echo $domains | wc -w))"
+}
+
+_detach_domain_from_cgroup() { # <domain> <group_id>
+  local d=$1 gid=$2
+  local info; info=$(cstate_find_group_by_id "$gid")
+  [ -n "$info" ] || return 0
+  local proto port; proto=$(echo "$info" | cut -f1); port=$(echo "$info" | cut -f3)
+  python3 - "$CSTATE" "$gid" "$d" <<'PY'
+import json,os,sys
+f,gid,d=sys.argv[1],sys.argv[2],sys.argv[3]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if g["group_id"]==gid and d in g["domains"]:
+        g["domains"].remove(d)
+        break
+json.dump(data,open(f,"w"),ensure_ascii=False,indent=1)
+PY
+  local remaining; remaining=$(python3 -c "import json;g=next((x for x in json.load(open('$CSTATE')) if x['group_id']=='$gid'),None);print(' '.join(g['domains']) if g else '')")
+  if [ -z "$remaining" ]; then
+    stop_ciadpi_daemon "$gid"
+    csvc_rules -D "$proto" "brainc_$gid" "$port"
+    ipset destroy "brainc_$gid" 2>/dev/null
+    cstate_remove_group "$gid"
+    echo "🗑 ciadpi-группа $gid опустела — снесена"
+  else
+    rebuild_group_ipset "brainc_$gid" $remaining
+  fi
+}
+
+do_remove_ciadpi() {
+  local d=$1
+  local prev; prev=$(cstate_find_group_for_domain "$d")
+  [ -n "$prev" ] || { echo "…$d не найден ни в одной ciadpi-группе"; return 0; }
+  _detach_domain_from_cgroup "$d" "$(echo "$prev" | cut -f1)"
+  echo "🗑 удалено из ciadpi-группы: $d"
+}
+
+do_restore_ciadpi() {
+  [ -f "$CSTATE" ] || return 0
+  python3 -c "
+import json
+for g in json.load(open('$CSTATE')):
+    p=g.get('port')
+    print(g['group_id']+'\t'+g.get('proto','tcp')+'\t'+(str(p) if p is not None else '')+'\t'+g.get('strategy','')+'\t'+','.join(g['domains']))
+" | while IFS=$'\t' read -r gid proto port strat domains_csv; do
+    [ -n "$gid" ] || continue
+    IFS=',' read -ra domains <<< "$domains_csv"
+    rebuild_group_ipset "brainc_$gid" "${domains[@]}"
+    csvc_rules -A "$proto" "brainc_$gid" "$port"
+    local chain; chain=$(build_auto_chain "$strat")
+    start_ciadpi_daemon "$gid" "$port" $chain
+    echo "↻ восстановлена ciadpi-группа: $gid ($proto, порт $port, доменов: ${#domains[@]})"
+  done
+}
+
+# --- zapret2 (bol-van/zapret2, nfqws2) — T-zapret2: третий движок, параллельно
+# zapret1/ciadpi, полностью изолирован (свой state-файл, свой ipset-префикс, свой
+# пул очередей 800-1099 — не пересекается с zapret1: 210-710). В отличие от ciadpi
+# (REDIRECT) — тот же механизм, что zapret1: NFQUEUE + mangle POSTROUTING, просто
+# другой бинарник (nfqws2, Lua-desync вместо --dpi-desync=...) — поэтому модель
+# groups/queue/svc_rules почти буквально копия zapret1-веток выше, не ciadpi.
+Z2DIR=${Z2DIR:-/opt/zapret2}; NFQWS2=$Z2DIR/nfq2/nfqws2
+Z2LUA="--lua-init=@$Z2DIR/lua/zapret-lib.lua --lua-init=@$Z2DIR/lua/zapret-antidpi.lua --lua-init=@$Z2DIR/lua/zapret-auto.lua"
+Z2STATE=/etc/gateway/brain-services-zapret2.json
+Z2BASE=800; Z2POOL=300
+
+z2group_id() { echo -n "z2|$1|$2" | md5sum | cut -c1-10 | sed 's/^/grpz2_/'; }
+
+alloc_queue2() {
+  local used q
+  used=$(iptables -t mangle -S POSTROUTING 2>/dev/null | grep -oE 'queue-num [0-9]+' | awk '{print $2}')
+  used="$used $(pgrep -a nfqws2 2>/dev/null | grep -oE 'qnum=[0-9]+' | cut -d= -f2)"
+  used="$used $(python3 -c "import json,os;f='$Z2STATE';print(' '.join(str(x['queue']) for x in (json.load(open(f)) if os.path.exists(f) else []) if x.get('queue') is not None))" 2>/dev/null)"
+  for q in $(seq $Z2BASE $((Z2BASE+Z2POOL))); do echo "$used" | tr ' ' '\n' | grep -qx "$q" || { echo "$q"; return 0; }; done
+  echo "alloc_queue2: пул исчерпан ($Z2BASE..$((Z2BASE+Z2POOL)))" >&2
+  return 1
+}
+
+# svc_rules2 — тот же RETURN-перед-xray-REDIRECT + NFQUEUE-в-POSTROUTING паттерн,
+# что и zapret1's svc_rules (см. выше), но заведён отдельно (свой ipset, ничего
+# общего в правилах с zapret1-группами) — проще держать функции раздельно, чем
+# городить общий helper ради экономии 20 строк.
+svc_rules2() { # <op:-A|-D> <proto:tcp|udp> <ipset> <qnum>
+  local op=$1 proto=$2 ipset=$3 q=$4
+  local base=(-s $LAN -p $proto -m multiport --dports 443 -m addrtype ! --src-type LOCAL -m set --match-set $ipset dst)
+  if [ "$proto" = "tcp" ]; then
+    base=(-s $LAN -p tcp -m multiport --dports 80,443 -m addrtype ! --src-type LOCAL -m set --match-set $ipset dst)
+  fi
+  if [ "$op" = "-A" ]; then
+    if [ "$proto" = "tcp" ]; then
+      local nat_ret=(-s $LAN -p tcp -m set --match-set $ipset dst -j RETURN)
+      iptables -t nat -C PREROUTING "${nat_ret[@]}" 2>/dev/null || iptables -t nat -I PREROUTING 1 "${nat_ret[@]}"
+    else
+      local pre_acc=(-s $LAN -p udp --dport 443 -m set --match-set $ipset dst -j ACCEPT)
+      local fwd_acc=(-s $LAN -p udp --dport 443 -m set --match-set $ipset dst -j ACCEPT)
+      iptables -t mangle -C PREROUTING "${pre_acc[@]}" 2>/dev/null || iptables -t mangle -I PREROUTING 1 "${pre_acc[@]}"
+      iptables -C FORWARD "${fwd_acc[@]}" 2>/dev/null || iptables -I FORWARD 1 "${fwd_acc[@]}"
+    fi
+    iptables -t mangle -C POSTROUTING "${base[@]}" -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $q --queue-bypass 2>/dev/null || \
+    iptables -t mangle -I POSTROUTING 1 "${base[@]}" -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $q --queue-bypass
+    iptables -t mangle -C POSTROUTING "${base[@]}" -j ACCEPT 2>/dev/null || iptables -t mangle -I POSTROUTING 2 "${base[@]}" -j ACCEPT
+  else
+    if [ "$proto" = "tcp" ]; then
+      local nat_ret=(-s $LAN -p tcp -m set --match-set $ipset dst -j RETURN)
+      iptables -t nat -D PREROUTING "${nat_ret[@]}" 2>/dev/null
+    else
+      local pre_acc=(-s $LAN -p udp --dport 443 -m set --match-set $ipset dst -j ACCEPT)
+      local fwd_acc=(-s $LAN -p udp --dport 443 -m set --match-set $ipset dst -j ACCEPT)
+      iptables -t mangle -D PREROUTING "${pre_acc[@]}" 2>/dev/null
+      iptables -D FORWARD "${fwd_acc[@]}" 2>/dev/null
+    fi
+    iptables -t mangle -D POSTROUTING "${base[@]}" -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $q --queue-bypass 2>/dev/null
+    iptables -t mangle -D POSTROUTING "${base[@]}" -j ACCEPT 2>/dev/null
+  fi
+}
+
+start_daemon2() { # <group_id> <proto> <qnum> <strategy...>
+  local gid=$1 proto=$2 q=$3; shift 3; local strat="$*"
+  local unit=brain-nfqws2-$gid
+  systemctl reset-failed "$unit" 2>/dev/null
+  systemd-run --unit="$unit" --collect $NFQWS2 --qnum=$q --fwmark=$MARK $Z2LUA --filter-$proto=443 $strat >/dev/null 2>&1
+}
+stop_daemon2() { systemctl stop "brain-nfqws2-$1" 2>/dev/null; systemctl reset-failed "brain-nfqws2-$1" 2>/dev/null; }
+
+z2state_load() { python3 -c "import json,os;f='$Z2STATE';print(json.dumps(json.load(open(f)) if os.path.exists(f) else []))"; }
+
+z2state_find_group_by_id() { # <group_id> -> "proto<TAB>strategy<TAB>queue"
+  python3 - "$Z2STATE" "$1" <<'PY'
+import json,os,sys
+f,gid=sys.argv[1],sys.argv[2]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if g["group_id"]==gid:
+        q=g.get("queue")
+        print(f"{g.get('proto','tcp')}\t{g.get('strategy','')}\t{q if q is not None else ''}")
+        break
+PY
+}
+
+z2state_find_group_for_domain() { # <domain> -> "group_id<TAB>proto<TAB>strategy<TAB>queue" или пусто
+  python3 - "$Z2STATE" "$1" <<'PY'
+import json,os,sys
+f,d=sys.argv[1],sys.argv[2]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if d in g.get("domains",[]):
+        q=g.get("queue")
+        print(f"{g['group_id']}\t{g.get('proto','tcp')}\t{g.get('strategy','')}\t{q if q is not None else ''}")
+        break
+PY
+}
+
+z2state_upsert_group() { # <group_id> <proto> <strategy> <queue> <domains-csv>
+  python3 - "$Z2STATE" "$1" "$2" "$3" "$4" "$5" <<'PY'
+import json,os,sys,time
+f,gid,proto,strat,qraw,domains_csv=sys.argv[1:7]
+q=int(qraw) if qraw else None
+domains=[d for d in domains_csv.split(",") if d]
+data=json.load(open(f)) if os.path.exists(f) else []
+data=[g for g in data if g["group_id"]!=gid]
+data.append({"group_id":gid,"proto":proto,"strategy":strat,"queue":q,"domains":domains,
+             "last_active":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())})
+json.dump(data,open(f,"w"),ensure_ascii=False,indent=1)
+PY
+}
+
+z2state_remove_group() { python3 -c "import json,os;f='$Z2STATE';d=[g for g in (json.load(open(f)) if os.path.exists(f) else []) if g['group_id']!='$1'];json.dump(d,open(f,'w'),ensure_ascii=False,indent=1)"; }
+
+ensure_group2() { # <proto> <strategy> -> "group_id<TAB>queue"
+  local proto=$1 strat=$2 gid q
+  gid=$(z2group_id "$proto" "$strat")
+  local existing; existing=$(z2state_find_group_by_id "$gid")
+  if [ -n "$existing" ]; then
+    q=$(echo "$existing" | cut -f3)
+    echo -e "$gid\t$q"
+    return 0
+  fi
+  local ipset=brainz2_$gid
+  ipset create $ipset hash:ip family inet -exist
+  q=$(alloc_queue2) || { echo "❌ zapret2-группа $gid: не удалось выделить очередь" >&2; return 1; }
+  svc_rules2 -A "$proto" $ipset "$q"
+  start_daemon2 "$gid" "$proto" "$q" $strat
+  z2state_upsert_group "$gid" "$proto" "$strat" "$q" ""
+  echo -e "$gid\t$q"
+}
+
+do_zapret2() { # <domain> <proto> <strategy-args...>
+  local d=$1 proto=$2; shift 2; local strat="$*"
+  local res gid q
+  res=$(ensure_group2 "$proto" "$strat") || return 1
+  gid=$(echo "$res" | cut -f1); q=$(echo "$res" | cut -f2)
+
+  local prev; prev=$(z2state_find_group_for_domain "$d")
+  if [ -n "$prev" ] && [ "$(echo "$prev" | cut -f1)" != "$gid" ]; then
+    _detach_domain_from_z2group "$d" "$(echo "$prev" | cut -f1)"
+  fi
+
+  python3 - "$Z2STATE" "$gid" "$d" <<'PY'
+import json,os,sys
+f,gid,d=sys.argv[1],sys.argv[2],sys.argv[3]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if g["group_id"]==gid:
+        if d not in g["domains"]: g["domains"].append(d)
+        break
+json.dump(data,open(f,"w"),ensure_ascii=False,indent=1)
+PY
+  local domains; domains=$(python3 -c "import json;print(' '.join(next(g['domains'] for g in json.load(open('$Z2STATE')) if g['group_id']=='$gid')))")
+  rebuild_group_ipset "brainz2_$gid" $domains
+  echo "✅ $d -> zapret2-группа $gid ($proto, очередь $q, доменов: $(echo $domains | wc -w))"
+}
+
+_detach_domain_from_z2group() { # <domain> <group_id>
+  local d=$1 gid=$2
+  local info; info=$(z2state_find_group_by_id "$gid")
+  [ -n "$info" ] || return 0
+  local proto q; proto=$(echo "$info" | cut -f1); q=$(echo "$info" | cut -f3)
+  python3 - "$Z2STATE" "$gid" "$d" <<'PY'
+import json,os,sys
+f,gid,d=sys.argv[1],sys.argv[2],sys.argv[3]
+data=json.load(open(f)) if os.path.exists(f) else []
+for g in data:
+    if g["group_id"]==gid and d in g["domains"]:
+        g["domains"].remove(d)
+        break
+json.dump(data,open(f,"w"),ensure_ascii=False,indent=1)
+PY
+  local remaining; remaining=$(python3 -c "import json;g=next((x for x in json.load(open('$Z2STATE')) if x['group_id']=='$gid'),None);print(' '.join(g['domains']) if g else '')")
+  if [ -z "$remaining" ]; then
+    stop_daemon2 "$gid"
+    svc_rules2 -D "$proto" "brainz2_$gid" "$q"
+    ipset destroy "brainz2_$gid" 2>/dev/null
+    z2state_remove_group "$gid"
+    echo "🗑 zapret2-группа $gid опустела — снесена"
+  else
+    rebuild_group_ipset "brainz2_$gid" $remaining
+  fi
+}
+
+do_remove_zapret2() {
+  local d=$1
+  local prev; prev=$(z2state_find_group_for_domain "$d")
+  [ -n "$prev" ] || { echo "…$d не найден ни в одной zapret2-группе"; return 0; }
+  _detach_domain_from_z2group "$d" "$(echo "$prev" | cut -f1)"
+  echo "🗑 удалено из zapret2-группы: $d"
+}
+
+do_restore_zapret2() {
+  [ -f "$Z2STATE" ] || return 0
+  python3 -c "
+import json
+for g in json.load(open('$Z2STATE')):
+    q=g.get('queue')
+    print(g['group_id']+'\t'+g.get('proto','tcp')+'\t'+(str(q) if q is not None else '')+'\t'+g.get('strategy','')+'\t'+','.join(g['domains']))
+" | while IFS=$'\t' read -r gid proto q strat domains_csv; do
+    [ -n "$gid" ] || continue
+    IFS=',' read -ra domains <<< "$domains_csv"
+    rebuild_group_ipset "brainz2_$gid" "${domains[@]}"
+    svc_rules2 -A "$proto" "brainz2_$gid" "$q"
+    start_daemon2 "$gid" "$proto" "$q" $strat
+    echo "↻ восстановлена zapret2-группа: $gid ($proto, очередь $q, доменов: ${#domains[@]})"
+  done
+}
+
 # --- VPS-автообход (без изменений) ---
 AR_JSON=/etc/gateway/autoroute.json; AR_IPSET=gw_autoroute
 GWCFG=${GWCFG:-/root/gateway-universal/config.env}
@@ -361,16 +790,24 @@ for g in json.load(open('$STATE')):
 }
 
 case "${1:-}" in
-  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_zapret "$d" "$proto" "$@" ;;
-  vps)    shift; do_remove "$1" >/dev/null 2>&1
+  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@" ;;
+  ciadpi) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@" ;;
+  zapret2) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@" ;;
+  vps)    shift; do_remove "$1" >/dev/null 2>&1; do_remove_ciadpi "$1" >/dev/null 2>&1; do_remove_zapret2 "$1" >/dev/null 2>&1
           if has_vps; then ar_add "$1"; echo "🔵 vps: $1 в автообходе"
-          else echo "⚪ $1: ни одна стратегия zapret не пробила, VPS не настроен — остаётся заблокирован"; fi ;;
+          else echo "⚪ $1: ни одна стратегия не пробила, VPS не настроен — остаётся заблокирован"; fi ;;
   remove-entity) shift; do_remove "$1" ;;
-  remove) shift; do_remove "$1"; ar_del "$1" ;;
+  remove) shift; do_remove "$1"; do_remove_ciadpi "$1"; do_remove_zapret2 "$1"; ar_del "$1" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
+  list-ciadpi) cat "$CSTATE" 2>/dev/null || echo "[]" ;;
+  list-zapret2) cat "$Z2STATE" 2>/dev/null || echo "[]" ;;
+  cgroup-of) shift; cstate_find_group_for_domain "$1" ;;
+  z2group-of) shift; z2state_find_group_for_domain "$1" ;;
   groups) state_load ;;
   group-of) shift; state_find_group_for_domain "$1" ;;
   move)   shift; do_move "$1" "$2" ;;
-  restore) do_restore ;;
-  *) echo "usage: brain-apply.sh {zapret <d> <tcp|udp> <strat>|vps <d>|remove <d>|list|groups|group-of <d>|move <d> <gid>|restore}" >&2; exit 2 ;;
+  restore) do_restore; do_restore_ciadpi; do_restore_zapret2 ;;
+  restore-ciadpi) do_restore_ciadpi ;;
+  restore-zapret2) do_restore_zapret2 ;;
+  *) echo "usage: brain-apply.sh {zapret <d> <tcp|udp> <strat>|ciadpi <d> <tcp> <strat>|zapret2 <d> <tcp|udp> <strat>|vps <d>|remove <d>|list|list-ciadpi|list-zapret2|groups|group-of <d>|move <d> <gid>|restore|restore-ciadpi|restore-zapret2}" >&2; exit 2 ;;
 esac
