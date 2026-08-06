@@ -53,6 +53,15 @@ type whitelistEntry struct {
 	AddedAt string `json:"added_at"`
 }
 
+// hiddenWhitelistNote — записи, чья заметка помечена как техническая (2026-08-06):
+// принудительный VPS-роутинг adult-доменов (pornhub и т.п., см. запись от
+// 2026-08-01 — zapret ломал авторизацию/редиректил на VK) реально нужен
+// детектору, но неловко показывать в списке панели. INSERT/whitelisted-запрос
+// в БД не трогаем — фильтруем только вывод в UI.
+func hiddenWhitelistNote(note string) bool {
+	return strings.Contains(strings.ToLower(note), "pornhub")
+}
+
 func (s *server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -71,7 +80,15 @@ func (s *server) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			id, _ := strconv.ParseInt(f[0], 10, 64)
-			list = append(list, whitelistEntry{ID: id, Pattern: f[1], Kind: f[2], Note: f[3], Source: f[4], AddedAt: f[5]})
+			entry := whitelistEntry{ID: id, Pattern: f[1], Kind: f[2], Note: f[3], Source: f[4], AddedAt: f[5]}
+			if hiddenWhitelistNote(entry.Note) {
+				// Технические записи вроде принудительного VPS-роутинга adult-
+				// доменов (см. hiddenWhitelistNote) реально нужны детектору —
+				// не удаляем из БД, только не показываем в UI, чтобы не смущать
+				// пользователей панели.
+				continue
+			}
+			list = append(list, entry)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"whitelist": list})
 

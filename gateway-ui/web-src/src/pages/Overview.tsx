@@ -1,11 +1,10 @@
 import { TopBar } from '../components/TopBar'
-import { EngineCard } from '../components/EngineCard'
 import { ModesPanel } from '../components/ModesPanel'
 import { MissionTimeline } from '../components/MissionTimeline'
 import { HealthPanel } from '../components/HealthPanel'
 import { InternetPanel } from '../components/InternetPanel'
 import { usePoll } from '../hooks/usePoll'
-import { fetchStatus, fetchConnection, fetchZapretVersion, fetchCiadpiVersion, fetchZapret2Version } from '../lib/api'
+import { fetchStatus, fetchConnection } from '../lib/api'
 
 function SectionHead({ title }: { title: string }) {
   return (
@@ -97,18 +96,9 @@ export function Overview() {
         </div>
       </div>
 
-      <div className="mb-(--section-gap)">
+      <div>
         <SectionHead title="Хронология" />
         <MissionTimeline />
-      </div>
-
-      <div>
-        <SectionHead title="Движки обхода" />
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(var(--grid-min),1fr))] gap-(--grid-gap)">
-          <EngineCard engine="zapret" label="zapret" fetcher={fetchZapretVersion} index={0} />
-          <EngineCard engine="ciadpi" label="ciadpi" fetcher={fetchCiadpiVersion} index={1} />
-          <EngineCard engine="zapret2" label="zapret2" fetcher={fetchZapret2Version} index={2} />
-        </div>
       </div>
     </div>
   )

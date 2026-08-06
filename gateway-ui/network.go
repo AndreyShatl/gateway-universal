@@ -68,6 +68,13 @@ func readNetInterfaces() []netInterface {
 			continue
 		}
 		name := strings.TrimSpace(parts[0])
+		if name == "lo" {
+			// loopback — operstate у него в Linux всегда "unknown", даже когда
+			// реально работает (это НЕ "down"), а RX/TX/errors по нему никогда
+			// не диагностируют ничего полезного — просто убираем из списка,
+			// чем показывать неверный статус.
+			continue
+		}
 		fields := strings.Fields(parts[1])
 		if len(fields) < 16 {
 			continue

@@ -117,7 +117,14 @@ export function DomainsPage() {
       <TopBar title="Domains" subtitle="ручные домены и режимы сервисов" live={!servicesError} />
 
       <div className="mb-(--section-gap)">
-        <SectionHead title="Домены в обход" count={domainsData?.domains.length} />
+        <SectionHead title="Домены в обход (вручную)" count={domainsData?.domains.length} />
+        {domainsData && (
+          <div className="mb-3 text-[11.5px] text-text-muted">
+            Плюс ещё {domainsData.defaults.length} курируемых доменов уже встроены и работают без ручного
+            добавления (Instagram/Discord/YouTube и т.д. — см. вкладку Domains ниже, раздел «Сервисы»); список
+            здесь — только для доменов, которых нет ни в курируемых, ни в автообходе.
+          </div>
+        )}
         <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
           <div className="mb-3 flex gap-2">
             <input
