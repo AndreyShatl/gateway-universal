@@ -39,3 +39,11 @@ sleep 2
 bash "$BRAIN_APPLY" restore
 
 echo "готово: $before -> $after"
+# Mission Timeline (T-shattl-gwui-feedback, 2026-08-06): "список обновлений,
+# которые были" на вкладке Updates — TIMELINE_FILE не задан этим процессом,
+# путь совпадает с дефолтом --timeline-file в gateway-ui (main.go).
+python3 -c "
+import json, datetime
+line = json.dumps({'at': datetime.datetime.utcnow().isoformat()+'Z', 'kind': 'engine.updated', 'message': 'zapret: $before -> $after'})
+open('/etc/gateway/timeline.jsonl', 'a').write(line + '\n')
+" 2>/dev/null || true

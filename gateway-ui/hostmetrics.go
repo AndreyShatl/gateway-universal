@@ -19,29 +19,32 @@ import (
 )
 
 type hostMetrics struct {
-	UptimeS     int64   `json:"uptime_s"`
-	CPUPct      float64 `json:"cpu_pct"`
-	MemoryPct   float64 `json:"memory_pct"`
-	MemTotalMB  float64 `json:"mem_total_mb"`
-	SwapPct     float64 `json:"swap_pct"`
-	SwapTotalMB float64 `json:"swap_total_mb"`
-	DiskPct     float64 `json:"disk_pct"`
-	DiskTotalGB float64 `json:"disk_total_gb"`
-	CPUTempC    float64 `json:"cpu_temp_c"`
-	LoadAvg1    float64 `json:"load_avg_1"`
-	LoadAvg5    float64 `json:"load_avg_5"`
-	LoadAvg15   float64 `json:"load_avg_15"`
-	CPUCores    int     `json:"cpu_cores"`
-	CPUMHz      float64 `json:"cpu_mhz"`
+	UptimeS     int64     `json:"uptime_s"`
+	CPUPct      float64   `json:"cpu_pct"`
+	MemoryPct   float64   `json:"memory_pct"`
+	MemTotalMB  float64   `json:"mem_total_mb"`
+	SwapPct     float64   `json:"swap_pct"`
+	SwapTotalMB float64   `json:"swap_total_mb"`
+	DiskPct     float64   `json:"disk_pct"`
+	DiskTotalGB float64   `json:"disk_total_gb"`
+	CPUTempC    float64   `json:"cpu_temp_c"`
+	LoadAvg1    float64   `json:"load_avg_1"`
+	LoadAvg5    float64   `json:"load_avg_5"`
+	LoadAvg15   float64   `json:"load_avg_15"`
+	CPUCores    int       `json:"cpu_cores"`
+	CPUMHz      float64   `json:"cpu_mhz"`
+	PerCorePct  []float64 `json:"per_core_pct"`
 }
 
 func collectHostMetrics() hostMetrics {
 	swapPct, swapTotalMB := swapUsedPct()
 	load1, load5, load15 := loadAvg()
 	cores, mhz := cpuInfo()
+	cpuPct, perCore := cpuPctSample()
 	return hostMetrics{
 		UptimeS:     uptimeSeconds(),
-		CPUPct:      cpuPctSample(),
+		CPUPct:      cpuPct,
+		PerCorePct:  perCore,
 		MemoryPct:   memoryUsedPct(),
 		MemTotalMB:  memTotalMB(),
 		SwapPct:     swapPct,
@@ -65,17 +68,28 @@ func (s *server) handleHostMetrics(w http.ResponseWriter, r *http.Request) {
 // мгновенную загрузку — нужны два снимка с паузой между ними.
 const cpuSampleDelay = 200 * time.Millisecond
 
-func cpuPctSample() float64 {
-	first, err := readCPUStat()
+// cpuPctSample — общий CPU% + по-ядерный срез (для полосок в стиле htop,
+// ТЗ 2026-08-06). Одна пара снимков /proc/stat на оба результата — нет
+// смысла спать 200мс дважды ради того же файла.
+func cpuPctSample() (total float64, perCore []float64) {
+	first, err := readAllCPUStat()
 	if err != nil {
-		return 0
+		return 0, nil
 	}
 	time.Sleep(cpuSampleDelay)
-	second, err := readCPUStat()
+	second, err := readAllCPUStat()
 	if err != nil {
-		return 0
+		return 0, nil
 	}
-	return cpuPctFromSamples(first, second)
+	if len(first) == 0 || len(second) == 0 {
+		return 0, nil
+	}
+	total = cpuPctFromSamples(first[0], second[0])
+	perCore = make([]float64, 0, len(second)-1)
+	for i := 1; i < len(second) && i < len(first); i++ {
+		perCore = append(perCore, cpuPctFromSamples(first[i], second[i]))
+	}
+	return total, perCore
 }
 
 type cpuStat struct {
@@ -83,18 +97,36 @@ type cpuStat struct {
 	total uint64
 }
 
-func readCPUStat() (cpuStat, error) {
+// readAllCPUStat — [0]=агрегат ("cpu "), [1:]=по ядрам ("cpu0".."cpuN") —
+// именно в порядке строк /proc/stat, который совпадает с "processor" в
+// /proc/cpuinfo (cpuInfo()) на всех обычных Linux-системах.
+func readAllCPUStat() ([]cpuStat, error) {
 	raw, err := os.ReadFile("/proc/stat")
 	if err != nil {
-		return cpuStat{}, err
+		return nil, err
 	}
-	return parseCPUStat(raw)
+	var out []cpuStat
+	sc := bufio.NewScanner(strings.NewReader(string(raw)))
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "cpu") {
+			break // строки cpuN идут подряд в начале файла, дальше — intr/ctxt/...
+		}
+		st, err := parseCPUStatLine(line)
+		if err != nil {
+			continue
+		}
+		out = append(out, st)
+	}
+	if len(out) == 0 {
+		return nil, strconv.ErrSyntax
+	}
+	return out, nil
 }
 
-func parseCPUStat(raw []byte) (cpuStat, error) {
-	line := strings.SplitN(string(raw), "\n", 2)[0]
+func parseCPUStatLine(line string) (cpuStat, error) {
 	fields := strings.Fields(line)
-	if len(fields) < 5 || fields[0] != "cpu" {
+	if len(fields) < 5 {
 		return cpuStat{}, strconv.ErrSyntax
 	}
 	var total, idle uint64

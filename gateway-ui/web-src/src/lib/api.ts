@@ -81,6 +81,20 @@ export const saveServices = (services: ZService[]) =>
     body: JSON.stringify(services),
   })
 export const fetchConnection = () => api<ConnectionResponse>('/api/connection')
+export const setConnectionLink = (link: string) =>
+  api<{ ok?: boolean; error?: string; addr?: string }>('/api/connection', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `link=${encodeURIComponent(link)}`,
+  })
+
+export const fetchRouterIP = () => api<{ router_ip: string }>('/api/router-ip')
+export const setRouterIP = (ip: string) =>
+  api<{ ok?: boolean; error?: string }>('/api/router-ip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `router_ip=${encodeURIComponent(ip)}`,
+  })
 export const fetchZapretVersion = () => api<EngineVersion>('/api/zapret/version')
 export const fetchCiadpiVersion = () => api<EngineVersion>('/api/ciadpi/version')
 export const fetchZapret2Version = () => api<EngineVersion>('/api/zapret2/version')
@@ -233,6 +247,7 @@ export interface HostMetrics {
   load_avg_15: number
   cpu_cores: number
   cpu_mhz: number
+  per_core_pct: number[] | null
 }
 
 export const fetchHostMetrics = () => api<HostMetrics>('/api/host-metrics')

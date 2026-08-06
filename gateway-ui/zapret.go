@@ -182,9 +182,18 @@ func (s *server) handleZapretUpdate(w http.ResponseWriter, r *http.Request) {
 		"exec > " + shq(s.zupdateLog()) + " 2>&1\n" +
 		"set -x\n" +
 		"cd " + shq(zb) + " || exit 1\n" +
+		"before=$(git rev-parse --short HEAD)\n" +
 		"git fetch --depth 1 origin && git reset --hard FETCH_HEAD || exit 1\n" +
+		"after=$(git rev-parse --short HEAD)\n" +
 		"make -C nfq && make -C mdig && make -C tpws\n" +
 		"systemctl restart zapret.service\n" +
+		// Mission Timeline (T-shattl-gwui-feedback, 2026-08-06) — та же
+		// запись, что и у еженедельного таймера (scripts/zapret-auto-update.sh).
+		"python3 -c \"\n" +
+		"import json, datetime\n" +
+		"line = json.dumps({'at': datetime.datetime.utcnow().isoformat()+'Z', 'kind': 'engine.updated', 'message': 'zapret: $before -> $after'})\n" +
+		"open('/etc/gateway/timeline.jsonl', 'a').write(line + chr(10))\n" +
+		"\" 2>/dev/null || true\n" +
 		"echo __ZUPDATE_DONE__ rc=$?\n"
 	scriptPath := filepath.Join(filepath.Dir(s.scanDir), "zupdate.sh")
 	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {

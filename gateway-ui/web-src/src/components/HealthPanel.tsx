@@ -56,6 +56,30 @@ function fmtCapacity(cores?: number, mhz?: number) {
   return parts.join(' @ ')
 }
 
+// Полоски загрузки по ядрам (htop-стиль, но лаконично под токены Shattl —
+// ТЗ 2026-08-06). Количество полосок = число потоков CPU.
+function coreBarColor(pct: number) {
+  if (pct >= 85) return 'bg-danger'
+  if (pct >= 60) return 'bg-warning'
+  return 'bg-accent'
+}
+
+function CoreBars({ cores }: { cores?: number[] | null }) {
+  if (!cores || cores.length === 0) return null
+  return (
+    <div className="flex items-end gap-[3px] pb-2.5" style={{ height: 22 }}>
+      {cores.map((pct, i) => (
+        <div key={i} className="relative w-[5px] flex-1 max-w-[9px] overflow-hidden rounded-[1.5px] bg-border" style={{ height: '100%' }}>
+          <div
+            className={`absolute bottom-0 left-0 w-full rounded-[1.5px] transition-[height] duration-500 ${coreBarColor(pct)}`}
+            style={{ height: `${Math.max(4, Math.min(100, pct))}%` }}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function HealthPanel() {
   const { data } = usePoll(fetchHostMetrics, 5000)
 
@@ -69,6 +93,7 @@ export function HealthPanel() {
         <span className="font-mono text-[10.5px] text-text-muted">{fmtCapacity(data?.cpu_cores, data?.cpu_mhz)}</span>
       </div>
       <Field label="CPU" value={data ? `${Math.round(data.cpu_pct)}%` : '—'} />
+      <CoreBars cores={data?.per_core_pct} />
       <Field label="RAM" value={fmtUsedOfTotalMB(data?.memory_pct, data?.mem_total_mb)} />
       <Field label="Swap" value={fmtUsedOfTotalMB(data?.swap_pct, data?.swap_total_mb)} />
       <Field label="Disk" value={fmtUsedOfTotalGB(data?.disk_pct, data?.disk_total_gb)} />

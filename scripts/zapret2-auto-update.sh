@@ -44,3 +44,9 @@ fi
 bash "$BRAIN_APPLY" restore-zapret2
 
 echo "готово: $before -> $after (групп перезапущено: $(echo "$active_units" | grep -c .))"
+# Mission Timeline (T-shattl-gwui-feedback, 2026-08-06) — см. zapret-auto-update.sh.
+python3 -c "
+import json, datetime
+line = json.dumps({'at': datetime.datetime.utcnow().isoformat()+'Z', 'kind': 'engine.updated', 'message': 'zapret2: $before -> $after'})
+open('/etc/gateway/timeline.jsonl', 'a').write(line + '\n')
+" 2>/dev/null || true

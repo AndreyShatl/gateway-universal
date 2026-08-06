@@ -1,12 +1,55 @@
+import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { EngineCard } from '../components/EngineCard'
 import { usePoll } from '../hooks/usePoll'
-import { fetchMonitor, fetchZapretVersion, fetchCiadpiVersion, fetchZapret2Version } from '../lib/api'
+import { fetchMonitor, fetchZapretVersion, fetchCiadpiVersion, fetchZapret2Version, fetchTimeline } from '../lib/api'
 
 function fmtBuildDate(unixSec: string) {
   const n = Number(unixSec)
   if (!n) return '—'
   return new Date(n * 1000).toLocaleString()
+}
+
+function UpdateHistory() {
+  const { data } = usePoll(fetchTimeline, 15000)
+  const [open, setOpen] = useState(false)
+  const updates = (data ?? []).filter((ev) => ev.kind === 'engine.updated')
+
+  return (
+    <div className="mb-(--section-gap) rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <span className="text-[10.5px] uppercase tracking-wide text-text-muted">
+          История обновлений {updates.length > 0 && `(${updates.length})`}
+        </span>
+        <ChevronDown size={14} strokeWidth={2} className={`text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-3">
+          {updates.length === 0 ? (
+            <div className="text-[12px] text-text-muted">
+              Пока пусто — записи появляются начиная с этого обновления панели (задним числом не восстановить).
+            </div>
+          ) : (
+            updates
+              .slice()
+              .reverse()
+              .map((ev, i) => (
+                <div key={i} className="flex justify-between border-b border-border py-2 text-[12px] last:border-b-0">
+                  <span className="font-mono">{ev.message}</span>
+                  <span className="whitespace-nowrap font-mono text-text-muted">
+                    {new Date(ev.at).toLocaleString()}
+                  </span>
+                </div>
+              ))
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function UpdatesPage() {
@@ -36,12 +79,14 @@ export function UpdatesPage() {
         <EngineCard engine="zapret2" label="zapret2" fetcher={fetchZapret2Version} index={2} />
       </div>
 
-      <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad) text-[12px] text-text-muted">
+      <div className="mb-(--section-gap) rounded-[--card-radius] border border-border bg-surface p-(--card-pad) text-[12px] text-text-muted">
         Обновление движков всегда подтягивает последний коммит апстрима (git fetch + rebuild) —
         отдельного шага "проверить, потом установить" и отката на произвольную старую версию нет.
         Если сборка после обновления не удаётся, скрипт автоматически откатывается на предыдущий
         коммит сам — вручную откатывать не требуется.
       </div>
+
+      <UpdateHistory />
     </div>
   )
 }
