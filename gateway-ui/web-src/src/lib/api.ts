@@ -259,13 +259,18 @@ export interface Preset {
 
 export const fetchPresets = () => api<{ presets: Preset[] }>('/api/presets')
 
+export interface WorkingStrategy {
+  domain: string
+  strategy: string
+}
+
 export interface ScanStatus {
   exists: boolean
   running: boolean
   can_start: boolean
   precondition_ok: boolean
   precondition: string
-  working: string
+  working: WorkingStrategy[]
   log_tail: string
   status?: string
   started?: string
@@ -355,10 +360,10 @@ export interface InternetChecks {
 export const fetchInternetChecks = () => api<InternetChecks>('/api/internet-checks')
 
 export const fetchScanStatus = () => api<ScanStatus>('/api/scan')
-export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard') =>
+export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard', owner = 'manual') =>
   api<{ ok?: boolean; error?: string }>('/api/scan/start', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner: 'manual', domains, http: true, tls12: true, tls13: true, quic: true, scanlevel, parallel: true }),
+    body: JSON.stringify({ owner, domains, http: true, tls12: true, tls13: true, quic: true, scanlevel, parallel: true }),
   })
 export const stopScan = () => api<{ ok?: boolean }>('/api/scan/stop', { method: 'POST' })

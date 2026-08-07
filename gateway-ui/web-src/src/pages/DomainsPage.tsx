@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X } from 'lucide-react'
+import { X, Wand2 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, type ZService } from '../lib/api'
+import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, startScan, fetchScanStatus, type ZService } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
@@ -32,7 +32,25 @@ const modes = [
   { value: 'direct', label: 'direct' },
 ]
 
-function ModeToggle({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+// Порог для "Авто": если хотя бы половина доменов сервиса проходит через
+// zapret (по результатам blockcheck) — оставляем zapret на весь сервис,
+// иначе форсируем vps. Per-domain роутинг внутри одного сервиса архитектурно
+// не поддержан (zapret-services.json хранит один mode на сервис целиком) —
+// сознательно не стали городить это ради авто-режима, majority vote проще
+// и достаточно для решения "этот сервис в целом легко обходится или нет".
+const AUTO_ZAPRET_THRESHOLD = 0.5
+
+function ModeToggle({
+  value,
+  onChange,
+  onAuto,
+  autoBusy,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onAuto: () => void
+  autoBusy: boolean
+}) {
   const current = value || 'zapret'
   return (
     <div className="flex gap-0.5 rounded-lg border border-border p-0.5">
@@ -47,11 +65,30 @@ function ModeToggle({ value, onChange }: { value: string; onChange: (v: string) 
           {m.label}
         </button>
       ))}
+      <button
+        onClick={onAuto}
+        disabled={autoBusy}
+        title="Прогнать домены через blockcheck и подобрать zapret/vps автоматически"
+        className="flex items-center gap-1 rounded-md px-2 py-1 font-mono text-[10.5px] text-text-muted transition-colors hover:text-text disabled:opacity-40"
+      >
+        <Wand2 size={11} strokeWidth={2} className={autoBusy ? 'animate-pulse' : ''} />
+        {autoBusy ? '…' : 'auto'}
+      </button>
     </div>
   )
 }
 
-function ServiceRow({ svc, onModeChange }: { svc: ZService; onModeChange: (id: string, mode: string) => void }) {
+function ServiceRow({
+  svc,
+  onModeChange,
+  onAuto,
+  autoBusy,
+}: {
+  svc: ZService
+  onModeChange: (id: string, mode: string) => void
+  onAuto: (svc: ZService) => void
+  autoBusy: boolean
+}) {
   return (
     <div className="flex items-center justify-between border-b border-border py-3 text-[12.5px] last:border-b-0">
       <div>
@@ -61,7 +98,7 @@ function ServiceRow({ svc, onModeChange }: { svc: ZService; onModeChange: (id: s
         </div>
         <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
       </div>
-      <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} />
+      <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
     </div>
   )
 }
@@ -74,6 +111,8 @@ export function DomainsPage() {
   const [msg, setMsg] = useState<string | null>(null)
   const [localServices, setLocalServices] = useState<ZService[] | null>(null)
   const [saving, setSaving] = useState(false)
+  const [autoServiceId, setAutoServiceId] = useState<string | null>(null)
+  const autoCancelled = useRef(false)
 
   const services = localServices ?? servicesData?.services ?? []
 
@@ -107,6 +146,63 @@ export function DomainsPage() {
     const next = services.map((s) => (s.id === id ? { ...s, mode } : s))
     setLocalServices(next)
   }
+
+  // "Авто": прогоняет домены сервиса через blockcheck (тот же движок, что и
+  // ручной "Поиск стратегии" на Monitor), затем сам решает zapret/vps по
+  // majority vote (см. AUTO_ZAPRET_THRESHOLD) и подставляет режим — дальше
+  // всё равно требуется "Сохранить и применить", ничего не применяется
+  // молча за спиной пользователя.
+  async function onAuto(svc: ZService) {
+    if (svc.domains.length === 0) {
+      setMsg('✗ у сервиса нет доменов для проверки')
+      return
+    }
+    setMsg(null)
+    autoCancelled.current = false
+    try {
+      await startScan(svc.domains, 'quick', `auto:${svc.id}`)
+      setAutoServiceId(svc.id)
+    } catch (e) {
+      setMsg('✗ ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  useEffect(() => {
+    if (!autoServiceId) return
+    const svcId = autoServiceId
+
+    async function poll() {
+      let st
+      try {
+        st = await fetchScanStatus()
+      } catch (e) {
+        if (autoCancelled.current) return
+        setMsg('✗ ' + (e instanceof Error ? e.message : String(e)))
+        setAutoServiceId(null)
+        return
+      }
+      if (autoCancelled.current) return
+      if (st.running) {
+        setTimeout(poll, 3000)
+        return
+      }
+      const svc = services.find((s) => s.id === svcId)
+      if (svc) {
+        const workingDomains = new Set(st.working.map((w) => w.domain))
+        const hit = svc.domains.filter((d) => workingDomains.has(d)).length
+        const mode = svc.domains.length > 0 && hit / svc.domains.length >= AUTO_ZAPRET_THRESHOLD ? 'zapret' : 'vps'
+        const next = services.map((s) => (s.id === svcId ? { ...s, mode } : s))
+        setLocalServices(next)
+        setMsg(`✓ авто-подбор для «${svc.name}»: ${mode} (${hit}/${svc.domains.length} доменов через zapret) — нажмите «Сохранить и применить»`)
+      }
+      setAutoServiceId(null)
+    }
+    poll()
+    return () => {
+      autoCancelled.current = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoServiceId])
 
   async function onSaveServices() {
     if (!localServices) return
@@ -185,7 +281,7 @@ export function DomainsPage() {
         <div className="mb-3.5 flex items-center justify-between">
           <h2 className="m-0 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
             Сервисы ({services.length})
-            <InfoTip text="Курируемые группы доменов с готовыми стратегиями обхода. Режим на каждую: zapret (свой DPI-обход), vps (форс через VPS-туннель) или direct (без обхода вообще)." />
+            <InfoTip text="Курируемые группы доменов с готовыми стратегиями обхода. Режим на каждую: zapret (свой DPI-обход), vps (форс через VPS-туннель) или direct (без обхода вообще). Кнопка auto прогоняет все домены сервиса через blockcheck и сама подбирает zapret/vps по большинству — решение всё равно нужно подтвердить кнопкой «Сохранить и применить»." />
           </h2>
           {localServices && (
             <button
@@ -200,7 +296,7 @@ export function DomainsPage() {
         <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
           {services.length === 0 && <div className="text-[12.5px] text-text-muted">загрузка…</div>}
           {services.map((svc) => (
-            <ServiceRow key={svc.id} svc={svc} onModeChange={onModeChange} />
+            <ServiceRow key={svc.id} svc={svc} onModeChange={onModeChange} onAuto={onAuto} autoBusy={autoServiceId === svc.id} />
           ))}
         </div>
       </div>

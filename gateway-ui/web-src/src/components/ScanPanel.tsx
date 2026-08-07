@@ -84,7 +84,15 @@ export function ScanPanel() {
         )}
       </div>
       {msg && <div className="mb-2 text-[11px] text-text-muted">{msg}</div>}
-      {data?.working && <div className="mb-2 font-mono text-[11.5px] text-text-secondary">{data.working}</div>}
+      {data && data.working.length > 0 && (
+        <div className="mb-2 space-y-1 font-mono text-[11.5px] text-text-secondary">
+          {data.working.map((w, i) => (
+            <div key={i} className="truncate">
+              {w.domain}: <span className="text-text-muted">{w.strategy}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {data?.log_tail && (
         <pre className="max-h-[180px] overflow-auto rounded-md border border-border bg-bg p-2.5 font-mono text-[11px] leading-relaxed text-text-muted">
           {data.log_tail}
