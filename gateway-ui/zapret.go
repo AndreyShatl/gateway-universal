@@ -40,6 +40,11 @@ type zService struct {
 	Mode     string     `json:"mode"` // vps | zapret (пусто = zapret)
 	Domains  []string   `json:"domains"`
 	Channels []zChannel `json:"channels"`
+	// AutoAt — когда режим последний раз подобран кнопкой "auto" (blockcheck
+	// + majority vote), не вручную. Пусто, если mode когда-либо менялся
+	// вручную после этого — см. фидбек 2026-08-07 ("auto" не персистентный
+	// режим, это разовое действие, но должно быть видно, что оно было).
+	AutoAt string `json:"auto_at,omitempty"`
 }
 
 func (s *server) readServices() ([]zService, error) {

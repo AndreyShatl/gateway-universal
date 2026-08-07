@@ -78,6 +78,17 @@ function ModeToggle({
   )
 }
 
+// Относительное время для пометки "подобрано автоматически" — тот же
+// формат, что и в остальном интерфейсе (fmtAgo-подобный, но локальный:
+// отдельного общего lib/format.ts в этом репо нет).
+function fmtAgo(iso: string) {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (s < 60) return 'только что'
+  if (s < 3600) return `${Math.floor(s / 60)} мин назад`
+  if (s < 86400) return `${Math.floor(s / 3600)} ч назад`
+  return `${Math.floor(s / 86400)} дн назад`
+}
+
 function ServiceRow({
   svc,
   onModeChange,
@@ -95,6 +106,15 @@ function ServiceRow({
         <div className="flex items-center gap-1.5 font-medium">
           {svc.name}
           {serviceHints[svc.id] && <InfoTip text={serviceHints[svc.id]} />}
+          {svc.auto_at && (
+            <span
+              className="flex items-center gap-1 rounded-md bg-[--accent-dim] px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-accent"
+              title={`Режим подобран кнопкой auto ${new Date(svc.auto_at).toLocaleString()}`}
+            >
+              <Wand2 size={9} strokeWidth={2} />
+              auto {fmtAgo(svc.auto_at)}
+            </span>
+          )}
         </div>
         <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
       </div>
@@ -143,7 +163,9 @@ export function DomainsPage() {
   }
 
   function onModeChange(id: string, mode: string) {
-    const next = services.map((s) => (s.id === id ? { ...s, mode } : s))
+    // Ручное переключение — снимаем пометку "подобрано автоматически"
+    // (см. auto_at), раз человек сам явно выбрал режим.
+    const next = services.map((s) => (s.id === id ? { ...s, mode, auto_at: undefined } : s))
     setLocalServices(next)
   }
 
@@ -191,7 +213,7 @@ export function DomainsPage() {
         const workingDomains = new Set(st.working.map((w) => w.domain))
         const hit = svc.domains.filter((d) => workingDomains.has(d)).length
         const mode = svc.domains.length > 0 && hit / svc.domains.length >= AUTO_ZAPRET_THRESHOLD ? 'zapret' : 'vps'
-        const next = services.map((s) => (s.id === svcId ? { ...s, mode } : s))
+        const next = services.map((s) => (s.id === svcId ? { ...s, mode, auto_at: new Date().toISOString() } : s))
         setLocalServices(next)
         setMsg(`✓ авто-подбор для «${svc.name}»: ${mode} (${hit}/${svc.domains.length} доменов через zapret) — нажмите «Сохранить и применить»`)
       }

@@ -56,6 +56,7 @@ export interface ZService {
   mode: string // "" | "zapret" | "vps" | "direct"
   domains: string[]
   channels: ZChannel[]
+  auto_at?: string
 }
 
 export const fetchStatus = () => api<StatusResponse>('/api/status')
