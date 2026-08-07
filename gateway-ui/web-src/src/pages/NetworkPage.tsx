@@ -1,9 +1,10 @@
 import { TopBar } from '../components/TopBar'
 import { InfoTip } from '../components/InfoTip'
+import { BlurReveal } from '../components/BlurReveal'
 import { usePoll } from '../hooks/usePoll'
-import { fetchNetwork, fetchConnection } from '../lib/api'
+import { fetchNetwork, fetchConnection, fetchExitIP } from '../lib/api'
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between border-b border-border py-2.5 text-[12.5px] last:border-b-0">
       <span className="text-text-muted">{label}</span>
@@ -34,14 +35,20 @@ function fmtBytes(n: number) {
 export function NetworkPage() {
   const { data, error } = usePoll(fetchNetwork, 5000)
   const { data: conn } = usePoll(fetchConnection, 10000)
+  const { data: exitIP } = usePoll(fetchExitIP, 30000)
 
   return (
     <div>
       <TopBar title="Network" subtitle="интерфейсы, маршрутизация, DNS" live={!error} />
 
       <div className="mb-(--section-gap) grid grid-cols-[repeat(auto-fit,minmax(var(--grid-min),1fr))] gap-(--grid-gap)">
-        <Panel title="Routing" hint="Свой IP в локальной сети и маршрут по умолчанию (через какой роутер/интерфейс уходит трафик в интернет).">
+        <Panel
+          title="Routing"
+          hint="Свой IP в локальной сети и маршрут по умолчанию (через какой роутер/интерфейс уходит трафик в интернет). WAN IP размыт по умолчанию — кликните, чтобы показать (не спалить на скриншоте)."
+        >
           <Field label="LAN IP" value={data?.lan_ip || '—'} />
+          <Field label="WAN IP (провайдер)" value={<BlurReveal value={exitIP?.provider || '—'} />} />
+          <Field label="WAN IP (через VPS)" value={<BlurReveal value={exitIP?.vps || '—'} />} />
           <Field label="Default route" value={data?.default_route || '—'} />
         </Panel>
         <Panel title="DNS" hint="DNS-серверы, которые реально использует система (/etc/resolv.conf) — не обязательно совпадают с AdGuard Home, если он настроен отдельно.">
