@@ -553,6 +553,21 @@ systemctl enable vps-mode.service >/dev/null
 systemctl restart vps-mode.service
 ok "vps-mode enabled (режим=$(cat /etc/gateway/vps-mode.conf))"
 
+# direct-fastpath: снижает нагрузку xray на тяжёлый direct-трафик (Steam/
+# торренты/видео) — весь LAN 80/443 редиректится на xray ради решения
+# direct/proxy на КАЖДОЕ соединение, даже когда решение заведомо direct.
+# Смысла нет без xray (нечего разгружать), ставим только вместе с ним.
+if [[ "$INSTALL_XRAY" == "yes" ]]; then
+    say "Installing direct-fastpath (снижение CPU на тяжёлом direct-трафике)…"
+    cp "$SCRIPT_DIR/iptables/direct-fastpath.sh" /opt/gateway/direct-fastpath.sh
+    chmod +x /opt/gateway/direct-fastpath.sh
+    cp "$SCRIPT_DIR/systemd/gateway-direct-fastpath.service" /etc/systemd/system/gateway-direct-fastpath.service
+    systemctl daemon-reload
+    systemctl enable gateway-direct-fastpath.service >/dev/null
+    systemctl restart gateway-direct-fastpath.service
+    ok "direct-fastpath enabled"
+fi
+
 # ==========================================================================
 #                        REVERSE SSH TUNNEL
 # ==========================================================================

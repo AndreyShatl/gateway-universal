@@ -1,0 +1,14 @@
+[Unit]
+Description=Gateway direct-fastpath — снижает нагрузку xray на тяжёлый direct-трафик (Steam/торренты/видео)
+After=network-online.target xray.service
+Wants=network-online.target
+BindsTo=xray.service
+
+[Service]
+Type=simple
+ExecStart=/opt/gateway/direct-fastpath.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -79,8 +79,8 @@ export function ModesPanel() {
 
       <div className="flex items-center justify-between border-b border-border py-2.5 text-[12.5px]">
         <span className="flex items-center gap-1.5 text-text-muted">
-          VPS-режим (весь трафик)
-          <InfoTip text="on — абсолютно весь трафик LAN идёт через VPS-туннель (не только курируемые сервисы). Полезно как аварийный рубильник, но повышает нагрузку на VPS и задержку для всего." />
+          Маршрутизация через xray
+          <InfoTip text="Название вводило в заблуждение — переименовано (2026-08-09). НЕ значит 'весь трафик через VPS': on — весь LAN 80/443 проходит через xray, который САМ решает по каждому соединению — курируемые домены (Instagram и т.п.) идут через VPS-туннель, всё остальное (Steam, обычный сёрфинг) — напрямую, VPS не трогает. off — xray выключен из цепочки целиком: работает только zapret, ни один курируемый сервис через VPS уже не пойдёт (в том числе Telegram)." />
         </span>
         <Pills options={vpsModes} value={vm?.mode === 'on' ? 'on' : 'off'} onChange={onVPSMode} disabled={busy} />
       </div>
