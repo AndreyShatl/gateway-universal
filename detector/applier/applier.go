@@ -58,6 +58,44 @@ type Entry struct {
 	// (см. collapseSuffix), новые "братья" не создают отдельных записей.
 }
 
+// protectedIPs — адреса, которые НИКОГДА нельзя заворачивать в авто-обход
+// (VPS-туннель), даже если проба ошибочно посчитала их "заблокированными".
+// Обнаружено на практике (2026-08-09): 8.8.8.8 (DNS-резолвер клиента) и
+// 127.0.0.1 попали в gw_autoroute (ложный TCP/UDP syn-timeout к :53 под
+// нагрузкой), после чего весь DNS-трафик клиентов, использующих эти
+// резолверы, безусловно заворачивался в proxy-mux (правило xray для
+// inboundTag tproxy-udp не делает исключений) — VPS этот путь для чистого
+// DNS не тянет, что уронило интернет клиенту целиком.
+var protectedIPs = map[string]bool{
+	"127.0.0.1": true,
+	"::1":       true,
+	"8.8.8.8":   true,
+	"8.8.4.4":   true,
+	"1.1.1.1":   true,
+	"1.0.0.1":   true,
+	"9.9.9.9":   true,
+	"149.112.112.112": true,
+	"208.67.222.222":  true,
+	"208.67.220.220":  true,
+}
+
+// IsProtected — true, если addr нельзя добавлять в авто-обход: сам адрес в
+// списке защищённых, либо loopback/link-local/приватный диапазон.
+func IsProtected(addr string) bool {
+	return isProtected(addr)
+}
+
+func isProtected(addr string) bool {
+	if protectedIPs[addr] {
+		return true
+	}
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return false // домен — не адрес, проверяется отдельно на этапе резолва
+	}
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
 // uuidPrefixRe — CDN-провайдеры (замечено на *.fbcdn.net) иногда генерируют
 // per-сессионные поддомены вида "<uuid>-netseer-ipaddr-assoc.xz.fbcdn.net" —
 // кардинальность практически неограничена (новый UUID на почти каждый визит).
@@ -153,7 +191,7 @@ func Sync(entries []Entry) {
 	run("ipset", "flush", IPSet)
 	for _, e := range entries {
 		addr := e.Addr
-		if strings.HasPrefix(addr, "geosite:") {
+		if strings.HasPrefix(addr, "geosite:") || isProtected(addr) {
 			continue
 		}
 		if net.ParseIP(addr) != nil || strings.Contains(addr, "/") {
@@ -161,6 +199,9 @@ func Sync(entries []Entry) {
 			continue
 		}
 		for _, ip := range resolveV4(addr) {
+			if isProtected(ip) {
+				continue
+			}
 			run("ipset", "add", IPSet, ip, "-exist")
 		}
 	}
@@ -173,6 +214,9 @@ func Sync(entries []Entry) {
 // всё равно получает IP этого конкретного домена, трафик не теряется, растёт
 // только список того, что нужно перепроверять по ночам, а не сама маршрутизация.
 func Apply(target, source string, port int) bool {
+	if isProtected(target) {
+		return false
+	}
 	added := false
 	route := false
 	suffix := collapseSuffix(target)
@@ -213,6 +257,9 @@ func Apply(target, source string, port int) bool {
 		run("ipset", "add", IPSet, target, "-exist")
 	} else {
 		for _, ip := range resolveV4(target) {
+			if isProtected(ip) {
+				continue
+			}
 			run("ipset", "add", IPSet, ip, "-exist")
 		}
 	}

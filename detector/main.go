@@ -461,7 +461,7 @@ func inBrainQueue(domain string) bool {
 // addToSet — добавить IP в ipset (идемпотентно). Держим наборы свежими реальным
 // IP клиента (Cloudflare/DoH отдают ему другие IP, чем резолвит стенд).
 func addToSet(set, ip string) {
-	if net.ParseIP(ip) != nil {
+	if net.ParseIP(ip) != nil && !(set == applier.IPSet && applier.IsProtected(ip)) {
 		exec.Command("ipset", "add", set, ip, "-exist").Run()
 	}
 }
