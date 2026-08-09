@@ -161,12 +161,18 @@ rebuild_group_ipset() { # <ipset> <domain...>
   local ipset=$1; shift
   ipset create $ipset hash:ip family inet -exist
   ipset flush $ipset
-  local d ip
-  for d in "$@"; do
-    for ip in $(getent ahostsv4 "$d" 2>/dev/null | awk '{print $1}' | sort -u); do
-      ipset add $ipset $ip -exist
-    done
-  done
+  [ $# -eq 0 ] && return 0
+  # T-restore-perf (2026-08-09): раньше getent по одному домену за раз —
+  # на большом числе сущностей после ребута (найдено живьём: 645 сущностей
+  # ~8 минут) держало gateway-brain-worker в простое (тот стартует только
+  # ПОСЛЕ restore, см. Before= в gateway-brain-restore.service — иначе начал
+  # бы применять стратегии к ещё не пересозданным группам). DNS-резолв
+  # per-domain независим и без побочных эффектов — безопасно распараллелить,
+  # ipset add сериализуется самим ipset (не гонка). -P 16 — не CPU-bound
+  # работа (сеть/DNS-латентность), число воркеров больше числа ядер — норм.
+  printf '%s\n' "$@" | xargs -P 16 -I{} getent ahostsv4 {} 2>/dev/null \
+    | awk '{print $1}' | sort -u \
+    | while read -r ip; do ipset add $ipset $ip -exist; done
 }
 
 # ensure_group — найти группу с этой proto+strategy, иначе создать (очередь+правила+
@@ -806,7 +812,13 @@ case "${1:-}" in
   groups) state_load ;;
   group-of) shift; state_find_group_for_domain "$1" ;;
   move)   shift; do_move "$1" "$2" ;;
-  restore) do_restore; do_restore_ciadpi; do_restore_zapret2 ;;
+  # T-restore-perf (2026-08-09): три движка полностью изолированы (свои
+  # state-файлы, свои ipset-префиксы brain_/brainc_/brainz2_, непересекающиеся
+  # диапазоны очередей — см. комментарий у do_restore_zapret2 выше) — раньше
+  # шли строго последовательно, хотя ничем друг друга не блокируют. Теперь
+  # параллельно, wait ждёт все три перед выходом (иначе restore.service
+  # завершился бы раньше, чем реально всё восстановлено).
+  restore) do_restore & do_restore_ciadpi & do_restore_zapret2 & wait ;;
   restore-ciadpi) do_restore_ciadpi ;;
   restore-zapret2) do_restore_zapret2 ;;
   *) echo "usage: brain-apply.sh {zapret <d> <tcp|udp> <strat>|ciadpi <d> <tcp> <strat>|zapret2 <d> <tcp|udp> <strat>|vps <d>|remove <d>|list|list-ciadpi|list-zapret2|groups|group-of <d>|move <d> <gid>|restore|restore-ciadpi|restore-zapret2}" >&2; exit 2 ;;
