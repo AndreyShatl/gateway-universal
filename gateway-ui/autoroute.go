@@ -24,6 +24,42 @@ const (
 	autorouteMark    = "0x1/0xffffffff"
 )
 
+// autorouteProtectedIPs — адреса, которые нельзя добавлять в gw_autoroute ни
+// при каких обстоятельствах: xray безусловно заворачивает весь трафик с
+// tproxy-udp в proxy-mux (VPS), без исключений по домену/порту. Обнаружено
+// на практике (2026-08-09/10): DoH-домены из списка автообхода (dns.google,
+// one.one.one.one, cloudflare-dns.com и т.п.) резолвятся AdGuardHome в
+// 127.0.0.1 (анти-DoH-перехват) — этот адрес затем безусловно попадал в
+// ipset при каждом sync, что заворачивало ВЕСЬ локальный DNS в VPS-туннель
+// и полностью ронял интернет клиентам. См. такую же защиту в
+// detector/applier/applier.go (isProtected) — здесь отдельная копия логики
+// авто-обхода в gateway-ui, требует своей проверки.
+var autorouteProtectedIPs = map[string]bool{
+	"127.0.0.1":       true,
+	"::1":             true,
+	"8.8.8.8":         true,
+	"8.8.4.4":         true,
+	"1.1.1.1":         true,
+	"1.0.0.1":         true,
+	"9.9.9.9":         true,
+	"9.9.9.10":        true,
+	"149.112.112.112": true,
+	"208.67.222.222":  true,
+	"208.67.220.220":  true,
+}
+
+// autorouteProtected — true, если addr нельзя добавлять в gw_autoroute.
+func autorouteProtected(addr string) bool {
+	if autorouteProtectedIPs[addr] {
+		return true
+	}
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
 // ensureAutorouteInfra — ipset + iptables (TCP REDIRECT + UDP TPROXY), идемпотентно.
 func (s *server) ensureAutorouteInfra() {
 	runCmd("ipset", "create", autorouteIPSet, "hash:net", "family", "inet", "-exist")
@@ -65,11 +101,17 @@ func (s *server) syncAutoroute(a autoRoute) {
 		if strings.HasPrefix(addr, "geosite:") {
 			continue // geosite не резолвится в IP — только через xray-роутинг (не наш путь)
 		}
+		if autorouteProtected(addr) {
+			continue
+		}
 		if net.ParseIP(addr) != nil || strings.Contains(addr, "/") {
 			runCmd("ipset", "add", autorouteIPSet, addr, "-exist")
 			continue
 		}
 		for _, ip := range resolveV4(addr) {
+			if autorouteProtected(ip) {
+				continue
+			}
 			runCmd("ipset", "add", autorouteIPSet, ip, "-exist")
 		}
 	}
@@ -176,6 +218,9 @@ func (s *server) writeAutoRoute(a autoRoute) error {
 func validAddr(v string) bool {
 	v = strings.ToLower(strings.TrimSpace(v))
 	if v == "" {
+		return false
+	}
+	if autorouteProtected(v) {
 		return false
 	}
 	if domainRe.MatchString(v) {
