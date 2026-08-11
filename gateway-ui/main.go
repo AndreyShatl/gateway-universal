@@ -80,6 +80,7 @@ type server struct {
 	recheckFile    string // /etc/gateway/recheck.json (расписание перепроверки авто-обхода)
 	ver            string // версия сборки (mtime бинаря) — для автоперезагрузки вкладки
 	timeline       *timelineLog
+	orchestrator   *orchestrator
 
 	mu       sync.Mutex
 	sessions map[string]time.Time // token -> expiry
@@ -116,6 +117,7 @@ func main() {
 		autorouteFile: *autorouteFile, recheckFile: *recheckFile,
 		timeline: newTimelineLog(*timelineFile),
 	}
+	s.orchestrator = newOrchestrator(s.timeline, s.configEnv)
 	s.ver = buildVersion()
 	if err := s.loadOrInitPassword(*conf); err != nil {
 		log.Fatalf("gateway-ui: %v", err)
@@ -186,6 +188,7 @@ func main() {
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
 	mux.HandleFunc("/api/timeline", s.requireAuth(s.handleTimeline))
+	mux.HandleFunc("/api/engine/snapshots", s.requireAuth(s.handleEngineSnapshots))
 	mux.HandleFunc("/api/host-metrics", s.requireAuth(s.handleHostMetrics))
 	mux.HandleFunc("/api/services/detail", s.requireAuth(s.handleServicesDetail))
 	mux.HandleFunc("/api/services/stop", s.requireAuth(s.handleStop))

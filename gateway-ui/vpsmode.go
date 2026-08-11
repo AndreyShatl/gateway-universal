@@ -38,11 +38,22 @@ func (s *server) handleVPSMode(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "mode: on|off"})
 			return
 		}
-		if out, err := runCmd("/opt/gateway/vps-mode.sh", mode); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "output": out})
+		// T-shattl-orchestrator: backup -> apply -> health-check -> rollback
+		// вместо прямого вызова скрипта (см. engine.go — этот путь реально
+		// ломал Telegram в этой же сессии 2026-08-09, применённый напрямую).
+		res, err := s.orchestrator.applyVPSMode(mode)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": res.Detail})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"mode": readVPSMode()})
+		if !res.ok() {
+			// откат прошёл успешно, но целевой режим не применился — это не
+			// 500 (сервер в порядке, просто желаемое не достигнуто), явно
+			// говорим пользователю, что вернули как было (ТЗ п.8).
+			writeJSON(w, http.StatusConflict, map[string]any{"error": res.Detail, "mode": readVPSMode()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"mode": readVPSMode(), "health": res.Detail})
 
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "GET|POST"})
