@@ -485,6 +485,14 @@ if [[ "$INSTALL_DNSCRYPT" == "yes" ]]; then
     else
         warn "dnscrypt-proxy setup failed — DNS останется как есть"
     fi
+    # T64: dnscrypt-proxy не переживает горячую замену LAN-кабеля/скачки линка —
+    # исходящее DoH-соединение зависает и не восстанавливается само (см. коммент
+    # в самом скрипте). NM dispatcher перезапускает его при восстановлении WAN.
+    say "Installing NetworkManager dispatcher (auto-restart dnscrypt-proxy on link up)…"
+    sed "s|\${GATEWAY_WAN_IFACE:-enp2s0}|\${GATEWAY_WAN_IFACE:-$IFACE}|" \
+        "$SCRIPT_DIR/dns/nm-dispatcher-dnscrypt-restart.sh" > /etc/NetworkManager/dispatcher.d/01-dnscrypt-restart
+    chmod 755 /etc/NetworkManager/dispatcher.d/01-dnscrypt-restart
+    ok "dispatcher установлен (WAN=$IFACE)"
 fi
 
 # ==========================================================================
