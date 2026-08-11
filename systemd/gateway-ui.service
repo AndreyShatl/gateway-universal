@@ -5,10 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# LAN-only: разрешить UI-порт из локальной сети, остальное — DROP.
+# LAN-only: разрешить UI-порт из локальной сети + с самого шлюза (127.0.0.1),
+# остальное — DROP. Loopback нужен явно (T-shattl-tunnel, 2026-08-12):
+# реверс-туннель на VPS (-R port:localhost:8088) приходит на этот порт именно
+# как соединение с 127.0.0.1 — без явного ACCEPT оно попадает под общий DROP
+# и проксирование веб-морды с дашборда зависает (обнаружено на Raspberry Pi 5).
 # Делаем на каждом старте (идемпотентно), чтобы не писать в rules.v4
 # (иначе риск с NFQUEUE-персистентностью zapret — см. TROUBLESHOOTING).
 ExecStartPre=/bin/bash -c 'iptables -C INPUT -p tcp --dport __PORT__ -s __LAN__ -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport __PORT__ -s __LAN__ -j ACCEPT'
+ExecStartPre=/bin/bash -c 'iptables -C INPUT -p tcp --dport __PORT__ -s 127.0.0.1 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport __PORT__ -s 127.0.0.1 -j ACCEPT'
 ExecStartPre=/bin/bash -c 'iptables -C INPUT -p tcp --dport __PORT__ -j DROP 2>/dev/null || iptables -A INPUT -p tcp --dport __PORT__ -j DROP'
 ExecStart=__UI_BIN__ --listen :__PORT__ --repo __REPO__ --config-env __CONFIG_ENV__
 Restart=on-failure
