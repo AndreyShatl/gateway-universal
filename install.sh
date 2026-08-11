@@ -73,6 +73,8 @@ CONFIG_ENV="${SCRIPT_DIR}/config.env"
 : "${WEB_UI_PASSWORD:=}"
 : "${INSTALL_DNSCRYPT:=yes}"
 : "${INSTALL_BRAIN:=yes}"
+: "${INSTALL_CIADPI:=yes}"
+: "${INSTALL_ZAPRET2:=yes}"
 : "${INSTALL_ADGUARD:=yes}"
 : "${ADGUARD_PASSWORD:=}"
 : "${NON_INTERACTIVE:=no}"
@@ -102,6 +104,8 @@ while [[ $# -gt 0 ]]; do
         --no-block-quic)       BLOCK_QUIC=no; shift;;
         --no-dnscrypt)         INSTALL_DNSCRYPT=no; shift;;
         --no-brain)            INSTALL_BRAIN=no; shift;;
+        --no-ciadpi)           INSTALL_CIADPI=no; shift;;
+        --no-zapret2)          INSTALL_ZAPRET2=no; shift;;
         --no-adguard)          INSTALL_ADGUARD=no; shift;;
         --adguard-password)    ADGUARD_PASSWORD="$2"; shift 2;;
         --non-interactive|-y)  NON_INTERACTIVE=yes; shift;;
@@ -224,6 +228,8 @@ cat <<EOF
   BLOCK_QUIC          = $BLOCK_QUIC
   INSTALL_DNSCRYPT    = $INSTALL_DNSCRYPT
   INSTALL_BRAIN       = $INSTALL_BRAIN
+  INSTALL_CIADPI      = $INSTALL_CIADPI
+  INSTALL_ZAPRET2     = $INSTALL_ZAPRET2
   INSTALL_ADGUARD     = $INSTALL_ADGUARD
 EOF
 
@@ -754,6 +760,61 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
         gateway-brain-idle-stop.timer gateway-brain-static-reeval.timer \
         gateway-zapret-autoupdate.timer >/dev/null 2>&1 || true
     ok "brain установлен (voркер + ночная переоценка 04:00 + автообновление zapret по воскресеньям 02:00)"
+fi
+
+# ==========================================================================
+#         ДОПОЛНИТЕЛЬНЫЕ ДВИЖКИ BRAIN: CIADPI (byedpi) и zapret2
+# ==========================================================================
+# "Мозг" умеет переключать проблемные домены с основного zapret на альтернативный
+# движок, если тот справляется лучше (см. brain-apply.sh: brain_ciadpi_*/
+# brain_nfqws2_* группы, отдельные ipset-префиксы и диапазоны NFQUEUE, полностью
+# изолированы от zapret1). Раньше оба ставились вручную и в install.sh не
+# попадали — на новых установках (T64, обнаружено на Raspberry Pi 5 2026-08-11)
+# движки просто отсутствовали, хотя brain был установлен и transient-юниты
+# (brain-ciadpi-*/brain-nfqws2-*) готовы их принять.
+if [[ "$INSTALL_CIADPI" == "yes" && "$INSTALL_BRAIN" == "yes" ]]; then
+    say "Installing ciadpi/byedpi engine (альтернативный движок обхода)…"
+    apt-get install -y -qq build-essential >/dev/null 2>&1 || true
+    if [[ -d /opt/byedpi/.git ]]; then
+        ( cd /opt/byedpi && git fetch --depth 1 origin >/dev/null 2>&1 && git reset --hard FETCH_HEAD >/dev/null 2>&1 ) || true
+    else
+        rm -rf /opt/byedpi
+        git clone --depth 1 https://github.com/hufrea/byedpi.git /opt/byedpi >/dev/null 2>&1 || true
+    fi
+    if ( cd /opt/byedpi && make >/dev/null 2>&1 ) && [[ -x /opt/byedpi/ciadpi ]]; then
+        cp "$SCRIPT_DIR/scripts/ciadpi-auto-update.sh" /opt/gateway-brain/ciadpi-auto-update.sh
+        chmod +x /opt/gateway-brain/ciadpi-auto-update.sh
+        cp "$SCRIPT_DIR/systemd/gateway-ciadpi-autoupdate.service" /etc/systemd/system/gateway-ciadpi-autoupdate.service
+        cp "$SCRIPT_DIR/systemd/gateway-ciadpi-autoupdate.timer" /etc/systemd/system/gateway-ciadpi-autoupdate.timer
+        systemctl daemon-reload
+        systemctl enable --now gateway-ciadpi-autoupdate.timer >/dev/null 2>&1 || true
+        ok "ciadpi собран (/opt/byedpi/ciadpi) + еженедельное автообновление"
+    else
+        warn "сборка ciadpi не удалась — движок останется недоступен для мозга (это не критично, zapret/VPS работают независимо)"
+    fi
+fi
+
+if [[ "$INSTALL_ZAPRET2" == "yes" && "$INSTALL_BRAIN" == "yes" ]]; then
+    say "Installing zapret2 engine (альтернативный движок обхода, nfqws2)…"
+    # Makefile-дефолт LUA_VER=5.5 обычно отсутствует в Debian — используем 5.4
+    apt-get install -y -qq build-essential liblua5.4-dev >/dev/null 2>&1 || true
+    if [[ -d /opt/zapret2/.git ]]; then
+        ( cd /opt/zapret2 && git fetch --depth 1 origin >/dev/null 2>&1 && git reset --hard FETCH_HEAD >/dev/null 2>&1 ) || true
+    else
+        rm -rf /opt/zapret2
+        git clone --depth 1 https://github.com/bol-van/zapret2.git /opt/zapret2 >/dev/null 2>&1 || true
+    fi
+    if ( cd /opt/zapret2 && LUA_VER=5.4 make >/dev/null 2>&1 ); then
+        cp "$SCRIPT_DIR/scripts/zapret2-auto-update.sh" /opt/gateway-brain/zapret2-auto-update.sh
+        chmod +x /opt/gateway-brain/zapret2-auto-update.sh
+        cp "$SCRIPT_DIR/systemd/gateway-zapret2-autoupdate.service" /etc/systemd/system/gateway-zapret2-autoupdate.service
+        cp "$SCRIPT_DIR/systemd/gateway-zapret2-autoupdate.timer" /etc/systemd/system/gateway-zapret2-autoupdate.timer
+        systemctl daemon-reload
+        systemctl enable --now gateway-zapret2-autoupdate.timer >/dev/null 2>&1 || true
+        ok "zapret2 собран (/opt/zapret2) + еженедельное автообновление"
+    else
+        warn "сборка zapret2 не удалась — движок останется недоступен для мозга (это не критично, zapret/VPS работают независимо)"
+    fi
 fi
 
 # ==========================================================================
