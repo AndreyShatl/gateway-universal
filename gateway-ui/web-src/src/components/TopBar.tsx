@@ -1,5 +1,6 @@
 import { useDensity, useTheme, type Density } from '../hooks/useSettings'
 import { InfoTip } from './InfoTip'
+import { withBase } from '../lib/basePath'
 
 const densities: { value: Density; label: string }[] = [
   { value: 'compact', label: 'Compact' },
@@ -75,7 +76,7 @@ export function TopBar({
           </button>
         </div>
 
-        <a href="/logout" className="font-mono text-[11px] text-text-muted hover:text-text-secondary">
+        <a href={withBase('/logout')} className="font-mono text-[11px] text-text-muted hover:text-text-secondary">
           logout
         </a>
       </div>

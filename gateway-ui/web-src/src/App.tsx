@@ -11,6 +11,7 @@ import { WhitelistPage } from './pages/WhitelistPage'
 import { MonitorPage } from './pages/MonitorPage'
 import { LogsPage } from './pages/LogsPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { basePath } from './lib/basePath'
 
 function AnimatedRoutes() {
   const location = useLocation()
@@ -42,7 +43,7 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basePath}>
       <div className="grid min-h-screen grid-cols-[64px_1fr]">
         <RailNav />
         <main className="max-w-[1180px] px-9 py-7 pb-16">

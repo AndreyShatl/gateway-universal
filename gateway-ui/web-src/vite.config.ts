@@ -4,6 +4,12 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Относительные пути к ассетам (T-shattl-tunnel, 2026-08-12): gateway-ui
+  // отдаётся и напрямую с шлюза (http://LAN_IP:8088/), и через дашборд-прокси
+  // (https://.../gw/<id>/) — с абсолютными путями (/assets/...) браузер при
+  // проксировании запрашивал бы их с корня ДАШБОРДА (совпадение по имени
+  // пути), подсовывая вместо gateway-ui интерфейс самого дашборда.
+  base: './',
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {

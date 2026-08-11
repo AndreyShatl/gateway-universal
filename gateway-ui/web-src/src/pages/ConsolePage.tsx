@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { TopBar } from '../components/TopBar'
+import { withBase } from '../lib/basePath'
 
 // UTF-8-safe base64 — обычные btoa/atob падают на не-ASCII (кириллица в
 // шелле) — тот же паттерн, что и в старом web/dashboard.html gmp-server.
@@ -54,7 +55,7 @@ export function ConsolePage() {
     fitRef.current = fitAddon
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${proto}//${location.host}/ws/console?cols=${term.cols}&rows=${term.rows}`)
+    const ws = new WebSocket(`${proto}//${location.host}${withBase('/ws/console')}?cols=${term.cols}&rows=${term.rows}`)
     wsRef.current = ws
 
     ws.onopen = () => {

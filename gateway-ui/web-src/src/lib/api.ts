@@ -1,3 +1,5 @@
+import { withBase } from './basePath'
+
 export interface StatusResponse {
   services: Record<string, string>
   nfqws: string
@@ -23,7 +25,7 @@ export interface EngineVersion {
 }
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(path, { credentials: 'same-origin', ...opts })
+  const res = await fetch(withBase(path), { credentials: 'same-origin', ...opts })
   if (!res.ok) {
     let body = ''
     try {

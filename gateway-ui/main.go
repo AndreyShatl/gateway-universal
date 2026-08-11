@@ -308,11 +308,20 @@ func (s *server) validSession(tok string) bool {
 	return true
 }
 
+// fwdPrefix — T-shattl-tunnel (2026-08-12): gateway-ui отдаётся и напрямую
+// (basePath=""), и через дашборд-прокси (/gw/<id>/...) — reverse-proxy на
+// сервере ставит этот заголовок (см. gmp-server/internal/api/gwproxy.go),
+// без него все абсолютные редиректы (/login, /) увели бы браузер на корень
+// ДАШБОРДА вместо самого gateway-ui.
+func fwdPrefix(r *http.Request) string {
+	return r.Header.Get("X-Forwarded-Prefix")
+}
+
 func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(sessionCookie)
 		if err != nil || !s.validSession(c.Value) {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			http.Redirect(w, r, fwdPrefix(r)+"/login", http.StatusSeeOther)
 			return
 		}
 		next(w, r)
@@ -322,13 +331,14 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // ---- хендлеры ---------------------------------------------------------
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	prefix := fwdPrefix(r)
 	if r.Method == http.MethodGet {
-		s.render(w, "login.html", nil)
+		s.render(w, "login.html", map[string]any{"Prefix": prefix})
 		return
 	}
 	if !s.checkPassword(r.FormValue("password")) {
 		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, "login.html", map[string]any{"Error": "Неверный пароль"})
+		s.render(w, "login.html", map[string]any{"Error": "Неверный пароль", "Prefix": prefix})
 		return
 	}
 	tok := s.newSession()
@@ -337,7 +347,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(sessionTTL),
 	})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, prefix+"/", http.StatusSeeOther)
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +357,7 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	http.Redirect(w, r, fwdPrefix(r)+"/login", http.StatusSeeOther)
 }
 
 func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +365,7 @@ func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, "dashboard.html", map[string]any{"Ver": s.ver})
+	s.render(w, "dashboard.html", map[string]any{"Ver": s.ver, "Prefix": fwdPrefix(r)})
 }
 
 // buildVersion — метка версии бинаря (mtime исполняемого файла). Меняется при

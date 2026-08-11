@@ -90,7 +90,7 @@
 </head>
 <body>
   <button id="themeBtn" class="theme-toggle" type="button" title="Сменить тему">🌙</button>
-  <form class="card" method="POST" action="/login">
+  <form class="card" method="POST" action="{{.Prefix}}/login">
     <div class="mark"></div>
     <h1>Shattl Gateway</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
