@@ -78,6 +78,16 @@ export interface ZService {
 
 export const fetchStatus = () => api<StatusResponse>('/api/status')
 export const fetchEngineStatus = () => api<EngineStatus>('/api/engine/status')
+
+export interface EngineSnapshot {
+  id: string
+  at: string
+  component: string
+  reason: string
+  data: Record<string, string>
+}
+
+export const fetchEngineSnapshots = () => api<EngineSnapshot[]>('/api/engine/snapshots')
 export const fetchDomains = () => api<DomainsResponse>('/api/domains')
 export const addDomain = (domain: string) =>
   api<{ ok?: boolean; error?: string }>('/api/domains', {
