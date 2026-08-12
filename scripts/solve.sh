@@ -38,7 +38,13 @@ QNUM_TCP=59781; QNUM_UDP=59782; MARK=0x40000000; PORT=443
 # тест-портом 19999 выше). Тот же netns-фейк-клиент, что и zapret1, просто другой
 # бинарник (Lua-desync вместо --dpi-desync).
 Z2DIR="${Z2DIR:-/opt/zapret2}"
-NFQWS2="$Z2DIR/nfq/nfqws2"
+# путь "nfq2/" (не "nfq/") — реальная раскладка сборки zapret2, см. brain-apply.sh
+# NFQWS2. Найдено 2026-08-12 при добавлении UDP: с опечаткой ($Z2DIR/nfq/...,
+# каталога никогда не существовало) весь ПЕРЕБОР zapret2-стратегий через solve.sh
+# был сломан с самого добавления движка — nfqws2 не мог даже запуститься, каждая
+# проба молча падала на "не забиндил". Прикладной слой (brain-apply.sh, уже
+# применённые группы) путь всегда имел верный — не задет.
+NFQWS2="$Z2DIR/nfq2/nfqws2"
 Z2LUA="--lua-init=@$Z2DIR/lua/zapret-lib.lua --lua-init=@$Z2DIR/lua/zapret-antidpi.lua --lua-init=@$Z2DIR/lua/zapret-auto.lua"
 QNUM2_TCP=59786; QNUM2_UDP=59787
 
@@ -83,9 +89,9 @@ if [ "${1:-}" = "--test-args" ]; then
   SOURCE=unknown
 elif [ "${1:-}" = "--test-zapret2-args" ]; then
   TEST_MODE2=1
-  DOMAIN="${2:?usage: solve.sh --test-zapret2-args <domain> <args>}"
-  PROTO=tcp
-  shift 2
+  DOMAIN="${2:?usage: solve.sh --test-zapret2-args <domain> <proto> <args>}"
+  PROTO="${3:?usage: solve.sh --test-zapret2-args <domain> <proto> <args>}"
+  shift 3
   TEST_ARGS2="$*"
   [ -n "$TEST_ARGS2" ] || { echo "нужны args" >&2; exit 2; }
   SOURCE=unknown
@@ -119,23 +125,46 @@ if [ -z "$IP" ]; then
 fi
 echo "цель: $DOMAIN -> $IP (proto=$PROTO)"
 
+# purge_test_mangle_rules — устойчивая замена точечным "iptables -D <точная
+# спецификация>": та требовала точного совпадения "-d $IP", а на "снять
+# остатки ПРОШЛОГО запуска" (вызов ниже) $IP — это IP ТЕКУЩЕГО домена, а
+# висячее правило осталось от ДРУГОГО (прошлого) домена с ДРУГИМ IP —
+# спецификации никогда не совпадали, мусор копился бесконечно (найдено
+# вживую 2026-08-12: 6 висячих правил после серии тестов). Ищет по номеру
+# NFQUEUE (уникален для наших тестовых очередей, не зависит от домена/IP)
+# и удаляет по номеру строки — повторяет, пока совпадения не кончатся
+# (может быть несколько дублей от разных прошлых доменов).
+purge_test_mangle_rules() {
+  local q
+  for q in "$@"; do
+    while true; do
+      local ln
+      # вывод `-L --line-numbers` рисует флаг --queue-num как "NFQUEUE num N
+      # bypass" (НЕ "queue-num N" — это название CLI-флага при добавлении
+      # правила, не то, что показывает listing; перепутал в первой версии
+      # фикса — проверено вживую, без этого исправления не матчилось НИЧЕГО).
+      ln=$(iptables -t mangle -L POSTROUTING -n --line-numbers 2>/dev/null | awk -v q="NFQUEUE num $q " '$0 ~ q {print $1; exit}')
+      [ -n "$ln" ] || break
+      iptables -t mangle -D POSTROUTING "$ln" 2>/dev/null || break
+    done
+  done
+}
+
 NPID=
 teardown() {
   [ -n "$NPID" ] && kill "$NPID" 2>/dev/null
   pkill -f "qnum=$QNUM_TCP" 2>/dev/null; pkill -f "qnum=$QNUM_UDP" 2>/dev/null   # сироты на обеих тест-очередях
-  pkill -f "qnum=$QNUM2_TCP" 2>/dev/null   # и на тест-очереди zapret2 (T-zapret2)
+  pkill -f "qnum=$QNUM2_TCP" 2>/dev/null; pkill -f "qnum=$QNUM2_UDP" 2>/dev/null   # и на тест-очередях zapret2 (T-zapret2/T-zapret2-udp)
   ip netns del $NS 2>/dev/null
   ip link del veth-s 2>/dev/null      # ГЛАВНОЕ: остаток veth ломает следующий netns (был флак!)
   iptables -t nat -D POSTROUTING -s $SUBNET -o $WAN -j MASQUERADE 2>/dev/null
   iptables -D FORWARD -s $NSIP -p udp --dport $PORT -j ACCEPT 2>/dev/null   # T57: обход глобального UDP/443 DROP на время теста
-  iptables -t mangle -D POSTROUTING -s $NSIP -p tcp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM_TCP --queue-bypass 2>/dev/null
-  iptables -t mangle -D POSTROUTING -s $NSIP -p udp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM_UDP --queue-bypass 2>/dev/null
-  iptables -t mangle -D POSTROUTING -s $NSIP -p tcp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM2_TCP --queue-bypass 2>/dev/null
+  purge_test_mangle_rules $QNUM_TCP $QNUM_UDP $QNUM2_TCP $QNUM2_UDP
   iptables -t mangle -D POSTROUTING -s $NSIP -j ACCEPT 2>/dev/null
-  conntrack -D -d "$IP" 2>/dev/null >/dev/null  # сбросить conntrack цели (иначе connbytes «залипает»)
+  [ -n "${IP:-}" ] && conntrack -D -d "$IP" 2>/dev/null >/dev/null  # сбросить conntrack цели (иначе connbytes «залипает»)
 }
 trap teardown EXIT
-teardown 2>/dev/null   # снять остатки прошлого запуска
+teardown 2>/dev/null   # снять остатки прошлого запуска (IP ещё не определён — purge_test_mangle_rules это переживает, старый способ — нет)
 
 # --- netns-фейк-клиент ---
 ip netns add $NS
@@ -153,8 +182,11 @@ if [ "$PROTO" = "udp" ]; then
   # даст "нет ответа" из-за нашего же DROP.
   iptables -I FORWARD 1 -s $NSIP -p udp --dport $PORT -j ACCEPT
   iptables -t mangle -I POSTROUTING 1 -s $NSIP -p udp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM --queue-bypass
-  # ACCEPT СРАЗУ ПОСЛЕ тест-очереди — не пускать на боевые правила (200/201/210+)
-  iptables -t mangle -I POSTROUTING 2 -s $NSIP -j ACCEPT
+  # zapret2-tier (T-zapret2-udp): своя очередь, та же цепочка, что и её TCP-версия
+  # ниже — --queue-bypass пропускает дальше, если nfqws2 сейчас не запущен.
+  iptables -t mangle -I POSTROUTING 2 -s $NSIP -p udp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM2_UDP --queue-bypass
+  # ACCEPT СРАЗУ ПОСЛЕ обеих тест-очередей — не пускать на боевые правила
+  iptables -t mangle -I POSTROUTING 3 -s $NSIP -j ACCEPT
 else
   iptables -t mangle -I POSTROUTING 1 -s $NSIP -p tcp -d "$IP" --dport $PORT -m connbytes --connbytes 1:6 --connbytes-mode packets --connbytes-dir original -m mark ! --mark $MARK/$MARK -j NFQUEUE --queue-num $QNUM --queue-bypass
   # zapret2-tier — своя очередь, та же цепочка (--queue-bypass пропускает дальше,
@@ -213,16 +245,17 @@ if [ "$TEST_MODE" = 1 ]; then
   exit 0
 fi
 
-# --- режим --test-zapret2-args (T-zapret2): аналог --test-args, но nfqws2 на
-# своей очереди QNUM2_TCP (только tcp, см. константы выше).
+# --- режим --test-zapret2-args (T-zapret2/T-zapret2-udp): аналог --test-args,
+# но nfqws2 на своей очереди (QNUM2_TCP/QNUM2_UDP, в зависимости от $PROTO).
 if [ "$TEST_MODE2" = 1 ]; then
-  $NFQWS2 --qnum=$QNUM2_TCP --fwmark=$MARK $Z2LUA --filter-tcp=$PORT $TEST_ARGS2 >/dev/null 2>&1 &
+  if [ "$PROTO" = "udp" ]; then Z2QNUM=$QNUM2_UDP; else Z2QNUM=$QNUM2_TCP; fi
+  $NFQWS2 --qnum=$Z2QNUM --fwmark=$MARK $Z2LUA --filter-$PROTO=$PORT $TEST_ARGS2 >/dev/null 2>&1 &
   NPID=$!
-  if ! wait_bound "$QNUM2_TCP"; then kill "$NPID" 2>/dev/null; NPID=; echo "nfqws2 не забиндил" >&2; echo "FAIL 000"; exit 0; fi
-  read -r code lat_ms < <(nscurl)
+  if ! wait_bound "$Z2QNUM"; then kill "$NPID" 2>/dev/null; NPID=; echo "nfqws2 не забиндил" >&2; echo "FAIL 000"; exit 0; fi
+  if [ "$PROTO" = "udp" ]; then read -r code lat_ms < <(nscurl_udp); else read -r code lat_ms < <(nscurl); fi
   code=${code:-000}
   kill "$NPID" 2>/dev/null; NPID=
-  pid_db=$(python3 "$GWDB" strategy-find tcp zapret2 "$TEST_ARGS2" 2>/dev/null)
+  pid_db=$(python3 "$GWDB" strategy-find "$PROTO" zapret2 "$TEST_ARGS2" 2>/dev/null)
   if [ "$code" != "000" ]; then
     echo "РАБОТАЕТ (HTTP=$code)"; echo "OK $code"
     [ -n "$pid_db" ] && python3 "$GWDB" history-add "$pid_db" "$DOMAIN" success "$lat_ms" >/dev/null 2>&1
@@ -299,11 +332,11 @@ try_tier custom && exit 0
 # КАЖДАЯ стратегия, не только те, что случайно попали в топ по score). Дедуп по
 # id — если стратегия попала в оба списка (напр. новая, ещё не тестированная,
 # но с высоким стартовым score), не тестируем её дважды за один перебор.
-pick_candidates() {
-  local engine=$1 max=$2
+pick_candidates() { # <engine> <max> [proto=tcp]
+  local engine=$1 max=$2 proto=${3:-tcp}
   local half=$(( (max+1) / 2 ))
-  { python3 "$GWDB" strategies-list --proto tcp --engine "$engine" 2>/dev/null | head -n "$half"
-    python3 "$GWDB" strategies-explore --proto tcp --engine "$engine" -n "$half" 2>/dev/null
+  { python3 "$GWDB" strategies-list --proto "$proto" --engine "$engine" 2>/dev/null | head -n "$half"
+    python3 "$GWDB" strategies-explore --proto "$proto" --engine "$engine" -n "$half" 2>/dev/null
   } | awk -F'\t' '!seen[$1]++'
 }
 
@@ -333,31 +366,35 @@ if [ "$PROTO" = "tcp" ] && [ -x "$CIADPI_BIN" ]; then
 fi
 
 # zapret2 (bol-van/zapret2, Lua-desync, T-zapret2) — третий движок, ПОСЛЕ ciadpi и
-# ДО VPS. Тоже tcp-only пока (см. csvc_rules2 в brain-apply.sh — модель как zapret1,
-# NFQUEUE, но своя очередь QNUM2_TCP). Тот же потолок кандидатов, что у ciadpi —
-# по тем же причинам (пул стратегий будет расти).
+# ДО VPS. С T-zapret2-udp поддерживает оба протокола — своя очередь на каждый
+# (QNUM2_TCP/QNUM2_UDP, см. константы выше), прикладной слой (brain-apply.sh
+# svc_rules2/start_daemon2) уже был proto-осознанным с самого начала, не хватало
+# только perebor'а здесь. 4 готовые UDP-стратегии в базе (QUIC/STUN/Discord-
+# voice/WireGuard) ждали этого момента с добавления zapret2. Тот же потолок
+# кандидатов, что у ciadpi — по тем же причинам (пул стратегий будет расти).
 ZAPRET2_MAX_TRY=${ZAPRET2_MAX_TRY:-20}
-if [ "$PROTO" = "tcp" ] && [ -x "$NFQWS2" ]; then
-  echo "ciadpi не пробил — пробую zapret2-стратегии (топ-$ZAPRET2_MAX_TRY по score/utility)..."
+if [ -x "$NFQWS2" ]; then
+  if [ "$PROTO" = "udp" ]; then Z2QNUM=$QNUM2_UDP; else Z2QNUM=$QNUM2_TCP; fi
+  echo "пробую zapret2-стратегии ($PROTO, топ-$ZAPRET2_MAX_TRY по score/utility)..."
   while IFS=$'\t' read -r zid zname zproto zargs zsource ztrusted zsc zengine zscore zconf; do
     [ -n "$zargs" ] || continue
     [ -n "$NPID" ] && kill "$NPID" 2>/dev/null; NPID=
-    $NFQWS2 --qnum=$QNUM2_TCP --fwmark=$MARK $Z2LUA --filter-tcp=$PORT $zargs >/dev/null 2>&1 &
+    $NFQWS2 --qnum=$Z2QNUM --fwmark=$MARK $Z2LUA --filter-$PROTO=$PORT $zargs >/dev/null 2>&1 &
     NPID=$!
-    wait_bound "$QNUM2_TCP" || { kill "$NPID" 2>/dev/null; NPID=; echo "  [zapret2:$zid] $zname — nfqws2 не забиндил, пропуск"; continue; }
-    read -r code lat_ms < <(nscurl)
+    wait_bound "$Z2QNUM" || { kill "$NPID" 2>/dev/null; NPID=; echo "  [zapret2:$zid] $zname — nfqws2 не забиндил, пропуск"; continue; }
+    if [ "$PROTO" = "udp" ]; then read -r code lat_ms < <(nscurl_udp); else read -r code lat_ms < <(nscurl); fi
     code=${code:-000}
     kill "$NPID" 2>/dev/null; NPID=
     if [ "$code" != "000" ]; then
       echo "  [zapret2:$zid] $zname — РАБОТАЕТ (HTTP=$code, ${lat_ms}мс) ✓"
       python3 "$GWDB" strategy-mark-success "$zid" >/dev/null 2>&1
       python3 "$GWDB" history-add "$zid" "$DOMAIN" success "$lat_ms" >/dev/null 2>&1
-      printf 'ZAPRET2\ttcp\t%s\t%s\n' "$zname" "$zargs"
+      printf 'ZAPRET2\t%s\t%s\t%s\n' "$PROTO" "$zname" "$zargs"
       exit 0
     fi
     echo "  [zapret2:$zid] $zname — нет (HTTP=$code)"
     python3 "$GWDB" history-add "$zid" "$DOMAIN" fail >/dev/null 2>&1
-  done < <(pick_candidates zapret2 "$ZAPRET2_MAX_TRY")
+  done < <(pick_candidates zapret2 "$ZAPRET2_MAX_TRY" "$PROTO")
 fi
 
 echo "ни один пресет не пробил -> VPS"; echo "VPS"
