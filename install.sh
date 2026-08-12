@@ -898,15 +898,18 @@ OVR
             sleep 2
         fi
         # веб-панель :3000 — только LAN (тот же паттерн, что у gateway-ui:8088)
+        # loopback ACCEPT для :3000 идёт первым же ExecStartPre и живёт в самом
+        # drop-in (не разовой командой при установке) — иначе сам шлюз не
+        # достучится до :3000 (правило ACCEPT-LAN-DROP-остальное не пропускает
+        # 127.0.0.1, он не в LAN-подсети), и правило теряется при пересоздании
+        # цепочки/ребуте, если не привязано к ExecStartPre сервиса
         mkdir -p /etc/systemd/system/AdGuardHome.service.d
         cat > /etc/systemd/system/AdGuardHome.service.d/firewall.conf <<EOF
 [Service]
+ExecStartPre=/bin/bash -c "iptables -C INPUT -p tcp --dport 3000 -s 127.0.0.1 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 3000 -s 127.0.0.1 -j ACCEPT"
 ExecStartPre=/bin/bash -c "iptables -C INPUT -p tcp --dport 3000 -s $LAN -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 3000 -s $LAN -j ACCEPT"
 ExecStartPre=/bin/bash -c "iptables -C INPUT -p tcp --dport 3000 -j DROP 2>/dev/null || iptables -A INPUT -p tcp --dport 3000 -j DROP"
 EOF
-        # loopback ACCEPT (иначе сам шлюз не достучится до :3000/:8088 — правило
-        # ACCEPT-LAN-DROP-остальное не пропускает 127.0.0.1, он не в LAN-подсети)
-        iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || iptables -I INPUT -i lo -j ACCEPT
         systemctl daemon-reload
         systemctl enable --now AdGuardHome.service >/dev/null 2>&1 || true
         sleep 2
