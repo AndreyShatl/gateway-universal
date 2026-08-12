@@ -1,0 +1,10 @@
+[
+  {
+    "name": "community: QUIC udplen+fake fallback, Москва/Мегафон YouTube (zapret2 discuss#154, доп. отчёт)",
+    "engine": "zapret2",
+    "proto": "udp",
+    "args": "--filter-l7=quic --lua-desync=circular:fails=1:maxtime=60 --lua-desync=udplen:increment=2:strategy=1 --lua-desync=fake:blob=fake_default_quic:repeats=2:strategy=2",
+    "source": "custom",
+    "trusted": true
+  }
+]

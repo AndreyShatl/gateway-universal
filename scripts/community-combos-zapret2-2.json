@@ -1,0 +1,26 @@
+[
+  {
+    "name": "community: debug-verified TLS (fake+multisplit -> fakedsplit -> hostfakesplit) (zapret2 discuss#154)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=circular:fails=2:time=30:retrans=2:nld=2:reset --lua-desync=fake:blob=fake_default_tls:tcp_ack=-66000:tcp_ts_up:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:tls_mod=rnd,dupsid,padencap:strategy=1 --lua-desync=multisplit:pos=2:seqovl=5:seqovl_pattern=0x1603030000:strategy=1 --lua-desync=fakedsplit:pos=2:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:tcp_ack=-66000:tcp_ts_up:strategy=2 --lua-desync=hostfakesplit:nofake2:tcp_md5:strategy=3",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: debug-verified QUIC (google blob) (zapret2 discuss#154)",
+    "engine": "zapret2",
+    "proto": "udp",
+    "args": "--filter-l7=quic --lua-desync=fake:blob=quic_google:repeats=5",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: debug-verified HTTP (fake+fakedsplit, ttl+md5) (zapret2 discuss#154)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=http --lua-desync=fake:blob=fake_default_http:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:tcp_md5 --lua-desync=fakedsplit:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:tcp_md5",
+    "source": "custom",
+    "trusted": true
+  }
+]
