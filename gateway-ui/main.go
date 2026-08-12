@@ -189,6 +189,7 @@ func main() {
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
 	mux.HandleFunc("/api/timeline", s.requireAuth(s.handleTimeline))
 	mux.HandleFunc("/api/engine/snapshots", s.requireAuth(s.handleEngineSnapshots))
+	mux.HandleFunc("/api/engine/status", s.requireAuth(s.handleEngineStatus))
 	mux.HandleFunc("/api/host-metrics", s.requireAuth(s.handleHostMetrics))
 	mux.HandleFunc("/api/services/detail", s.requireAuth(s.handleServicesDetail))
 	mux.HandleFunc("/api/services/stop", s.requireAuth(s.handleStop))

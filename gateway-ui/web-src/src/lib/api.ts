@@ -24,6 +24,21 @@ export interface EngineVersion {
   log_tail: string
 }
 
+export interface EngineComponents {
+  zapret: boolean
+  xray: boolean
+  ciadpi: boolean
+  zapret2: boolean
+  brain: boolean
+}
+
+export interface EngineStatus {
+  engine: string
+  status: 'healthy' | 'degraded' | 'failed'
+  detail: string
+  components: EngineComponents
+}
+
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(withBase(path), { credentials: 'same-origin', ...opts })
   if (!res.ok) {
@@ -62,6 +77,7 @@ export interface ZService {
 }
 
 export const fetchStatus = () => api<StatusResponse>('/api/status')
+export const fetchEngineStatus = () => api<EngineStatus>('/api/engine/status')
 export const fetchDomains = () => api<DomainsResponse>('/api/domains')
 export const addDomain = (domain: string) =>
   api<{ ok?: boolean; error?: string }>('/api/domains', {

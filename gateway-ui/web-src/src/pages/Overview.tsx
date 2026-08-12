@@ -3,48 +3,15 @@ import { ModesPanel } from '../components/ModesPanel'
 import { MissionTimeline } from '../components/MissionTimeline'
 import { HealthPanel } from '../components/HealthPanel'
 import { InternetPanel } from '../components/InternetPanel'
+import { TrafficEngineCard } from '../components/TrafficEngineCard'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchStatus, fetchConnection } from '../lib/api'
+import { fetchConnection } from '../lib/api'
 
 function SectionHead({ title }: { title: string }) {
   return (
     <div className="mb-3.5 flex items-center justify-between">
       <h2 className="m-0 text-[11px] font-medium uppercase tracking-wider text-text-muted">{title}</h2>
-    </div>
-  )
-}
-
-function statusVariant(v: string): 'online' | 'offline' | 'degraded' {
-  if (v === 'active') return 'online'
-  if (v === 'failed') return 'degraded'
-  return 'offline'
-}
-
-const dotClass: Record<string, string> = {
-  online: 'bg-success',
-  degraded: 'bg-warning',
-  offline: 'bg-text-muted',
-}
-
-// "Running"/"Failed"/"Stopped" — та же формулировка, что и у gmp-server
-// Dashboard (ServiceRow там же): сырые systemd-статусы (active/failed/…)
-// на двух похожих панелях одного шлюза читались как расхождение.
-const stateLabel: Record<string, string> = {
-  online: 'Running',
-  degraded: 'Failed',
-  offline: 'Stopped',
-}
-
-function ServiceRow({ name, state }: { name: string; state: string }) {
-  const variant = statusVariant(state)
-  return (
-    <div className="flex items-center justify-between border-b border-border py-2.5 text-[12.5px] last:border-b-0">
-      <div className="flex items-center gap-2.5">
-        <span className={`h-[7px] w-[7px] rounded-full ${dotClass[variant]}`} />
-        <span>{name}</span>
-      </div>
-      <span className="font-mono text-[11px] text-text-muted">{stateLabel[variant]}</span>
     </div>
   )
 }
@@ -71,26 +38,16 @@ function Panel({ title, hint, children }: { title: string; hint?: string; childr
 }
 
 export function Overview() {
-  const { data: status, error: statusError } = usePoll(fetchStatus, 3000)
-  const { data: conn } = usePoll(fetchConnection, 10000)
+  const { data: conn, error: connError } = usePoll(fetchConnection, 10000)
 
   return (
     <div>
-      <TopBar title="Shattl Gateway" subtitle="локальная панель шлюза" live={!statusError} />
+      <TopBar title="Shattl Gateway" subtitle="локальная панель шлюза" live={!connError} />
 
       <div className="mb-(--section-gap)">
         <SectionHead title="Состояние сервисов" />
         <div className="grid grid-cols-[repeat(auto-fit,minmax(var(--grid-min),1fr))] gap-(--grid-gap)">
-          <Panel
-            title="Демоны"
-            hint="Ключевые сервисы шлюза: xray (VPS-туннель), zapret (обход по DPI-стратегиям), fix-gateway (чинит default route при загрузке — нужен, не трогайте), discord-tproxy (голос Discord через VPS — опционален, выключен по умолчанию)."
-          >
-            {status ? (
-              Object.entries(status.services).map(([name, state]) => <ServiceRow key={name} name={name} state={state} />)
-            ) : (
-              <div className="text-[12.5px] text-text-muted">загрузка…</div>
-            )}
-          </Panel>
+          <TrafficEngineCard />
           <Panel
             title="Подключение (VPS)"
             hint="Параметры VLESS Reality gRPC-туннеля до вашего VPS — тот канал, через который идёт трафик в режиме vps (Instagram/Discord и т.п.) и весь трафик при включённом VPS-режиме."

@@ -32,3 +32,19 @@ export function useTheme() {
 export function useDensity() {
   return usePersistedAttr<Density>('shattl-density', 'data-density', 'comfortable')
 }
+
+// useAdvancedMode — ТЗ п.12 "Advanced Diagnostics": по умолчанию скрыт,
+// пользователь сам включает, чтобы увидеть внутренний состав Traffic
+// Engine (Zapret/CIADPI/zapret2/xray) вместо одной агрегированной строки.
+const ADVANCED_MODE_KEY = 'shattl-advanced-mode'
+
+export function useAdvancedMode() {
+  const [value, setValue] = useState<boolean>(() => localStorage.getItem(ADVANCED_MODE_KEY) === '1')
+
+  const set = useCallback((v: boolean) => {
+    localStorage.setItem(ADVANCED_MODE_KEY, v ? '1' : '0')
+    setValue(v)
+  }, [])
+
+  return [value, set] as const
+}
