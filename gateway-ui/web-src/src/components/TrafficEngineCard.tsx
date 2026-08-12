@@ -1,4 +1,5 @@
-import { Wrench } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Wrench, Settings2 } from 'lucide-react'
 import { InfoTip } from './InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import { useAdvancedMode } from '../hooks/useSettings'
@@ -60,6 +61,13 @@ export function TrafficEngineCard() {
         <span className="ml-auto font-mono text-[11px] text-text-muted">{statusLabel[status]}</span>
       </div>
       <div className="pt-2 text-[11.5px] text-text-muted">{engine?.detail || 'загрузка…'}</div>
+
+      <Link
+        to="/domains"
+        className="mt-2 flex items-center gap-1.5 text-[11.5px] text-text-muted hover:text-text-secondary"
+      >
+        <Settings2 size={12} strokeWidth={1.8} /> Настроить (режимы сервисов)
+      </Link>
 
       {advanced && engine && (
         <div className="mt-3 border-t border-border pt-3">
