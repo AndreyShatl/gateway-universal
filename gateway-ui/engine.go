@@ -182,6 +182,91 @@ func (o *orchestrator) applyVPSMode(targetMode string) (HealthResult, error) {
 	}, nil
 }
 
+// coreUnits — статичные systemd-юниты ядра ShattlBypass, которыми реально
+// можно управлять командой start/stop/restart (ТЗ п.15). ciadpi/zapret2 —
+// динамические per-домен группы без единого юнита (см. servicectl на
+// стороне gmp-agent) — start/stop для них не имеют безопасного группового
+// смысла, поэтому не входят сюда; "мозг" (gateway-brain-worker) намеренно
+// тоже не трогаем этой командой — он сам следит за своим жизненным циклом.
+var coreUnits = []string{"zapret.service", "xray.service"}
+
+// controlCore — backup(текущее состояние) -> apply(start/stop/restart на
+// обоих юнитах) -> health-check -> откат (только для restart, см. ниже).
+// action: "start" | "stop" | "restart".
+func (o *orchestrator) controlCore(action string) (HealthResult, error) {
+	prevActive := map[string]bool{}
+	for _, u := range coreUnits {
+		prevActive[u] = serviceActive(u)
+	}
+	o.saveSnapshot("traffic-engine-core", "before "+action, map[string]string{
+		"zapret": fmt.Sprintf("%v", prevActive["zapret.service"]),
+		"xray":   fmt.Sprintf("%v", prevActive["xray.service"]),
+	})
+	o.event("engine."+action+".started", "Traffic Engine: "+action+" (zapret+xray)")
+
+	var cmdAction string
+	switch action {
+	case "start", "stop", "restart":
+		cmdAction = action
+	default:
+		return HealthResult{HealthFailed, "неизвестное действие: " + action}, fmt.Errorf("unknown action %q", action)
+	}
+
+	var errs []string
+	for _, u := range coreUnits {
+		if _, err := runCmd("systemctl", cmdAction, u); err != nil {
+			errs = append(errs, u+": "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		o.event("engine.error", "Traffic Engine: "+action+" завершился с ошибкой: "+strings.Join(errs, "; "))
+		return HealthResult{HealthFailed, strings.Join(errs, "; ")}, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+
+	time.Sleep(1 * time.Second)
+	status := shattlBypassStatus()
+
+	// для stop "здоровый" результат — это как раз ОБА юнита неактивны, а не
+	// shattlBypassStatus() (тот, наоборот, считает отсутствие zapret/xray
+	// поводом для degraded/failed) — разная семантика "успеха" в зависимости
+	// от намерения.
+	if action == "stop" {
+		stillUp := serviceActive("zapret.service") || serviceActive("xray.service")
+		if stillUp {
+			o.event("engine.error", "Traffic Engine: stop не остановил все компоненты")
+			return HealthResult{HealthFailed, "не все компоненты остановились"}, nil
+		}
+		o.event("engine.stop.completed", "Traffic Engine: остановлен по запросу")
+		return HealthResult{HealthHealthy, "zapret и xray остановлены"}, nil
+	}
+
+	if status.Status == HealthHealthy {
+		o.event("engine."+action+".completed", "Traffic Engine: "+action+" выполнен ("+status.Detail+")")
+		return HealthResult{status.Status, status.Detail}, nil
+	}
+
+	// health-check не прошёл. Откат имеет смысл только для restart (тогда
+	// известно "было работало") — для start отката по определению нет:
+	// цель и так была "запустить", неудача = неудача, а не регрессия.
+	o.event("engine.health.failed", "Traffic Engine: health-check после "+action+" провален: "+status.Detail)
+	if action == "restart" && (prevActive["zapret.service"] || prevActive["xray.service"]) {
+		o.event("engine.rollback.started", "Traffic Engine: пробую поднять ядро повторно после неудачного restart")
+		for _, u := range coreUnits {
+			runCmd("systemctl", "start", u)
+		}
+		time.Sleep(1 * time.Second)
+		retry := shattlBypassStatus()
+		if retry.Status == HealthHealthy {
+			o.event("engine.rollback.completed", "Traffic Engine: ядро поднято повторной попыткой")
+			return HealthResult{retry.Status, retry.Detail}, nil
+		}
+		o.event("engine.error", "КРИТИЧНО: ядро не удалось поднять даже повторной попыткой: "+retry.Detail)
+		return HealthResult{HealthFailed, "ядро не отвечает после restart, повторная попытка тоже не помогла: " + retry.Detail}, nil
+	}
+
+	return HealthResult{status.Status, status.Detail}, nil
+}
+
 // handleEngineSnapshots — для Advanced Diagnostics (ТЗ п.12): показать, что
 // оркестратор реально делал — достаточно отдать сырые снапшоты, страница
 // диагностики отрисует список без отдельной жёстко закодированной вьюхи.
