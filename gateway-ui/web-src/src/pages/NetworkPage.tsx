@@ -46,7 +46,7 @@ export function NetworkPage() {
           title="Routing"
           hint="Свой IP в локальной сети и маршрут по умолчанию (через какой роутер/интерфейс уходит трафик в интернет). WAN IP размыт по умолчанию — кликните, чтобы показать (не спалить на скриншоте)."
         >
-          <Field label="LAN IP" value={data?.lan_ip || '—'} />
+          <Field label="LAN IP" value={<BlurReveal value={data?.lan_ip || '—'} />} />
           <Field label="WAN IP (провайдер)" value={<BlurReveal value={exitIP?.provider || '—'} />} />
           <Field label="WAN IP (через VPS)" value={<BlurReveal value={exitIP?.vps || '—'} />} />
           <Field label="Default route" value={data?.default_route || '—'} />
@@ -60,7 +60,7 @@ export function NetworkPage() {
         </Panel>
         <Panel title="Подключение (VPS)">
           <Field label="Настроено" value={conn?.configured ? 'да' : 'нет'} />
-          <Field label="Адрес" value={conn?.addr || '—'} />
+          <Field label="Адрес" value={<BlurReveal value={conn?.addr || '—'} />} />
           <Field label="SNI" value={conn?.sni || '—'} />
         </Panel>
       </div>
