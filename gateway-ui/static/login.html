@@ -94,6 +94,11 @@
     <div class="mark"></div>
     <h1>Shattl Gateway</h1>
     {{if .Error}}<div class="err">{{.Error}}</div>{{end}}
+    <!-- скрытое поле username — не для сервера (сервер его не читает), а
+         чтобы password manager браузера сохранял пароль этого шлюза ОТДЕЛЬНО
+         от остальных (все шлюзы за прокси на одном origin, форма иначе
+         неотличима, см. коммент к hostname в main.go handleLogin). -->
+    <input type="text" name="username" value="{{.Hostname}}" autocomplete="username" style="display:none">
     <div class="pw-wrap">
       <input id="pw" type="password" name="password" placeholder="Password" autocomplete="current-password"
              autofocus required inputmode="latin" autocapitalize="off" autocorrect="off" spellcheck="false">

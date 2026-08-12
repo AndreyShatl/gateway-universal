@@ -379,6 +379,7 @@ export interface InternetChecks {
 export const fetchInternetChecks = () => api<InternetChecks>('/api/internet-checks')
 
 export const fetchExitIP = () => api<{ provider: string; vps: string }>('/api/exit-ip')
+export const fetchHostname = () => api<{ hostname: string }>('/api/hostname')
 
 export const fetchScanStatus = () => api<ScanStatus>('/api/scan')
 export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard', owner = 'manual') =>

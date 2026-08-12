@@ -1,4 +1,5 @@
 import { useDensity, useTheme, type Density } from '../hooks/useSettings'
+import { useHostname } from '../hooks/useHostname'
 import { InfoTip } from './InfoTip'
 import { withBase } from '../lib/basePath'
 
@@ -21,6 +22,7 @@ export function TopBar({
 }) {
   const [theme, setTheme] = useTheme()
   const [density, setDensity] = useDensity()
+  const hostname = useHostname()
 
   return (
     <div className="mb-7 flex flex-wrap items-baseline justify-between gap-6">
@@ -28,6 +30,14 @@ export function TopBar({
         <h1 className="m-0 flex items-center gap-2 text-[19px] font-medium tracking-tight">
           {title}
           {hint && <InfoTip text={hint} />}
+          {hostname && (
+            <span
+              className="rounded-md border border-border px-1.5 py-0.5 font-mono text-[10.5px] font-normal text-text-muted"
+              title="Имя этого шлюза — не перепутать с другой открытой вкладкой"
+            >
+              {hostname}
+            </span>
+          )}
         </h1>
         {subtitle && <div className="mt-0.5 font-mono text-[12.5px] text-text-muted">{subtitle}</div>}
       </div>

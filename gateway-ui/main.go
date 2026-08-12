@@ -157,6 +157,7 @@ func main() {
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/api/ping", s.requireAuth(s.handlePing))
+	mux.HandleFunc("/api/hostname", s.requireAuth(s.handleHostname))
 	mux.HandleFunc("/api/router-ip", s.requireAuth(s.handleRouterIP))
 	mux.HandleFunc("/api/connection", s.requireAuth(s.handleConnection))
 	mux.HandleFunc("/api/connections", s.requireAuth(s.handleConnections))
@@ -335,6 +336,21 @@ func fwdPrefix(r *http.Request) string {
 	return r.Header.Get("X-Forwarded-Prefix")
 }
 
+// cookiePath — T-shattl-cookie-collision (2026-08-12): без префикса кука
+// сессии ставится с Path=/ на общем домене дашборда (bibios.lol-kek.uk) —
+// при одновременно открытых вкладках разных шлюзов (оба проксируются под
+// /gw/<id>/ на ТОМ ЖЕ origin) последняя авторизация перезаписывала куку
+// ПРЕДЫДУЩЕГО шлюза (тот же Name+Domain, любой Path перекрывает), а браузер
+// заодно предлагал "тот же" сохранённый пароль для обоих шлюзов (autofill
+// матчится по origin, не по path). Path=<префикс>/ скоупит куку строго под
+// конкретный шлюз — при прямом доступе (LAN, префикса нет) ничего не меняется.
+func cookiePath(r *http.Request) string {
+	if p := fwdPrefix(r); p != "" {
+		return p + "/"
+	}
+	return "/"
+}
+
 func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(sessionCookie)
@@ -350,18 +366,26 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	prefix := fwdPrefix(r)
+	// hostname — не просто заголовок; T-shattl-cookie-collision (2026-08-12):
+	// та же форма логина везде идентична (один password-инпут без имени
+	// пользователя), браузер сопоставляет сохранённые пароли по origin, а
+	// у всех шлюзов за прокси origin ОДИН (bibios.lol-kek.uk) — password
+	// manager путал/переиспользовал пароль одного шлюза для другого. Скрытое
+	// поле username=hostname — стандартный приём, чтобы разные шлюзы
+	// сохранялись как разные записи.
+	hostname, _ := os.Hostname()
 	if r.Method == http.MethodGet {
-		s.render(w, "login.html", map[string]any{"Prefix": prefix})
+		s.render(w, "login.html", map[string]any{"Prefix": prefix, "Hostname": hostname})
 		return
 	}
 	if !s.checkPassword(r.FormValue("password")) {
 		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, "login.html", map[string]any{"Error": "Неверный пароль", "Prefix": prefix})
+		s.render(w, "login.html", map[string]any{"Error": "Неверный пароль", "Prefix": prefix, "Hostname": hostname})
 		return
 	}
 	tok := s.newSession()
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: tok, Path: "/",
+		Name: sessionCookie, Value: tok, Path: cookiePath(r),
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(sessionTTL),
 	})
@@ -374,7 +398,7 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		delete(s.sessions, c.Value)
 		s.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: cookiePath(r), MaxAge: -1})
 	http.Redirect(w, r, fwdPrefix(r)+"/login", http.StatusSeeOther)
 }
 
@@ -400,6 +424,15 @@ func buildVersion() string {
 func (s *server) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"ok"}`))
+}
+
+// handleHostname — T-shattl-multi-gateway (2026-08-12): имя шлюза в шапке
+// локального UI — при нескольких открытых вкладках разных шлюзов (обычное
+// дело теперь, когда каждый шлюз доступен через дашборд-прокси) не путать,
+// какая вкладка какому шлюзу принадлежит.
+func (s *server) handleHostname(w http.ResponseWriter, r *http.Request) {
+	hostname, _ := os.Hostname()
+	writeJSON(w, http.StatusOK, map[string]string{"hostname": hostname})
 }
 
 func (s *server) render(w http.ResponseWriter, name string, data any) {
