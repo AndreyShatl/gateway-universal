@@ -126,7 +126,45 @@ func (s *server) connActivate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeConns(conns)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "addr": target.Fields["VPS_ADDR"]})
+
+	// discord-tproxy.sh хранит VPS_IP как захардкоженную подстановку из
+	// install-time (см. install.sh: sed __VPS_ADDR__) — обнаружено вживую
+	// (2026-08-11): при смене активного VPS без этого шага discord-tproxy
+	// продолжал исключать из TPROXY-перехвата СТАРЫЙ VPS IP, ловил в
+	// туннель и голосовые пакеты Discord к новому VPS тоже — голос ломался.
+	// Трогаем только если сервис реально включён — не форсируем discord
+	// тем, у кого он выключен.
+	discordWarn := ""
+	if serviceActive("discord-tproxy.service") {
+		if err := s.regenerateDiscordTproxy(target.Fields["VPS_ADDR"]); err != nil {
+			discordWarn = "VPS переключён, но discord-tproxy не удалось перенастроить: " + err.Error()
+		}
+	}
+
+	resp := map[string]any{"ok": true, "addr": target.Fields["VPS_ADDR"]}
+	if discordWarn != "" {
+		resp["warning"] = discordWarn
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// regenerateDiscordTproxy — перегенерирует /opt/gateway/discord-tproxy.sh с
+// НОВЫМ VPS_ADDR из шаблона в репозитории (та же подстановка, что делает
+// install.sh при первой установке) и перезапускает сервис — тот сам
+// идемпотентно чистит и пересоздаёт iptables-цепочку (flush в начале
+// скрипта), так что старые правила под старый VPS корректно уходят.
+func (s *server) regenerateDiscordTproxy(vpsAddr string) error {
+	tmplPath := filepath.Join(s.repoDir, "iptables/discord-tproxy.sh")
+	tmpl, err := os.ReadFile(tmplPath)
+	if err != nil {
+		return err
+	}
+	rendered := strings.ReplaceAll(string(tmpl), "__VPS_ADDR__", vpsAddr)
+	if err := os.WriteFile("/opt/gateway/discord-tproxy.sh", []byte(rendered), 0o755); err != nil {
+		return err
+	}
+	_, err = runCmd("systemctl", "restart", "discord-tproxy.service")
+	return err
 }
 
 // ensureCurrentConn: если в списке нет активного, заводит запись из config.env
@@ -191,6 +229,12 @@ func (s *server) connEdit(w http.ResponseWriter, r *http.Request) {
 		if out, err := s.applyXray(); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "применение: " + err.Error(), "output": out})
 			return
+		}
+		if serviceActive("discord-tproxy.service") {
+			if err := s.regenerateDiscordTproxy(fields["VPS_ADDR"]); err != nil {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": "VPS переприменён, но discord-tproxy не удалось перенастроить: " + err.Error()})
+				return
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
