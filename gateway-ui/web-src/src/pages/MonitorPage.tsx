@@ -1,9 +1,72 @@
+import { useState } from 'react'
 import { TopBar } from '../components/TopBar'
 import { usePoll } from '../hooks/usePoll'
-import { fetchMonitor } from '../lib/api'
+import { fetchMonitor, fetchNightlyProgress, triggerNightly } from '../lib/api'
 import { AnimatedNumber } from '../components/AnimatedNumber'
 import { ScanPanel } from '../components/ScanPanel'
 import { InfoTip } from '../components/InfoTip'
+
+// п.5 ТЗ: "Полная проверка" — ручной запуск того же самого прохода, что и
+// ночной таймер (04:00), кнопкой, когда пользователю самому хочется
+// перепроверить домены "прямо сейчас" (например, подозревает, что DPI
+// сегодня ослаб перед работой).
+function FullCheckPanel() {
+  const { data: progress } = usePoll(fetchNightlyProgress, 3000)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  async function onTrigger() {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const res = await triggerNightly()
+      if (res.error) setMsg('✗ ' + res.error)
+    } catch (e) {
+      setMsg('✗ ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const running = progress?.running ?? false
+  const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
+
+  return (
+    <div className="mb-(--section-gap) rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+          Полная проверка
+          <InfoTip text="Прогоняет все управляемые домены (курируемые сервисы + автообход) через тот же цикл переоценки, что и ночной таймер в 04:00 — заново подбирает рабочие стратегии по каждому. Не трогает домены, добавленные вручную сверх списков." />
+        </div>
+        <button
+          onClick={onTrigger}
+          disabled={busy || running}
+          className="rounded-md border border-border-strong bg-surface-raised px-3 py-1 text-xs font-medium disabled:opacity-40"
+        >
+          {running ? 'Выполняется…' : busy ? 'Запуск…' : 'Запустить'}
+        </button>
+      </div>
+      {msg && <div className="mb-2 text-[11px] text-text-muted">{msg}</div>}
+      {running && progress && (
+        <>
+          <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-raised">
+            <div className="h-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="mb-2 font-mono text-[11px] text-text-muted">
+            {progress.done}/{progress.total} ({pct}%), осталось {progress.remaining}
+          </div>
+        </>
+      )}
+      {progress && progress.feed.length > 0 && (
+        <div className="max-h-32 overflow-y-auto rounded-md border border-border bg-surface-raised p-2 font-mono text-[10.5px] leading-relaxed text-text-muted">
+          {progress.feed.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function MetricCell({ label, value, suffix }: { label: string; value?: number; suffix?: string }) {
   return (
@@ -52,6 +115,8 @@ export function MonitorPage() {
         <MetricCell label="Демоны" value={data?.brain_totals.daemons} />
         <MetricCell label="Память" value={data?.brain_totals.memory_mb} suffix="MB" />
       </div>
+
+      <FullCheckPanel />
 
       <div className="mb-(--section-gap)">
         <div className="mb-3.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">Группы по движку</div>

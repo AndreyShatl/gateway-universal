@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -52,6 +53,39 @@ func (s *server) handleNightlyProgress(w http.ResponseWriter, r *http.Request) {
 		StartedAt: startedAt, Running: total > 0 && remaining > 0,
 		Feed: tailBrainLog(25),
 	})
+}
+
+// handleNightlyTrigger — п.5 ТЗ: ручной запуск "Полная проверка", тот же
+// systemd-юнит, что и ночной таймер (gateway-brain-nightly.service), просто
+// по кнопке, а не по расписанию 04:00. Не дублирует логику постановки в
+// очередь — доверяем существующему brain-nightly.sh целиком.
+func (s *server) handleNightlyTrigger(w http.ResponseWriter, r *http.Request) {
+	if data, err := os.ReadFile("/etc/gateway/brain-progress.json"); err == nil {
+		var p struct {
+			Total int `json:"total"`
+		}
+		if json.Unmarshal(data, &p) == nil && p.Total > 0 {
+			remaining := 0
+			if f, err := os.Open("/etc/gateway/brain-queue"); err == nil {
+				sc := bufio.NewScanner(f)
+				for sc.Scan() {
+					if strings.TrimSpace(sc.Text()) != "" {
+						remaining++
+					}
+				}
+				f.Close()
+			}
+			if remaining > 0 {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "проверка уже выполняется"})
+				return
+			}
+		}
+	}
+	if out, err := exec.Command("systemctl", "start", "gateway-brain-nightly.service").CombinedOutput(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": strings.TrimSpace(string(out))})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // tailBrainLog — последние N строк лога мозга (для живой ленты в UI). Читает весь

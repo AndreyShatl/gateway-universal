@@ -117,10 +117,20 @@ func (s *server) vpnWatchLoop() {
 // сбои резолвера проходят мимо dmesg. Этот watcher ловит именно момент и
 // длительность падения, чтобы не приходилось ловить его вживую по жалобе
 // пользователя постфактум.
+//
+// requireConsecutive=2 (п.4 ТЗ, 2026-08-12): без дебаунса одна пропущенная
+// проверка резолвера (единичный UDP-таймаут, не реальный простой DNS) уже
+// писала пару dns.down/dns.up в ленту — на живых шлюзах это давало десятки
+// записей "down for 5s" в час и забивало Mission Timeline шумом. Реальная
+// авария (упавший линк, потерянный upstream) держится дольше одного тика —
+// двух проверок подряд достаточно, чтобы отсечь одиночные блипы и не
+// потерять настоящие простои.
 func (s *server) dnsWatchLoop() {
 	const interval = 5 * time.Second
 	const timeout = 3 * time.Second
+	const requireConsecutive = 2
 	prevOK := true
+	failStreak := 0
 	var downSince time.Time
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -128,14 +138,21 @@ func (s *server) dnsWatchLoop() {
 		cancel()
 		ok := err == nil
 
-		if ok && !prevOK {
-			dur := time.Since(downSince).Round(time.Second)
-			s.timeline.Record("dns.up", "DNS resolution restored (down for "+dur.String()+")")
-		} else if !ok && prevOK {
-			downSince = time.Now()
-			s.timeline.Record("dns.down", "DNS resolution failed")
+		if ok {
+			failStreak = 0
+			if !prevOK {
+				dur := time.Since(downSince).Round(time.Second)
+				s.timeline.Record("dns.up", "DNS resolution restored (down for "+dur.String()+")")
+				prevOK = true
+			}
+		} else {
+			failStreak++
+			if prevOK && failStreak >= requireConsecutive {
+				downSince = time.Now().Add(-time.Duration(requireConsecutive-1) * interval)
+				s.timeline.Record("dns.down", "DNS resolution failed")
+				prevOK = false
+			}
 		}
-		prevOK = ok
 		time.Sleep(interval)
 	}
 }

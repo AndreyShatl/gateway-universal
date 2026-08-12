@@ -218,6 +218,18 @@ export interface MonitorResponse {
 
 export const fetchMonitor = () => api<MonitorResponse>('/api/monitor')
 
+export interface NightlyProgress {
+  total: number
+  done: number
+  remaining: number
+  started_at: string
+  running: boolean
+  feed: string[]
+}
+
+export const fetchNightlyProgress = () => api<NightlyProgress>('/api/nightly-progress')
+export const triggerNightly = () => api<{ ok?: boolean; error?: string }>('/api/nightly-trigger', { method: 'POST' })
+
 export const LOGGABLE_SERVICES = [
   'gateway-brain',
   'xray',

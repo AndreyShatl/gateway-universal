@@ -5,7 +5,7 @@ import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, startScan, fetchScanStatus, type ZService } from '../lib/api'
+import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, startScan, fetchScanStatus, fetchMonitor, type ZService } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
@@ -94,31 +94,48 @@ function ServiceRow({
   onModeChange,
   onAuto,
   autoBusy,
+  bypassedDomains,
 }: {
   svc: ZService
   onModeChange: (id: string, mode: string) => void
   onAuto: (svc: ZService) => void
   autoBusy: boolean
+  bypassedDomains: Set<string>
 }) {
+  // п.15 ТЗ: badge сервиса — это mode из zapret-services.json, а не то, что
+  // реально происходит по доменам. Домен из vps-сервиса может уже успешно
+  // обходиться через ciadpi/zapret2 индивидуально (brain сам так решил по
+  // per-domain стратегиям) — тогда badge "vps" вводит в заблуждение. Считаем
+  // фактическое пересечение с активными brain-группами и показываем как
+  // подсказку, не трогая сам механизм хранения одного mode на сервис целиком.
+  const bypassedCount = svc.mode === 'vps' ? svc.domains.filter((d) => bypassedDomains.has(d)).length : 0
   return (
-    <div className="flex items-center justify-between border-b border-border py-3 text-[12.5px] last:border-b-0">
-      <div>
-        <div className="flex items-center gap-1.5 font-medium">
-          {svc.name}
-          {serviceHints[svc.id] && <InfoTip text={serviceHints[svc.id]} />}
-          {svc.auto_at && (
-            <span
-              className="flex items-center gap-1 rounded-md bg-[--accent-dim] px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-accent"
-              title={`Режим подобран кнопкой auto ${new Date(svc.auto_at).toLocaleString()}`}
-            >
-              <Wand2 size={9} strokeWidth={2} />
-              auto {fmtAgo(svc.auto_at)}
-            </span>
-          )}
+    <div className="border-b border-border py-3 text-[12.5px] last:border-b-0">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-1.5 font-medium">
+            {svc.name}
+            {serviceHints[svc.id] && <InfoTip text={serviceHints[svc.id]} />}
+            {svc.auto_at && (
+              <span
+                className="flex items-center gap-1 rounded-md bg-[--accent-dim] px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-accent"
+                title={`Режим подобран кнопкой auto ${new Date(svc.auto_at).toLocaleString()}`}
+              >
+                <Wand2 size={9} strokeWidth={2} />
+                auto {fmtAgo(svc.auto_at)}
+              </span>
+            )}
+          </div>
+          <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
         </div>
-        <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
+        <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
       </div>
-      <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
+      {bypassedCount > 0 && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-text-muted">
+          <InfoTip text="Brain индивидуально подобрал рабочую zapret/zapret2/ciadpi-стратегию для части доменов этого сервиса, хотя у самого сервиса режим 'vps'. Реальный трафик по ним уже идёт в обход VPS — можно понизить режим сервиса на zapret, если это устраивает по остальным доменам." />
+          {bypassedCount}/{svc.domains.length} доменов уже реально обходится (не через VPS)
+        </div>
+      )}
     </div>
   )
 }
@@ -126,6 +143,8 @@ function ServiceRow({
 export function DomainsPage() {
   const { data: domainsData } = usePoll(fetchDomains, 5000)
   const { data: servicesData, error: servicesError } = usePoll(fetchServices, 5000)
+  const { data: monitorData } = usePoll(fetchMonitor, 10000)
+  const bypassedDomains = new Set((monitorData?.brain_groups ?? []).flatMap((g) => g.domains))
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -318,10 +337,49 @@ export function DomainsPage() {
         <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
           {services.length === 0 && <div className="text-[12.5px] text-text-muted">загрузка…</div>}
           {services.map((svc) => (
-            <ServiceRow key={svc.id} svc={svc} onModeChange={onModeChange} onAuto={onAuto} autoBusy={autoServiceId === svc.id} />
+            <ServiceRow
+              key={svc.id}
+              svc={svc}
+              onModeChange={onModeChange}
+              onAuto={onAuto}
+              autoBusy={autoServiceId === svc.id}
+              bypassedDomains={bypassedDomains}
+            />
           ))}
         </div>
       </div>
+
+      {(() => {
+        const vpsServices = services.filter((s) => s.mode === 'vps' && s.domains.length > 0)
+        const vpsDomainCount = vpsServices.reduce((n, s) => n + s.domains.length, 0)
+        if (vpsServices.length === 0) return null
+        return (
+          <div className="mb-(--section-gap)">
+            <SectionHead
+              title="Только через VPS"
+              count={vpsDomainCount}
+              hint="Сервисы в режиме vps идут всем своим трафиком через VPS-туннель, а не через локальный zapret-обход — обычно потому что zapret их не пробивает."
+            />
+            <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
+              {vpsServices.map((svc) => (
+                <div key={svc.id} className="border-b border-border py-3 last:border-b-0">
+                  <div className="mb-1.5 font-medium">{svc.name}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {svc.domains.map((d) => (
+                      <span
+                        key={d}
+                        className="rounded-md border border-border bg-surface-raised px-2 py-0.5 font-mono text-[11px] text-text-muted"
+                      >
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       <PresetsPanel />
     </div>

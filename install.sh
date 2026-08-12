@@ -751,6 +751,8 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
              gateway-brain-activity.service gateway-brain-activity.timer \
              gateway-brain-idle-stop.service gateway-brain-idle-stop.timer \
              gateway-brain-static-reeval.service gateway-brain-static-reeval.timer \
+             gateway-brain-domain-actualize.service gateway-brain-domain-actualize.timer \
+             gateway-brain-healthcheck.service gateway-brain-healthcheck.timer \
              gateway-zapret-autoupdate.service gateway-zapret-autoupdate.timer; do
         cp "$SCRIPT_DIR/systemd/$u" /etc/systemd/system/"$u"
     done
@@ -758,6 +760,7 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
     systemctl enable --now gateway-brain-restore.service gateway-brain-worker.service >/dev/null 2>&1 || true
     systemctl enable --now gateway-brain-nightly.timer gateway-brain-activity.timer \
         gateway-brain-idle-stop.timer gateway-brain-static-reeval.timer \
+        gateway-brain-domain-actualize.timer gateway-brain-healthcheck.timer \
         gateway-zapret-autoupdate.timer >/dev/null 2>&1 || true
     ok "brain установлен (voркер + ночная переоценка 04:00 + автообновление zapret по воскресеньям 02:00)"
 fi
