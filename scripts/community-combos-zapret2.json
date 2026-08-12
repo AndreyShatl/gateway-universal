@@ -1,0 +1,74 @@
+[
+  {
+    "name": "community: wssize+multidisorder pos=2 (zapret2 discuss#154)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=wssize:wsize=1:scale=6 --lua-desync=multidisorder:pos=2",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: wssize+multidisorder pos=1,midsld (zapret2 discuss#172)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=wssize:wsize=1:scale=6 --lua-desync=multidisorder:pos=1,midsld:strategy=1",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: wssize+multidisorder все точки (zapret2 discuss#172)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=wssize:wsize=1:scale=6 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:strategy=2",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: wssize+multisplit+seqovl (zapret2 discuss#172)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=wssize:wsize=1:scale=6 --lua-desync=multisplit:pos=10:seqovl=1:strategy=3",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: fakedsplit+tcp_md5 pos=2 (zapret2 discuss#154, bol-van)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=fakedsplit:pos=2:tcp_md5:repeats=1",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: fakedsplit+tcp_md5 pos=1,midsld (zapret2 discuss#154, bol-van)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=tls --lua-desync=fakedsplit:pos=1,midsld:tcp_md5:repeats=1",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: fake ip_autottl http (zapret2 discuss#237)",
+    "engine": "zapret2",
+    "proto": "tcp",
+    "args": "--filter-l7=http --lua-desync=fake:blob=fake_default_http:ip_autottl=-2,3-20:ip6_autottl=-2,3-20",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: fake quic_google + fallback (zapret2 discuss#172)",
+    "engine": "zapret2",
+    "proto": "udp",
+    "args": "--filter-l7=quic --lua-desync=fake:blob=quic_google:repeats=5 --lua-desync=fake:blob=fake_default_quic:repeats=5:strategy=2",
+    "source": "custom",
+    "trusted": true
+  },
+  {
+    "name": "community: fake stun/discord voice 50000-65535 (zapret2 discuss#172)",
+    "engine": "zapret2",
+    "proto": "udp",
+    "args": "--filter-udp=50000-65535 --filter-l7=stun,discord --lua-desync=fake:blob=0x00000000000000000000000000000000:repeats=2",
+    "source": "custom",
+    "trusted": true
+  }
+]
