@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, Wand2 } from 'lucide-react'
+import { Wand2 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, startScan, fetchScanStatus, fetchMonitor, type ZService } from '../lib/api'
+import { fetchDomains, addDomain, fetchServices, saveServices, startScan, fetchScanStatus, fetchMonitor, type ZService } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
@@ -173,14 +172,6 @@ export function DomainsPage() {
     }
   }
 
-  async function onRemove(domain: string) {
-    try {
-      await removeDomain(domain)
-    } catch {
-      /* список обновится на следующем polling-тике вне зависимости от исхода */
-    }
-  }
-
   function onModeChange(id: string, mode: string) {
     // Ручное переключение — снимаем пометку "подобрано автоматически"
     // (см. auto_at), раз человек сам явно выбрал режим.
@@ -293,28 +284,7 @@ export function DomainsPage() {
               Добавить
             </button>
           </div>
-          {msg && <div className="mb-3 text-[11px] text-text-muted">{msg}</div>}
-          <div className="flex flex-wrap gap-1.5">
-            <AnimatePresence initial={false}>
-              {(domainsData?.domains ?? []).map((d) => (
-                <motion.span
-                  key={d}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-surface-raised px-2.5 py-1 font-mono text-[11.5px]"
-                >
-                  {d}
-                  <button onClick={() => onRemove(d)} className="text-text-muted hover:text-danger">
-                    <X size={12} strokeWidth={2} />
-                  </button>
-                </motion.span>
-              ))}
-            </AnimatePresence>
-            {domainsData && domainsData.domains.length === 0 && (
-              <span className="text-[12.5px] text-text-muted">нет добавленных вручную доменов</span>
-            )}
-          </div>
+          {msg && <div className="text-[11px] text-text-muted">{msg}</div>}
         </div>
       </div>
 
