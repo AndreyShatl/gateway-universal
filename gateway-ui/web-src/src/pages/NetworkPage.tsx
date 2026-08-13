@@ -43,17 +43,17 @@ export function NetworkPage() {
 
       <div className="mb-(--section-gap) grid grid-cols-[repeat(auto-fit,minmax(var(--grid-min),1fr))] gap-(--grid-gap)">
         <Panel
-          title="Routing"
+          title="Маршрутизация"
           hint="Свой IP в локальной сети и маршрут по умолчанию (через какой роутер/интерфейс уходит трафик в интернет). WAN IP размыт по умолчанию — кликните, чтобы показать (не спалить на скриншоте)."
         >
           <Field label="LAN IP" value={<BlurReveal value={data?.lan_ip || '—'} />} />
           <Field label="WAN IP (провайдер)" value={<BlurReveal value={exitIP?.provider || '—'} />} />
           <Field label="WAN IP (через VPS)" value={<BlurReveal value={exitIP?.vps || '—'} />} />
-          <Field label="Default route" value={data?.default_route || '—'} />
+          <Field label="Маршрут по умолчанию" value={data?.default_route || '—'} />
         </Panel>
         <Panel title="DNS" hint="DNS-серверы, которые реально использует система (/etc/resolv.conf) — не обязательно совпадают с AdGuard Home, если он настроен отдельно.">
           {data?.dns_servers.length ? (
-            data.dns_servers.map((d) => <Field key={d} label="Nameserver" value={d} />)
+            data.dns_servers.map((d) => <Field key={d} label="DNS-сервер" value={d} />)
           ) : (
             <div className="py-1 text-[12.5px] text-text-muted">не настроено</div>
           )}
@@ -66,7 +66,7 @@ export function NetworkPage() {
       </div>
 
       <div className="mb-3.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
-        Interfaces
+        Интерфейсы
         <InfoTip text="Loopback (lo) не показывается — его статус в Linux всегда 'unknown' и не несёт диагностической пользы. Errors/Dropped > 0 подсвечены — это признак проблем на физическом уровне (кабель/порт)." />
       </div>
       <div className="overflow-x-auto rounded-[--card-radius] border border-border">
