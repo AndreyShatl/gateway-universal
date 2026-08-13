@@ -78,6 +78,7 @@ function SortButton({
 function DomainList({ entries }: { entries: VPSDomainEntry[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('domain')
   const [dir, setDir] = useState<1 | -1>(1)
+  const [filter, setFilter] = useState('')
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setDir((d) => (d === 1 ? -1 : 1))
@@ -87,7 +88,8 @@ function DomainList({ entries }: { entries: VPSDomainEntry[] }) {
     }
   }
 
-  const sorted = sortEntries(entries, sortKey, dir)
+  const filtered = filter.trim() ? entries.filter((e) => e.domain.toLowerCase().includes(filter.trim().toLowerCase())) : entries
+  const sorted = sortEntries(filtered, sortKey, dir)
   const vpsCount = entries.filter((e) => e.route === 'vps').length
 
   return (
@@ -95,8 +97,15 @@ function DomainList({ entries }: { entries: VPSDomainEntry[] }) {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="font-mono text-[11px] text-text-muted">
           {entries.length} доменов · {vpsCount} на VPS · {entries.length - vpsCount} на DPI-обходе
+          {filter.trim() && ` · найдено ${filtered.length}`}
         </div>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap items-center gap-1">
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="фильтр по домену…"
+            className="h-7 w-40 rounded-md border border-border bg-surface-raised px-2 font-mono text-[11px] outline-none focus:border-border-strong"
+          />
           <SortButton label="домен" active={sortKey === 'domain'} dir={dir} onClick={() => toggleSort('domain')} />
           <SortButton label="маршрут" active={sortKey === 'route'} dir={dir} onClick={() => toggleSort('route')} />
           <SortButton label="группа" active={sortKey === 'group_id'} dir={dir} onClick={() => toggleSort('group_id')} />
@@ -138,11 +147,15 @@ export function VPSDomainsPanel() {
   const { data } = usePoll(fetchVPSDomains, 15000)
   if (!data) return null
 
-  const groups: { title: string; entries: VPSDomainEntry[] }[] = [
+  const groups: { title: string; hint?: string; entries: VPSDomainEntry[] }[] = [
     { title: 'Discord', entries: data.discord },
     { title: 'Instagram', entries: data.instagram },
     { title: 'YouTube', entries: data.youtube },
-    { title: 'Остальные домены через VPS', entries: data.other },
+    {
+      title: 'Остальные домены',
+      hint: 'Курируемые категории (соцсети, стриминг, игры, разработка и т.д. — см. xray/domains/*.txt), кроме уже показанных выше Discord/Instagram/YouTube и кроме AI-сервисов (те никогда не идут в обход намеренно). Как и везде на этой странице — не только VPS, колонка "маршрут" показывает фактическое состояние каждого домена.',
+      entries: data.other,
+    },
   ].filter((g) => g.entries.length > 0)
 
   if (groups.length === 0) return null
@@ -159,7 +172,10 @@ export function VPSDomainsPanel() {
       <div className="space-y-(--section-gap)">
         {groups.map((g) => (
           <div key={g.title} className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-            <div className="mb-3 text-[11px] font-medium uppercase tracking-wider text-text-muted">{g.title}</div>
+            <div className="mb-3 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+              {g.title}
+              {g.hint && <InfoTip text={g.hint} />}
+            </div>
             <DomainList entries={g.entries} />
           </div>
         ))}
