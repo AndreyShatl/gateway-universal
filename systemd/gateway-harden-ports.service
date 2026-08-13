@@ -1,0 +1,12 @@
+[Unit]
+Description=Harden internal ports (DNS, xray, ciadpi pool) — LAN/loopback only (T-security-audit)
+After=network.target
+Before=xray.service AdGuardHome.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/gateway/harden-internal-ports.sh
+
+[Install]
+WantedBy=multi-user.target

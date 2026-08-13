@@ -552,6 +552,14 @@ systemctl enable game-mode.service >/dev/null
 systemctl restart game-mode.service
 ok "game-mode enabled (mode=$(cat /etc/gateway/game-mode.conf))"
 
+say "Hardening internal ports (DNS/xray/ciadpi pool — LAN/loopback only)…"
+cp "$SCRIPT_DIR/scripts/harden-internal-ports.sh" /opt/gateway/harden-internal-ports.sh
+chmod +x /opt/gateway/harden-internal-ports.sh
+cp "$SCRIPT_DIR/systemd/gateway-harden-ports.service" /etc/systemd/system/gateway-harden-ports.service
+systemctl daemon-reload
+systemctl enable --now gateway-harden-ports.service >/dev/null
+ok "internal ports hardened"
+
 # Переключатель "VPS+zapret" / "только zapret" (в UI — «Режим работы»). Дефолт
 # зависит от того, настроен ли VPS при установке — если да, начинаем с "on"
 # (как раньше, ничего не меняется), если нет — "off" сразу (нечего включать).
