@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Wand2 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
+import { VPSDomainsPanel } from '../components/VPSDomainsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import { fetchDomains, addDomain, fetchServices, saveServices, startScan, fetchScanStatus, fetchMonitor, type ZService } from '../lib/api'
@@ -319,37 +320,7 @@ export function DomainsPage() {
         </div>
       </div>
 
-      {(() => {
-        const vpsServices = services.filter((s) => s.mode === 'vps' && s.domains.length > 0)
-        const vpsDomainCount = vpsServices.reduce((n, s) => n + s.domains.length, 0)
-        if (vpsServices.length === 0) return null
-        return (
-          <div className="mb-(--section-gap)">
-            <SectionHead
-              title="Только через VPS"
-              count={vpsDomainCount}
-              hint="Сервисы в режиме vps идут всем своим трафиком через VPS-туннель, а не через локальный zapret-обход — обычно потому что zapret их не пробивает."
-            />
-            <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-              {vpsServices.map((svc) => (
-                <div key={svc.id} className="border-b border-border py-3 last:border-b-0">
-                  <div className="mb-1.5 font-medium">{svc.name}</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {svc.domains.map((d) => (
-                      <span
-                        key={d}
-                        className="rounded-md border border-border bg-surface-raised px-2 py-0.5 font-mono text-[11px] text-text-muted"
-                      >
-                        {d}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })()}
+      <VPSDomainsPanel />
 
       <PresetsPanel />
     </div>

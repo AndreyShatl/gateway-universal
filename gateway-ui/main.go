@@ -186,6 +186,7 @@ func main() {
 	mux.HandleFunc("/api/adguard", s.requireAuth(s.handleAdguard))
 	mux.HandleFunc("/api/autoroute", s.requireAuth(s.handleAutoRoute))
 	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
+	mux.HandleFunc("/api/vps-domains", s.requireAuth(s.handleVPSDomains))
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))
 	mux.HandleFunc("/api/nightly-trigger", s.requireAuth(s.handleNightlyTrigger))

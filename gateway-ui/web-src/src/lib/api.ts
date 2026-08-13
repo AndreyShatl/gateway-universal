@@ -228,6 +228,23 @@ export interface MonitorResponse {
 
 export const fetchMonitor = () => api<MonitorResponse>('/api/monitor')
 
+export interface VPSDomainEntry {
+  domain: string
+  route: 'vps' | 'dpi'
+  engine?: string
+  group_id?: string
+  last_active?: string
+}
+
+export interface VPSDomainsResponse {
+  discord: VPSDomainEntry[]
+  instagram: VPSDomainEntry[]
+  youtube: VPSDomainEntry[]
+  other: VPSDomainEntry[]
+}
+
+export const fetchVPSDomains = () => api<VPSDomainsResponse>('/api/vps-domains')
+
 export interface NightlyProgress {
   total: number
   done: number

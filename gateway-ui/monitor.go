@@ -194,10 +194,11 @@ func readZapret2Groups() []brainGroup {
 // ciadpiGroup — группа ciadpi-адаптера (T-ciadpi, brain-apply.sh), формат
 // /etc/gateway/brain-services-ciadpi.json: {group_id, proto, strategy, port, domains}.
 type ciadpiGroup struct {
-	GroupID string   `json:"group_id"`
-	Proto   string   `json:"proto"`
-	Port    *int     `json:"port"`
-	Domains []string `json:"domains"`
+	GroupID    string   `json:"group_id"`
+	Proto      string   `json:"proto"`
+	Port       *int     `json:"port"`
+	Domains    []string `json:"domains"`
+	LastActive string   `json:"last_active"`
 }
 
 func readCiadpiGroups() []ciadpiGroup {
@@ -259,10 +260,11 @@ type acceptOnlyEntity struct {
 // brainGroup — одна ГРУППА доменов с общей стратегией (T-consolidate, 2026-07-23:
 // схема сменилась с "сущность на домен" на "сущность на группу", см. CANON).
 type brainGroup struct {
-	GroupID string   `json:"group_id"`
-	Proto   string   `json:"proto"`
-	Queue   *int     `json:"queue"`
-	Domains []string `json:"domains"`
+	GroupID    string   `json:"group_id"`
+	Proto      string   `json:"proto"`
+	Queue      *int     `json:"queue"`
+	Domains    []string `json:"domains"`
+	LastActive string   `json:"last_active"`
 }
 
 func readBrainGroups() []brainGroup {
