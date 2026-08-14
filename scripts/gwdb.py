@@ -490,16 +490,17 @@ def cmd_vps_touch(args):
     CDN плодит новые случайные UUID-поддомены) это давало неограниченно
     растущую ночную очередь. Здесь свой, отдельный от service-touch streak
     (колонка vps_streak, не завязан на history — тот таблица про попытки
-    ZAPRET/CIADPI-стратегий, для VPS семантически не то), и заметно короче
-    максимальный интервал (3 дня, не 7) — VPS-домен всё ещё стоит перепроверять
-    почаще: именно для него мы ждём момента, когда наконец заработает прямой
-    обход."""
+    ZAPRET/CIADPI-стратегий, для VPS семантически не то). Максимальный
+    интервал подняли с 3 до 7 дней (2026-08-14, по запросу пользователя —
+    ночная переоценка занимала ~12ч и продолжала расти; хронически-VPS
+    домены вроде googlevideo.com троттлятся, а не блокируются, повторная
+    проверка каждые несколько дней всё равно ничего не изменит)."""
     domain, result = args[0], args[1]
     conn = db()
     row = conn.execute("SELECT vps_streak FROM services WHERE group_key=?", (domain,)).fetchone()
     streak = (row[0] if row else 0) + 1 if result == "success" else 0
     if streak >= 10:
-        confidence, interval_days = 100, 3
+        confidence, interval_days = 100, 7
     elif streak >= 5:
         confidence, interval_days = 70, 1
     elif streak >= 1:
