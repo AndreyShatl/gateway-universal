@@ -339,7 +339,7 @@ func fwdPrefix(r *http.Request) string {
 }
 
 // cookiePath — T-shattl-cookie-collision (2026-08-12): без префикса кука
-// сессии ставится с Path=/ на общем домене дашборда (bibios.lol-kek.uk) —
+// сессии ставится с Path=/ на общем домене дашборда (example.gateway-dashboard.tld) —
 // при одновременно открытых вкладках разных шлюзов (оба проксируются под
 // /gw/<id>/ на ТОМ ЖЕ origin) последняя авторизация перезаписывала куку
 // ПРЕДЫДУЩЕГО шлюза (тот же Name+Domain, любой Path перекрывает), а браузер
@@ -371,7 +371,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// hostname — не просто заголовок; T-shattl-cookie-collision (2026-08-12):
 	// та же форма логина везде идентична (один password-инпут без имени
 	// пользователя), браузер сопоставляет сохранённые пароли по origin, а
-	// у всех шлюзов за прокси origin ОДИН (bibios.lol-kek.uk) — password
+	// у всех шлюзов за прокси origin ОДИН (example.gateway-dashboard.tld) — password
 	// manager путал/переиспользовал пароль одного шлюза для другого. Скрытое
 	// поле username=hostname — стандартный приём, чтобы разные шлюзы
 	// сохранялись как разные записи.
