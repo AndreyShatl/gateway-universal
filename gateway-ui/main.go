@@ -149,6 +149,7 @@ func main() {
 	s.timeline.Record("system.boot", "System boot completed")
 	go s.vpnWatchLoop()
 	go s.dnsWatchLoop()
+	go s.cpuDiscordWatchLoop()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

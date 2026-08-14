@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -155,4 +158,75 @@ func (s *server) dnsWatchLoop() {
 		}
 		time.Sleep(interval)
 	}
+}
+
+// cpuDiscordWatchLoop (2026-08-14) — пользователь заметил живую корреляцию:
+// на слабом 2-ядерном CPU (132) во время просадок нагрузки под ~95%
+// зелёный пиндикатор в Discord-звонке становился красным. Причина уже
+// найдена и исправлена (SSH-мультиплексирование убрало лишний спавн
+// systemd --user на каждую команду), но пользователь не сидит в мониторинге
+// постоянно — нужен ПОСТФАКТУМ-лог, не живой дашборд. Пишем в Mission
+// Timeline: (1) сами по себе всплески нагрузки (load1 относительно числа
+// ядер), и (2) отдельно помечаем, если всплеск пришёлся на момент активного
+// голосового Discord-соединения (conntrack на UDP 50000-65535 — тот же
+// диапазон, что и discord-tproxy.sh) — прямая улика для разбора постфактум,
+// не просто "нагрузка скакнула где-то там".
+func (s *server) cpuDiscordWatchLoop() {
+	const interval = 5 * time.Second
+	const highRatio = 0.85 // доля от numCPU, после которой считаем это всплеском
+	numCPU := float64(runtime.NumCPU())
+	if numCPU < 1 {
+		numCPU = 1
+	}
+	threshold := numCPU * highRatio
+	spiking := false
+	var spikeStart time.Time
+	for {
+		load1, ok := readLoadAvg1()
+		if ok {
+			discordActive := hasDiscordVoiceConntrack()
+			if !spiking && load1 >= threshold {
+				spiking = true
+				spikeStart = time.Now()
+				msg := fmt.Sprintf("нагрузка CPU %.2f/%.0f ядер", load1, numCPU)
+				if discordActive {
+					msg += " — идёт активный голосовой Discord-коннект (вероятная просадка пинга)"
+					s.timeline.Record("cpu.spike.discord", msg)
+				} else {
+					s.timeline.Record("cpu.spike", msg)
+				}
+			} else if spiking && load1 < threshold {
+				spiking = false
+				dur := time.Since(spikeStart).Round(time.Second)
+				s.timeline.Record("cpu.normal", "нагрузка CPU вернулась в норму (пик длился "+dur.String()+")")
+			}
+		}
+		time.Sleep(interval)
+	}
+}
+
+func readLoadAvg1() (float64, bool) {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0, false
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(fields[0], 64)
+	return v, err == nil
+}
+
+// hasDiscordVoiceConntrack — есть ли прямо сейчас установленное UDP-соединение
+// в диапазоне 50000-65535 (тот же, что перехватывает discord-tproxy.sh) —
+// грубый, но дешёвый сигнал "человек сейчас в голосовом звонке", без парсинга
+// самого голосового трафика.
+func hasDiscordVoiceConntrack() bool {
+	out, err := runCmd("bash", "-c", `conntrack -L -p udp 2>/dev/null | grep -oE 'dport=[0-9]+' | cut -d= -f2 | awk '$1>=50000 && $1<=65535 {c++} END{print c+0}'`)
+	if err != nil {
+		return false
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	return n > 0
 }

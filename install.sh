@@ -270,6 +270,11 @@ fi
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean false" | debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean false" | debconf-set-selections
 APT_PKGS+=(iptables-persistent)
+# conntrack — solve.sh (T-solve-teardown) и cpuDiscordWatchLoop (2026-08-14)
+# оба на него молча полагаются (2>/dev/null маскирует "command not found");
+# найдено живьём: стоял на Pi, отсутствовал на 132 — расхождение годами
+# оставалось незамеченным именно из-за этой маскировки.
+APT_PKGS+=(conntrack)
 
 apt-get install -y -qq "${APT_PKGS[@]}"
 ok "APT packages installed"
