@@ -98,7 +98,17 @@ export function MonitorPage() {
     {},
   )
 
-  const schedule = [...(data?.reeval_schedule ?? [])].sort((a, b) => a.confidence - b.confidence)
+  const scheduleAll = [...(data?.reeval_schedule ?? [])].sort((a, b) => a.confidence - b.confidence)
+  const [domainFilter, setDomainFilter] = useState('')
+  const [engineFilter, setEngineFilter] = useState('')
+  const [confFilter, setConfFilter] = useState<number | ''>('')
+  const scheduleEngines = Array.from(new Set(scheduleAll.map((e) => e.engine))).sort()
+  const schedule = scheduleAll.filter((e) => {
+    if (domainFilter.trim() && !e.domain.toLowerCase().includes(domainFilter.trim().toLowerCase())) return false
+    if (engineFilter && e.engine !== engineFilter) return false
+    if (confFilter !== '' && e.confidence !== confFilter) return false
+    return true
+  })
 
   return (
     <div>
@@ -147,7 +157,42 @@ export function MonitorPage() {
             Confidence-гистерезис
             <InfoTip text="Confidence 0/30/70/100 — насколько уверенно домену подобрана стратегия: чем выше, тем реже перепроверка (экономит ресурсы на стабильных доменах, быстрее реагирует на нестабильные)." />
           </span>
-          <span className="font-mono text-[11px] text-text-muted">{schedule.length} доменов</span>
+          <span className="font-mono text-[11px] text-text-muted">
+            {schedule.length}/{scheduleAll.length} доменов
+          </span>
+        </div>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <input
+            value={domainFilter}
+            onChange={(e) => setDomainFilter(e.target.value)}
+            placeholder="фильтр по домену…"
+            className="h-7 w-44 rounded-md border border-border bg-surface-raised px-2 font-mono text-[11px] outline-none focus:border-border-strong"
+          />
+          <select
+            value={engineFilter}
+            onChange={(e) => setEngineFilter(e.target.value)}
+            className="h-7 rounded-md border border-border bg-surface-raised px-2 font-mono text-[11px] outline-none focus:border-border-strong"
+          >
+            <option value="">все движки</option>
+            {scheduleEngines.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-0.5 rounded-lg border border-border p-0.5">
+            {(['', 0, 30, 70, 100] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => setConfFilter(c)}
+                className={`rounded-md px-2 py-1 font-mono text-[10.5px] transition-colors ${
+                  confFilter === c ? 'border border-border-strong bg-surface-raised text-text' : 'text-text-muted'
+                }`}
+              >
+                {c === '' ? 'все' : c}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="max-h-[420px] overflow-y-auto rounded-[--card-radius] border border-border">
           {schedule.map((e) => (
