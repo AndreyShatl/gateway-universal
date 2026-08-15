@@ -1,6 +1,9 @@
 [Unit]
 Description=Еженедельное автообновление движка ciadpi (hufrea/byedpi) + восстановление ciadpi-групп
 After=network-online.target
+# T-timer-chaining (2026-08-16): см. комментарий в gateway-zapret-autoupdate.service
+OnSuccess=gateway-zapret2-autoupdate.service
+OnFailure=gateway-zapret2-autoupdate.service
 
 [Service]
 Type=oneshot

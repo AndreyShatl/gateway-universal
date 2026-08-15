@@ -771,11 +771,19 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
     done
     systemctl daemon-reload
     systemctl enable --now gateway-brain-restore.service gateway-brain-worker.service >/dev/null 2>&1 || true
-    systemctl enable --now gateway-brain-nightly.timer gateway-brain-activity.timer \
-        gateway-brain-idle-stop.timer gateway-brain-static-reeval.timer \
-        gateway-brain-domain-actualize.timer gateway-brain-healthcheck.timer \
+    # T-timer-chaining (2026-08-16): gateway-brain-nightly/-domain-actualize/
+    # -static-reeval больше НЕ на собственных таймерах — цепочка через
+    # OnSuccess=/OnFailure= (см. соответствующие .service): gateway-recheck
+    # (таймер 03:00, ставится ниже в блоке auto-route detector) -> nightly ->
+    # domain-actualize -> static-reeval, каждый шаг стартует по факту
+    # завершения предыдущего, а не по расчётному времени. Их .timer юниты
+    # копируются (см. цикл выше) для наличия файла, но НЕ enable — если
+    # когда-нибудь понадобится вернуть независимый таймер, достаточно
+    # systemctl enable --now без правки install.sh.
+    systemctl enable --now gateway-brain-activity.timer \
+        gateway-brain-idle-stop.timer gateway-brain-healthcheck.timer \
         gateway-zapret-autoupdate.timer >/dev/null 2>&1 || true
-    ok "brain установлен (voркер + ночная переоценка 04:00 + автообновление zapret по воскресеньям 02:00)"
+    ok "brain установлен (воркер + цепочка ночных проверок от gateway-recheck 03:00 + автообновление движков-обходов по воскресеньям от 02:00)"
 fi
 
 # ==========================================================================
@@ -803,8 +811,9 @@ if [[ "$INSTALL_CIADPI" == "yes" && "$INSTALL_BRAIN" == "yes" ]]; then
         cp "$SCRIPT_DIR/systemd/gateway-ciadpi-autoupdate.service" /etc/systemd/system/gateway-ciadpi-autoupdate.service
         cp "$SCRIPT_DIR/systemd/gateway-ciadpi-autoupdate.timer" /etc/systemd/system/gateway-ciadpi-autoupdate.timer
         systemctl daemon-reload
-        systemctl enable --now gateway-ciadpi-autoupdate.timer >/dev/null 2>&1 || true
-        ok "ciadpi собран (/opt/byedpi/ciadpi) + еженедельное автообновление"
+        # T-timer-chaining (2026-08-16): запускается по OnSuccess/OnFailure
+        # zapret-autoupdate, не по собственному таймеру — см. install.sh выше
+        ok "ciadpi собран (/opt/byedpi/ciadpi) + автообновление в цепочке после zapret (см. gateway-zapret-autoupdate.service)"
     else
         warn "сборка ciadpi не удалась — движок останется недоступен для мозга (это не критично, zapret/VPS работают независимо)"
     fi
@@ -826,8 +835,9 @@ if [[ "$INSTALL_ZAPRET2" == "yes" && "$INSTALL_BRAIN" == "yes" ]]; then
         cp "$SCRIPT_DIR/systemd/gateway-zapret2-autoupdate.service" /etc/systemd/system/gateway-zapret2-autoupdate.service
         cp "$SCRIPT_DIR/systemd/gateway-zapret2-autoupdate.timer" /etc/systemd/system/gateway-zapret2-autoupdate.timer
         systemctl daemon-reload
-        systemctl enable --now gateway-zapret2-autoupdate.timer >/dev/null 2>&1 || true
-        ok "zapret2 собран (/opt/zapret2) + еженедельное автообновление"
+        # T-timer-chaining (2026-08-16): запускается по OnSuccess/OnFailure
+        # ciadpi-autoupdate, не по собственному таймеру (конец цепочки)
+        ok "zapret2 собран (/opt/zapret2) + автообновление в цепочке после ciadpi (см. gateway-ciadpi-autoupdate.service)"
     else
         warn "сборка zapret2 не удалась — движок останется недоступен для мозга (это не критично, zapret/VPS работают независимо)"
     fi

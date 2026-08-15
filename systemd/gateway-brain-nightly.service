@@ -2,6 +2,9 @@
 Description=Gateway brain nightly pass (переоценка: solve -> zapret/VPS/GC)
 After=network-online.target xray.service zapret.service gateway-brain-worker.service
 Wants=network-online.target
+# T-timer-chaining (2026-08-16): см. комментарий в gateway-recheck.service
+OnSuccess=gateway-brain-domain-actualize.service
+OnFailure=gateway-brain-domain-actualize.service
 
 [Service]
 Type=oneshot
