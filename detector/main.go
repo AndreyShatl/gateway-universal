@@ -116,6 +116,15 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 		if c.SNI != "" && isWhitelisted(c.SNI) && !inCuratedRouting(c.SNI) {
 			return
 		}
+		// adguard-filter (T-junk-filter, 2026-08-16): реклама/трекеры/фишинг-
+		// типосквоттинг из уже загруженных блок-листов AdGuardHome — те же
+		// правила, что и так режут DNS-запрос до этого момента в норме, но
+		// пассивный детектор слушает сырой трафик (pcap/eBPF) и иногда ловит
+		// то, что резолвилось раньше/через другой DNS. См. adguard_filter.go.
+		if c.SNI != "" && !inCuratedRouting(c.SNI) && isAdGuardBlocked(c.SNI) {
+			log.Printf("🚫 мусор (AdGuardHome-блоклист): %s — не анализирую", c.SNI)
+			return
+		}
 		// уже обрабатывается — не пере-обрабатываем (иначе петля: свой трафик
 		// стенда zapret не десинхронизирует, прямая проба всегда «блок»). НО держим
 		// ipset свежим наблюдаемым IP клиента: Cloudflare/DoH отдают клиенту другие
