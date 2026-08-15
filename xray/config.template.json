@@ -241,6 +241,50 @@
       "mux": {
         "enabled": false
       }
+    },
+    {
+      "tag": "proxy-mux-voice",
+      "comment": "T-voice-isolation (2026-08-16): отдельное TCP/gRPC-соединение до того же VPS, тот же client id/serviceName — ТОЛЬКО для tproxy-udp (голос Discord). До сегодняшнего дня googlevideo.com шёл напрямую (zapret), а голос — через proxy-mux, пути не пересекались. Как только googlevideo.com перевели на VPS (фикс троттлинга ISP), голос и YouTube оказались в ОДНОМ gRPC-соединении (multiMode: true — общий TCP-поток, HTTP/2-мультиплексирование) — всплеск видео душил голосовые пакеты внутри одного и того же TCP-потока, шейпинг на интерфейсе тут не помогает. Отдельный outbound = отдельное TCP-соединение xray на клиенте, VPS ничего менять не нужно (тот же inbound спокойно принимает несколько соединений с одним client id).",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${VPS_ADDR}",
+            "port": ${VPS_PORT_GRPC},
+            "users": [
+              {
+                "id": "${VPS_UUID_GRPC}",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "${VPS_SERVER_NAME}",
+          "fingerprint": "${VPS_FINGERPRINT}",
+          "publicKey": "${VPS_PUBKEY}",
+          "shortId": "${VPS_SHORT_ID}",
+          "spiderX": "/"
+        },
+        "grpcSettings": {
+          "serviceName": "grpc-meta",
+          "multiMode": true
+        },
+        "sockopt": {
+          "tcpKeepAliveIdle": 60,
+          "tcpKeepAliveInterval": 30,
+          "tcpKeepAliveCount": 3,
+          "tcpNoDelay": true
+        }
+      },
+      "mux": {
+        "enabled": false
+      }
     }
   ],
   "routing": {
@@ -264,10 +308,11 @@
       },
       {
         "type": "field",
+        "comment": "T-voice-isolation (2026-08-16): свой outbound, не proxy-mux — см. комментарий у proxy-mux-voice выше",
         "inboundTag": [
           "tproxy-udp"
         ],
-        "outboundTag": "proxy-mux"
+        "outboundTag": "proxy-mux-voice"
       },
       {
         "type": "field",
