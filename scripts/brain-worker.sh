@@ -155,6 +155,13 @@ process_domain() {
         return 0
       fi
       log "⚠ $domain — группа $cur_gid больше не работает для этого домена, ищу замену"
+      # T-vps-safety-net (2026-08-15): пока идёт поиск замены (полный перебор
+      # может занимать несколько минут), домен временно уходит на VPS —
+      # иначе он бы висел на уже подтверждённо СЛОМАННОЙ стратегии всё это
+      # время, реально не работая ни через DPI, ни через VPS. Найдётся
+      # замена — try_existing_groups/полный перебор ниже сами применят её и
+      # снимут этот временный откат.
+      bash "$APPLY" remove "$domain" >/dev/null 2>&1
     fi
   else
     ccur=$(bash "$APPLY" cgroup-of "$domain" 2>/dev/null)
@@ -169,6 +176,8 @@ process_domain() {
           return 0
         fi
         log "⚠ $domain — ciadpi-группа $ccur_gid больше не работает для этого домена, ищу замену"
+        # T-vps-safety-net (2026-08-15) — см. комментарий выше по zapret-ветке.
+        bash "$APPLY" remove "$domain" >/dev/null 2>&1
       fi
     else
       zcur=$(bash "$APPLY" z2group-of "$domain" 2>/dev/null)
@@ -183,6 +192,8 @@ process_domain() {
             return 0
           fi
           log "⚠ $domain — zapret2-группа $zcur_gid больше не работает для этого домена, ищу замену"
+          # T-vps-safety-net (2026-08-15) — см. комментарий выше по zapret-ветке.
+          bash "$APPLY" remove "$domain" >/dev/null 2>&1
         fi
       fi
     fi
