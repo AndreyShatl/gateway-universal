@@ -943,7 +943,28 @@ EOF
         curl -s --max-time 10 -b "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/dns_config \
             -H "Content-Type: application/json" \
             -d '{"upstream_dns":["127.0.0.1:5353"],"bootstrap_dns":["127.0.0.1:5353"]}' >/dev/null 2>&1 || true
-        curl -s --max-time 30 -b "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/filtering/refresh \
+
+        # блок-листы (T-junk-filter, 2026-08-16): реклама/трекеры/DoH-обход/
+        # фишинг-тайпсквоттинг — единая точка правды и для DNS-фильтрации
+        # AdGuardHome, И для in-memory hash-set gateway-detector
+        # (detector/adguard_filter.go читает ЭТИ ЖЕ закешированные файлы с
+        # диска, /opt/AdGuardHome/data/filters/<id>.txt — id ниже должны
+        # совпадать с адресами detector/adguard_filter.go). TIF (~2 млн
+        # строк) безопасен по памяти даже на слабом (1.9ГБ RAM) шлюзе —
+        # проверено живым замером, ~156МБ на весь набор из 4 списков.
+        for f in \
+            '1|AdGuard DNS filter|https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt' \
+            '2|AdAway Default Blocklist|https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt' \
+            '1785344333|HaGeZi DoH/DoT Bypass Blocklist|https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/doh.txt' \
+            '1893552018|HaGeZi Threat Intelligence Feed|https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/tif.txt' \
+        ; do
+            f_name="$(echo "$f" | cut -d'|' -f2)"
+            f_url="$(echo "$f" | cut -d'|' -f3)"
+            curl -s --max-time 15 -b "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/filtering/add_url \
+                -H "Content-Type: application/json" \
+                -d "{\"name\":\"$f_name\",\"url\":\"$f_url\",\"whitelist\":false}" >/dev/null 2>&1 || true
+        done
+        curl -s --max-time 60 -b "$AGH_COOKIE_JAR" -X POST http://127.0.0.1:3000/control/filtering/refresh \
             -H "Content-Type: application/json" -d '{}' >/dev/null 2>&1 || true
         rm -f "$AGH_COOKIE_JAR"
 

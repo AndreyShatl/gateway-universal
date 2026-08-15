@@ -25,25 +25,38 @@ import (
 	"bufio"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// T-junk-filter (2026-08-16): НАМЕРЕННО не включает HaGeZi Threat
-// Intelligence Feed (id 1893552018) — тот список ~2 млн строк (42МБ), в
-// памяти детектора на слабом 132 (свободно ~130МБ RAM) это неоправданный
-// риск OOM, а искомые домены (фишинг-тайпсквоттинг Instagram) в нём всё
-// равно не нашлись при проверке. TIF продолжает блокировать на уровне DNS
-// через сам AdGuardHome (его C/Go-реализация под миллионы записей
-// рассчитана, наш ad-hoc hash-set — нет) — этого достаточно, детектору
-// эти домены дублировать в память незачем.
-var adguardFilterFiles = []string{
-	"/opt/AdGuardHome/data/filters/1.txt",
-	"/opt/AdGuardHome/data/filters/2.txt",
-	"/opt/AdGuardHome/data/filters/1785344333.txt",
-}
+// T-junk-filter (2026-08-16): AdGuardHome сам назначает id фильтру при
+// добавлении через API (/control/filtering/add_url) — на новой установке
+// (install.sh) он НЕ обязан совпасть с тем, что было прописано вручную на
+// 132/Pi при разработке этой фичи. Поэтому вместо жёстко заданных id —
+// просто ВСЕ *.txt в директории кеша AdGuardHome: на управляемой install.sh
+// установке там ровно те 4 списка, что мы сами и зарегистрировали (реклама/
+// трекеры/DoH-обход/фишинг-тайпсквоттинг, включая HaGeZi Threat
+// Intelligence Feed, ~2 млн строк) — не более. Живой замер (memtest,
+// отдельная программа с той же логикой парсинга) показал ~156МБ на весь
+// набор, проверено на 132 (1.9ГБ RAM) без деградации. ADGUARD_FILTER_FILES
+// (env, через systemd override) — аварийный рубильник, сузить список БЕЗ
+// пересборки: `systemctl edit gateway-detector` -> Environment= с нужным
+// подмножеством путей -> restart.
+const adguardFilterDir = "/opt/AdGuardHome/data/filters"
+
+var adguardFilterFiles = func() []string {
+	if v := os.Getenv("ADGUARD_FILTER_FILES"); v != "" {
+		return strings.Split(v, ",")
+	}
+	matches, err := filepath.Glob(filepath.Join(adguardFilterDir, "*.txt"))
+	if err != nil || len(matches) == 0 {
+		log.Printf("adguard-filter: нет файлов в %s (%v) — junk-фильтр отключён", adguardFilterDir, err)
+	}
+	return matches
+}()
 
 const adguardReloadInterval = 6 * time.Hour
 
