@@ -739,10 +739,22 @@ fi
 if [[ "$INSTALL_BRAIN" == "yes" ]]; then
     say "Installing brain (авто-подбор zapret-стратегий по доменам)…"
     mkdir -p /opt/gateway-brain /etc/gateway
-    for f in gwdb.py solve.sh brain-apply.sh brain-worker.sh brain-nightly.sh \
-             brain-activity.sh brain-idle-stop.sh brain-static-reeval.sh zapret-auto-update.sh; do
-        cp "$SCRIPT_DIR/scripts/$f" /opt/gateway-brain/"$f"
+    # T-deploy-drift (2026-08-16): раньше — явный список файлов на копирование,
+    # неоднократно расходился с реальным содержимым scripts/ (solve.sh,
+    # brain-apply.sh, brain-domain-actualize.sh, brain-healthcheck.sh — каждый
+    # свой инцидент, один и тот же класс бага: скрипт добавлен в репо, но не
+    # в этот список, деплой-копия тихо не обновляется/не создаётся никогда).
+    # Теперь — обратный принцип: копируем ВСЁ scripts/*.sh КРОМЕ явно
+    # исключённых dev-инструментов (не нужны в /opt, только для ручного
+    # запуска из репо). Новый скрипт добавляется в брейн просто фактом
+    # появления файла в scripts/ — забыть про этот список физически нельзя.
+    BRAIN_SKIP="deploy.sh discord-voice-test.sh stand-status.sh"
+    for f in "$SCRIPT_DIR"/scripts/*.sh; do
+        b="$(basename "$f")"
+        [[ " $BRAIN_SKIP " == *" $b "* ]] && continue
+        cp "$f" /opt/gateway-brain/"$b"
     done
+    cp "$SCRIPT_DIR/scripts/gwdb.py" /opt/gateway-brain/gwdb.py
     chmod +x /opt/gateway-brain/*.sh
 
     # состояние с нуля (свежая установка) — не трогаем, если уже есть (переустановка)
