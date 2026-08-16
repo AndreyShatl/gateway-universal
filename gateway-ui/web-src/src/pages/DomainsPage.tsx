@@ -170,6 +170,35 @@ export function DomainsPage() {
 
   const services = localServices ?? servicesData?.services ?? []
 
+  // T-vps-pin-rediscover (2026-08-16): раньше pinJobs узнавался только из
+  // ответа на POST /api/zapret/services в момент сохранения — если
+  // страница перезагружалась/переоткрывалась, пока фоновая работа на
+  // шлюзе ещё шла (перебор десятков доменов может занимать долго), прогресс
+  // -бар просто пропадал, хотя сама работа продолжалась нормально. Один раз
+  // после первой загрузки списка сервисов — переспрашиваем каждый на
+  // предмет активной job'ы, чтобы прогресс-бар появился заново.
+  const rediscoveredPinJobs = useRef(false)
+  useEffect(() => {
+    if (rediscoveredPinJobs.current || !servicesData) return
+    rediscoveredPinJobs.current = true
+    ;(async () => {
+      const results = await Promise.all(
+        servicesData.services.map(async (svc) => {
+          try {
+            const { job } = await fetchPinVPSJob(svc.id)
+            return [svc.id, job] as const
+          } catch {
+            return [svc.id, null] as const
+          }
+        }),
+      )
+      const active = Object.fromEntries(results.filter(([, job]) => job !== null))
+      if (Object.keys(active).length > 0) {
+        setPinJobs((prev) => ({ ...prev, ...active }))
+      }
+    })()
+  }, [servicesData])
+
   async function onAdd() {
     if (!input.trim()) return
     setBusy(true)
