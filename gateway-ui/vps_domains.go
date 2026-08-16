@@ -30,6 +30,10 @@ type vpsDomainsResponse struct {
 	Instagram []vpsDomainEntry `json:"instagram"`
 	Youtube   []vpsDomainEntry `json:"youtube"`
 	Other     []vpsDomainEntry `json:"other"`
+	// Pinned — id сервиса -> закреплён ли он на VPS (mode="vps" в
+	// zapret-services.json, см. pinvps.go). Нужно фронту, чтобы кнопка
+	// показывала правильное состояние сразу, без отдельного запроса.
+	Pinned map[string]bool `json:"pinned"`
 }
 
 type domainRoute struct {
@@ -131,11 +135,18 @@ func otherCuratedDomains(repoDir string) []string {
 
 func (s *server) handleVPSDomains(w http.ResponseWriter, r *http.Request) {
 	idx := buildDomainRouteIndex()
+	pinned := map[string]bool{}
+	if svc, err := s.readServices(); err == nil {
+		for _, v := range svc {
+			pinned[v.ID] = v.Mode == "vps"
+		}
+	}
 	resp := vpsDomainsResponse{
 		Discord:   entriesFor(readServiceDomains(s.servicesFile, "discord"), idx),
 		Instagram: entriesFor(readServiceDomains(s.servicesFile, "instagram"), idx),
 		Youtube:   entriesFor(readServiceDomains(s.servicesFile, "youtube"), idx),
 		Other:     entriesFor(otherCuratedDomains(s.repoDir), idx),
+		Pinned:    pinned,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

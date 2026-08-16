@@ -26,6 +26,35 @@ APPLY=${APPLY:-/root/brain-apply.sh}
 GWDB=${GWDB:-/root/gateway-universal/scripts/gwdb.py}
 IDLE=${IDLE:-5}
 FAKEDIR=${FAKEDIR:-/opt/zapret/files/fake}
+SERVICES=${SERVICES:-/etc/gateway/zapret-services.json}
+
+# T-vps-pin (2026-08-16): пользователь может закрепить сервис (discord/
+# youtube/instagram) целиком на VPS кнопкой в UI — mode="vps" в
+# zapret-services.json уже управляет статическим xray-роутингом
+# (render-config.sh/build-domains.sh), но раньше НИКАК не влиял на этот
+# воркер — pinned-домен мог быть вручную снят с DPI-обхода, а следующий же
+# ночной/пассивный проход тихо назначал ему ciadpi заново (реальный кейс
+# этой ночи: 41 домен discord пришлось снимать вручную, расползались бы
+# снова). Теперь process_domain() проверяет pin ПЕРВЫМ делом.
+pinned_vps_service() { # <domain> -> "1" если домен в сервисе с mode=vps, иначе ""
+  local domain=$1
+  python3 -c "
+import json, sys
+try:
+    data = json.load(open('$SERVICES'))
+except Exception:
+    sys.exit(0)
+d = '$domain'.lower()
+for svc in data:
+    if (svc.get('mode') or '') != 'vps':
+        continue
+    for sd in svc.get('domains', []):
+        sd = sd.lower()
+        if d == sd or d.endswith('.' + sd):
+            print('1')
+            sys.exit(0)
+" 2>/dev/null
+}
 
 # strategy-find для zapret получает строки уже с ПОДСТАВЛЕННЫМ $FAKE (brain-apply.sh
 # и ZAPRET-вердикт solve.sh отдают резолвленный путь /opt/zapret/files/fake/...,
@@ -138,6 +167,20 @@ for g in groups: print(g['strategy'])
 process_domain() {
   local domain=$1 source=$2
   local proto; if [ "$source" = "quic-no-response" ]; then proto=udp; else proto=tcp; fi
+
+  # 0. Сервис закреплён на VPS кнопкой в UI (T-vps-pin) — никакого DPI-обхода,
+  #    даже пробовать не нужно. Снимаем любую существующую группу (на случай
+  #    гонки: пин поставили ПОСЛЕ того, как домен уже получил DPI-стратегию)
+  #    и гарантируем VPS. Всегда return — шаги 1-3 ниже не должны выполняться.
+  if [ -n "$(pinned_vps_service "$domain")" ]; then
+    local cur_any; cur_any=$(bash "$APPLY" group-of "$domain" 2>/dev/null)$(bash "$APPLY" cgroup-of "$domain" 2>/dev/null)$(bash "$APPLY" z2group-of "$domain" 2>/dev/null)
+    bash "$APPLY" vps "$domain" >/dev/null 2>&1
+    if [ -n "$cur_any" ]; then
+      log "📌 $domain — сервис закреплён на VPS, снят с DPI-обхода"
+    fi
+    python3 "$GWDB" vps-touch "$domain" success >/dev/null 2>&1
+    return 0
+  fi
 
   # 1. Домен уже в zapret-группе, ИЛИ ciadpi-группе, ИЛИ zapret2-группе (взаимно-
   #    исключающе — brain-apply.sh сам отцепляет домен от «чужого» движка при

@@ -20,7 +20,13 @@ say() { printf '%-22s %s\n' "$1" "$2"; }
 die() { echo "FAIL: $*" >&2; exit 1; }
 
 sync_dir() { # локальный подкаталог -> стенд
-  scp -q -r "$LOCAL/$1" "$STAND:$SRC_REMOTE/$(dirname "$1")/" || die "scp $1"
+  # T-deploy-node-modules (2026-08-16): scp -r копировал web-src/node_modules
+  # (156МБ, тысячи мелких файлов) при каждом deploy.sh ui - на практике
+  # никогда не нужен на стенде (фронт уже собран локально в static/dist,
+  # go:embed берёт готовые файлы, node_modules нужен только для vite build,
+  # который делается ДО деплоя). rsync с exclude - на порядок быстрее.
+  ssh "$STAND" "mkdir -p $SRC_REMOTE/$(dirname "$1")" || die "mkdir $1"
+  rsync -az --exclude node_modules --exclude web-src/node_modules -e ssh "$LOCAL/$1" "$STAND:$SRC_REMOTE/$(dirname "$1")/" || die "rsync $1"
 }
 
 deploy_detector() {

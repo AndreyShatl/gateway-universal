@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { InfoTip } from './InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchVPSDomains, type VPSDomainEntry } from '../lib/api'
+import { fetchPinVPSJob, fetchVPSDomains, setPinVPS, type PinVPSJob, type VPSDomainEntry } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
@@ -72,6 +72,72 @@ function SortButton({
       {label}
       {active && <span>{dir === 1 ? '↑' : '↓'}</span>}
     </button>
+  )
+}
+
+// PinVPSToggle (T-vps-pin, 2026-08-16) — быстрое переключение сервиса целиком
+// между "авто-DPI" (мозг сам подбирает обход per-домен) и "закреплён на VPS"
+// (никакого DPI-обхода вообще, ни сейчас, ни при следующей ночной
+// переоценке — см. brain-worker.sh). Отклик мгновенный (mode пишется сразу),
+// фактическая чистка существующих DPI-групп идёт в фоне на шлюзе — пока
+// работает, показываем прогресс поллингом.
+function PinVPSToggle({ serviceId, initialPinned }: { serviceId: string; initialPinned: boolean }) {
+  const [pinned, setPinned] = useState(initialPinned)
+  const [busy, setBusy] = useState(false)
+  const [job, setJob] = useState<PinVPSJob | null>(null)
+
+  useEffect(() => setPinned(initialPinned), [initialPinned])
+
+  useEffect(() => {
+    if (!busy) return
+    const t = setInterval(async () => {
+      try {
+        const { job } = await fetchPinVPSJob(serviceId)
+        setJob(job)
+        if (!job) {
+          setBusy(false)
+          clearInterval(t)
+        }
+      } catch {
+        /* поллинг — не критично, если один запрос не удался */
+      }
+    }, 2000)
+    return () => clearInterval(t)
+  }, [busy, serviceId])
+
+  async function toggle() {
+    const next = !pinned
+    setPinned(next)
+    try {
+      await setPinVPS(serviceId, next)
+      if (next) {
+        setBusy(true)
+        setJob(null)
+      }
+    } catch {
+      setPinned(!next) // откат UI, если запрос не удался
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {busy && job && job.total > 0 && (
+        <span className="font-mono text-[10.5px] text-text-muted">
+          снимаю DPI-обход: {job.done}/{job.total}
+        </span>
+      )}
+      <button
+        onClick={toggle}
+        title="Закрепить сервис на VPS — мозг больше не будет подбирать DPI-обход для его доменов, ни сейчас, ни при ночной переоценке"
+        className={`rounded-md border px-2 py-1 font-mono text-[10.5px] transition-colors ${
+          pinned
+            ? 'border-accent bg-accent/10 text-accent'
+            : 'border-border text-text-muted hover:border-border-strong hover:text-text-secondary'
+        }`}
+      >
+        {pinned ? '📌 закреплён на VPS' : 'закрепить на VPS'}
+      </button>
+    </div>
   )
 }
 
@@ -147,10 +213,10 @@ export function VPSDomainsPanel() {
   const { data } = usePoll(fetchVPSDomains, 15000)
   if (!data) return null
 
-  const groups: { title: string; hint?: string; entries: VPSDomainEntry[] }[] = [
-    { title: 'Discord', entries: data.discord },
-    { title: 'Instagram', entries: data.instagram },
-    { title: 'YouTube', entries: data.youtube },
+  const groups: { title: string; serviceId?: string; hint?: string; entries: VPSDomainEntry[] }[] = [
+    { title: 'Discord', serviceId: 'discord', entries: data.discord },
+    { title: 'Instagram', serviceId: 'instagram', entries: data.instagram },
+    { title: 'YouTube', serviceId: 'youtube', entries: data.youtube },
     {
       title: 'Остальные домены',
       hint: 'Курируемые категории (соцсети, стриминг, игры, разработка и т.д. — см. xray/domains/*.txt), кроме уже показанных выше Discord/Instagram/YouTube и кроме AI-сервисов (те никогда не идут в обход намеренно). Как и везде на этой странице — не только VPS, колонка "маршрут" показывает фактическое состояние каждого домена.',
@@ -172,9 +238,12 @@ export function VPSDomainsPanel() {
       <div className="space-y-(--section-gap)">
         {groups.map((g) => (
           <div key={g.title} className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
-            <div className="mb-3 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
-              {g.title}
-              {g.hint && <InfoTip text={g.hint} />}
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
+                {g.title}
+                {g.hint && <InfoTip text={g.hint} />}
+              </div>
+              {g.serviceId && <PinVPSToggle serviceId={g.serviceId} initialPinned={!!data.pinned[g.serviceId]} />}
             </div>
             <DomainList entries={g.entries} />
           </div>

@@ -241,9 +241,25 @@ export interface VPSDomainsResponse {
   instagram: VPSDomainEntry[]
   youtube: VPSDomainEntry[]
   other: VPSDomainEntry[]
+  pinned: Record<string, boolean>
 }
 
 export const fetchVPSDomains = () => api<VPSDomainsResponse>('/api/vps-domains')
+
+export interface PinVPSJob {
+  total: number
+  done: number
+  error?: string
+}
+
+export const setPinVPS = (id: string, enabled: boolean) =>
+  api<{ ok: boolean; mode: string }>(`/api/services/${id}/pin-vps`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+
+export const fetchPinVPSJob = (id: string) => api<{ job: PinVPSJob | null }>(`/api/services/${id}/pin-vps`)
 
 export interface NightlyProgress {
   total: number
