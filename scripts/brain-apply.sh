@@ -818,15 +818,33 @@ for g in json.load(open('$STATE')):
   done
 }
 
+# flush_domain_conntrack (T-conntrack-stale, 2026-08-16) — сбросить conntrack
+# по ВСЕМ резолвящимся сейчас IP домена после смены маршрута. Та же причина,
+# что уже задокументирована в solve.sh (там - для честного повторного теста
+# кандидатов на один и тот же IP): боевые mangle-правила matches'ят "новое
+# соединение" через `connbytes 1:6` (см. do_zapret/do_ciadpi/do_zapret2) -
+# если в conntrack для целевого IP залипла старая запись (например, DPI
+# оборвал TLS, а запись не сразу истекла), NFQUEUE/TPROXY может не увидеть
+# следующую попытку как "новую" и обход не сработает, пока запись не
+# истечёт сама. В отличие от solve.sh (тестовый netns-стенд, один IP за
+# раз) здесь домен может резолвиться в несколько CDN-адресов - чистим все.
+flush_domain_conntrack() {
+  local domain=$1 ip
+  while IFS= read -r ip; do
+    [ -n "$ip" ] && conntrack -D -d "$ip" >/dev/null 2>&1
+  done < <(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+}
+
 case "${1:-}" in
-  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@" ;;
-  ciadpi) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@" ;;
-  zapret2) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@" ;;
+  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d" ;;
+  ciadpi) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d" ;;
+  zapret2) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d" ;;
   vps)    shift; do_remove "$1" >/dev/null 2>&1; do_remove_ciadpi "$1" >/dev/null 2>&1; do_remove_zapret2 "$1" >/dev/null 2>&1
           if has_vps; then ar_add "$1"; echo "🔵 vps: $1 в автообходе"
-          else echo "⚪ $1: ни одна стратегия не пробила, VPS не настроен — остаётся заблокирован"; fi ;;
-  remove-entity) shift; do_remove "$1" ;;
-  remove) shift; do_remove "$1"; do_remove_ciadpi "$1"; do_remove_zapret2 "$1"; ar_del "$1" ;;
+          else echo "⚪ $1: ни одна стратегия не пробила, VPS не настроен — остаётся заблокирован"; fi
+          flush_domain_conntrack "$1" ;;
+  remove-entity) shift; do_remove "$1"; flush_domain_conntrack "$1" ;;
+  remove) shift; do_remove "$1"; do_remove_ciadpi "$1"; do_remove_zapret2 "$1"; ar_del "$1"; flush_domain_conntrack "$1" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
   list-ciadpi) cat "$CSTATE" 2>/dev/null || echo "[]" ;;
   list-zapret2) cat "$Z2STATE" 2>/dev/null || echo "[]" ;;
