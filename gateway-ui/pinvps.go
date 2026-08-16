@@ -45,6 +45,26 @@ type pinVPSJob struct {
 	Error string `json:"error,omitempty"`
 }
 
+// tryClaimPinVPSJob — атомарно занимает слот под id сервиса, ПЕРЕД тем как
+// запускать фоновую горутину (не внутри неё — иначе два быстрых toggle
+// подряд оба проходят проверку до того, как первый успеет что-то записать).
+// Живой баг (2026-08-16): пользователь быстро переключил VPS -> zapret,
+// обе фоновые задачи (чистка от первого клика + перепроверка от второго)
+// писали в ОДНУ ячейку pinVPSJobs.m[id] и обе её же удаляли по завершении —
+// какая закончилась раньше, стирала прогресс ещё работающей другой,
+// прогресс-бар на фронте пропадал, хотя работа продолжалась. Теперь второй
+// запуск для уже занятого id просто не стартует (лог-предупреждение,
+// первая задача доводится до конца сама).
+func tryClaimPinVPSJob(id string) bool {
+	pinVPSJobs.Lock()
+	defer pinVPSJobs.Unlock()
+	if _, busy := pinVPSJobs.m[id]; busy {
+		return false
+	}
+	pinVPSJobs.m[id] = &pinVPSJob{} // место занято, реальный Total выставит сама job чуть позже
+	return true
+}
+
 // handlePinVPS — только опрос прогресса фоновой job'ы (GET). Само
 // переключение режима — через общий редактор, см. комментарий выше.
 func (s *server) handlePinVPS(w http.ResponseWriter, r *http.Request) {
@@ -66,11 +86,14 @@ func (s *server) handlePinVPS(w http.ResponseWriter, r *http.Request) {
 // runPinVPSCleanup — снимает существующие DPI-группы с каждого домена сервиса
 // (brain-apply.sh vps уже включает remove для всех трёх движков) в фоне,
 // не блокируя ответ пользователю. Прогресс — через /api/services/{id}/pin-vps
-// GET (пока job жив).
+// GET (пока job жив). Вызывающий (zapret.go) уже занял слот через
+// tryClaimPinVPSJob ДО запуска этой горутины — здесь только дописываем
+// реальный Total в уже существующий объект (не создаём новый — иначе снова
+// гонка, см. tryClaimPinVPSJob).
 func (s *server) runPinVPSCleanup(id string, domains []string) {
-	job := &pinVPSJob{Total: len(domains)}
 	pinVPSJobs.Lock()
-	pinVPSJobs.m[id] = job
+	job := pinVPSJobs.m[id]
+	job.Total = len(domains)
 	pinVPSJobs.Unlock()
 
 	brainApply := filepath.Join("/opt/gateway-brain", "brain-apply.sh")
@@ -103,12 +126,19 @@ const vpsPinRecheckMaxWait = 2 * time.Hour
 func (s *server) runVPSPinRecheck(id string, domains []string) {
 	enqueued := enqueueDomainsForRecheck(domains)
 	if len(enqueued) == 0 {
-		return // все уже были в очереди — нечего отслеживать, не плодим пустой job
+		// все уже были в очереди — нечего отслеживать, но слот, занятый
+		// tryClaimPinVPSJob, всё равно нужно освободить, иначе он навсегда
+		// заблокирует любой следующий toggle этого сервиса (место "занято"
+		// пустышкой, которую больше некому удалить).
+		pinVPSJobs.Lock()
+		delete(pinVPSJobs.m, id)
+		pinVPSJobs.Unlock()
+		return
 	}
 
-	job := &pinVPSJob{Total: len(enqueued)}
 	pinVPSJobs.Lock()
-	pinVPSJobs.m[id] = job
+	job := pinVPSJobs.m[id]
+	job.Total = len(enqueued)
 	pinVPSJobs.Unlock()
 
 	pending := make(map[string]bool, len(enqueued))

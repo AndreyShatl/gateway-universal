@@ -131,12 +131,23 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 			if was == becomes {
 				continue
 			}
+			// tryClaimPinVPSJob — СИНХРОННО, до go: живой баг (2026-08-16) —
+			// быстрый двойной toggle одного сервиса запускал две горутины
+			// почти одновременно, обе писали в один pinVPSJobs.m[id] и обе же
+			// удаляли его по завершении — какая закончилась раньше, стирала
+			// прогресс ещё работающей другой. Если слот уже занят (job для
+			// этого сервиса ещё идёт) — просто не стартуем вторую, первая
+			// доведёт до конца сама.
 			if becomes == "vps" {
-				go s.runPinVPSCleanup(v.ID, v.Domains)
-				pinJobs = append(pinJobs, v.ID)
+				if tryClaimPinVPSJob(v.ID) {
+					go s.runPinVPSCleanup(v.ID, v.Domains)
+					pinJobs = append(pinJobs, v.ID)
+				}
 			} else if was == "vps" {
-				go s.runVPSPinRecheck(v.ID, v.Domains)
-				pinJobs = append(pinJobs, v.ID)
+				if tryClaimPinVPSJob(v.ID) {
+					go s.runVPSPinRecheck(v.ID, v.Domains)
+					pinJobs = append(pinJobs, v.ID)
+				}
 			}
 		}
 
