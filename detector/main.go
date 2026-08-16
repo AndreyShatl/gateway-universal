@@ -87,6 +87,7 @@ func runWatch() {
 		log.Fatal("не удалось определить WAN-интерфейс, задайте --iface")
 	}
 	gwdbScript = filepath.Join(filepath.Dir(*configEnv), "scripts", "gwdb.py")
+	adguardPassword = configVar(*configEnv, "ADGUARD_PASSWORD")
 	log.Printf("detector: iface=%s vps=%s apply=%v", *iface, *vps, *apply)
 	// watcher -> prober (подтверждение) -> [тень: лог | apply: применить]
 	handler := buildCandidateHandler(apply, socks)

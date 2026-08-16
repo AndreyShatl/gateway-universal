@@ -1,166 +1,114 @@
 package main
 
-// adguard_filter.go (T-junk-filter, 2026-08-16) — фильтрация мусорных доменов
-// (реклама/трекеры/фишинг-типосквоттинг) через уже загруженные списки
-// AdGuardHome, вместо ручного пополнения gwdb whitelist по одному домену.
+// adguard_filter.go (T-junk-filter, 2026-08-16; T-adguard-api, 2026-08-16
+// вечер) — фильтрация мусорных доменов (реклама/трекеры/фишинг-
+// типосквоттинг) через уже настроенные блок-листы AdGuardHome.
 //
-// НЕ используем gwdb.py whitelist для этого: cmd_whitelisted там — линейный
-// перебор в Python по ВСЕЙ таблице на каждый вызов (см. scripts/gwdb.py) —
-// годится для десятков ручных записей, но при ~166k строк из блок-листов
-// убьёт латентность живого детектора трафика. Поэтому свой in-memory
-// hash-set, загружается из уже скачанных AdGuardHome файлов
-// (/opt/AdGuardHome/data/filters/*.txt — те же, что использует сам AGH для
-// DNS-фильтрации, обновляются им самим по расписанию) — отдельный источник
-// правды, не дублирование данных вручную, всегда синхронно с тем, что уже
-// блокируется на DNS-уровне.
+// Изначально (T-junk-filter) детектор держал СВОЮ копию всех блок-листов в
+// памяти (in-memory hash-set, ~165k-2.2М записей в зависимости от набора) —
+// работало, но дублировало то, что и так уже полностью загружено в память
+// самим AdGuardHome (у него те же списки нужны для DNS-фильтрации, это его
+// основная функция, не опционально). На слабом 132 (1.9ГБ RAM) с HaGeZi TIF
+// (2 млн записей) AdGuardHome сам держит ~870МБ, детектор поверх этого ещё
+// ~350МБ на дублирующую копию — почти 1.2ГБ из 1.9ГБ суммарно на ОДНУ и ту
+// же информацию в двух процессах.
 //
-// Формат AdBlock hostlist: подавляющее большинство строк — "||domain.tld^"
-// (блок), небольшая часть — "@@||domain.tld^" (исключение/allow, приоритет
-// выше блока). Комментарии начинаются с "!" или "#", остальные экзотические
-// правила (regex/^$important и т.п.) пропускаем — не наш случай, лучше
-// пропустить редкое правило, чем неверно распарсить и словить false-positive
-// на легитимном домене.
-
+// Теперь — прямой запрос к API AdGuardHome (/control/filtering/check_host,
+// тот же эндпоинт, что использует его собственный веб-интерфейс) вместо
+// собственной копии списков. AdGuardHome остаётся единственным источником
+// правды в памяти; детектор просто спрашивает. Локальный кеш ответов (TTL
+// 10 мин) — не бить по API на каждый повторный кандидат в короткий срок,
+// но и не держать ничего похожего на полную копию списков.
 import (
-	"bufio"
+	"encoding/json"
 	"log"
-	"os"
-	"path/filepath"
+	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-// T-junk-filter (2026-08-16): AdGuardHome сам назначает id фильтру при
-// добавлении через API (/control/filtering/add_url) — на новой установке
-// (install.sh) он НЕ обязан совпасть с тем, что было прописано вручную на
-// 132/Pi при разработке этой фичи. Поэтому вместо жёстко заданных id —
-// просто ВСЕ *.txt в директории кеша AdGuardHome: на управляемой install.sh
-// установке там ровно те 4 списка, что мы сами и зарегистрировали (реклама/
-// трекеры/DoH-обход/фишинг-тайпсквоттинг, включая HaGeZi Threat
-// Intelligence Feed, ~2 млн строк) — не более. Живой замер (memtest,
-// отдельная программа с той же логикой парсинга) показал ~156МБ на весь
-// набор, проверено на 132 (1.9ГБ RAM) без деградации. ADGUARD_FILTER_FILES
-// (env, через systemd override) — аварийный рубильник, сузить список БЕЗ
-// пересборки: `systemctl edit gateway-detector` -> Environment= с нужным
-// подмножеством путей -> restart.
-const adguardFilterDir = "/opt/AdGuardHome/data/filters"
+// adguardPassword — пароль admin AdGuardHome (Basic Auth для API). Задаётся
+// явно в runWatch()/runWatchEBPF() через configVar(configEnv, "ADGUARD_PASSWORD")
+// (тот же паттерн, что gwdbScript в main.go/ebpf_on.go) — здесь только дефолт
+// для случая, когда её не задали (например, запуск detector напрямую в CLI).
+var adguardPassword = ""
 
-var adguardFilterFiles = func() []string {
-	if v := os.Getenv("ADGUARD_FILTER_FILES"); v != "" {
-		return strings.Split(v, ",")
-	}
-	matches, err := filepath.Glob(filepath.Join(adguardFilterDir, "*.txt"))
-	if err != nil || len(matches) == 0 {
-		log.Printf("adguard-filter: нет файлов в %s (%v) — junk-фильтр отключён", adguardFilterDir, err)
-	}
-	return matches
-}()
+const adguardAPIBase = "http://127.0.0.1:3000"
+const adguardCacheTTL = 10 * time.Minute
 
-const adguardReloadInterval = 6 * time.Hour
-
-var adguardBlockSet atomic.Value // map[string]struct{}
-var adguardAllowSet atomic.Value // map[string]struct{}
-var adguardLoadOnce sync.Once
-
-func parseAdGuardLine(line string) (domain string, allow bool, ok bool) {
-	line = strings.TrimSpace(line)
-	if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
-		return "", false, false
-	}
-	allow = strings.HasPrefix(line, "@@")
-	if allow {
-		line = line[2:]
-	}
-	if !strings.HasPrefix(line, "||") {
-		return "", false, false // не доменное правило (regex/путь/etc.) — пропускаем
-	}
-	line = line[2:]
-	// срезаем модификаторы после ^ или $ (типы трафика, важность и т.п.)
-	if i := strings.IndexAny(line, "^$/"); i >= 0 {
-		line = line[:i]
-	}
-	line = strings.TrimPrefix(line, "*.")
-	line = strings.ToLower(strings.TrimSuffix(line, "."))
-	if line == "" || strings.ContainsAny(line, "*/ ") {
-		return "", false, false // остаточный wildcard/мусор — пропускаем, не наш формат
-	}
-	return line, allow, true
+type adguardCacheEntry struct {
+	blocked bool
+	expiry  time.Time
 }
 
-func loadAdGuardSets() (map[string]struct{}, map[string]struct{}) {
-	block := make(map[string]struct{}, 170000)
-	allow := make(map[string]struct{}, 1000)
-	loaded := 0
-	for _, path := range adguardFilterFiles {
-		f, err := os.Open(path)
-		if err != nil {
-			log.Printf("adguard-filter: не открыть %s: %v (пропуск)", path, err)
-			continue
-		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 64*1024), 1<<20)
-		for sc.Scan() {
-			d, isAllow, ok := parseAdGuardLine(sc.Text())
-			if !ok {
-				continue
-			}
-			if isAllow {
-				allow[d] = struct{}{}
-			} else {
-				block[d] = struct{}{}
-			}
-			loaded++
-		}
-		f.Close()
-	}
-	log.Printf("adguard-filter: загружено %d правил (%d блок/%d allow) из %d файлов", loaded, len(block), len(allow), len(adguardFilterFiles))
-	return block, allow
+var adguardCache = struct {
+	sync.Mutex
+	m map[string]adguardCacheEntry
+}{m: map[string]adguardCacheEntry{}}
+
+var adguardHTTPClient = &http.Client{Timeout: 3 * time.Second}
+
+type adguardCheckHostResp struct {
+	Reason string `json:"reason"`
 }
 
-// isAdGuardBlocked — домен или любой его родительский суффикс есть в блок-
-// списке AdGuardHome, И не переопределён более специфичным allow-правилом.
-// Суффиксная проверка (не только точное совпадение) — блок-листы обычно
-// покрывают базовый домен трекера/спамера, а реальный SNI часто на
-// поддомене (напр. "track.adnetwork.com" при правиле "||adnetwork.com^").
+// isAdGuardBlocked — спрашивает AdGuardHome напрямую (его /control/filtering/
+// check_host, тот же путь, что использует собственный веб-интерфейс AGH при
+// показе "почему заблокировано"). Fail-open при любой ошибке (AGH недоступен,
+// таймаут, неожиданный ответ) — не блокируем анализ трафика из-за сбоя
+// вспомогательного запроса, максимум пропустим фильтрацию мусора разово.
 func isAdGuardBlocked(domain string) bool {
-	// ленивый старт (не привязываемся к конкретной точке входа — их две,
-	// watch/watch-ebpf, обе используют buildCandidateHandler): первый вызов
-	// синхронно грузит списки (разовая задержка на первом кандидате,
-	// незаметно на фоне pcap/eBPF), дальше — фоновый реload по таймеру.
-	adguardLoadOnce.Do(func() {
-		block, allow := loadAdGuardSets()
-		adguardBlockSet.Store(block)
-		adguardAllowSet.Store(allow)
-		go func() {
-			for {
-				time.Sleep(adguardReloadInterval)
-				b, a := loadAdGuardSets()
-				adguardBlockSet.Store(b)
-				adguardAllowSet.Store(a)
-			}
-		}()
-	})
-	bv := adguardBlockSet.Load()
-	if bv == nil {
-		return false // не удалось загрузить ни один файл — fail-open, не блокируем анализ
-	}
-	block := bv.(map[string]struct{})
-	av, _ := adguardAllowSet.Load().(map[string]struct{})
-
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
-	labels := strings.Split(domain, ".")
-	for i := 0; i < len(labels)-1; i++ { // -1: не проверяем голый TLD
-		suffix := strings.Join(labels[i:], ".")
-		if av != nil {
-			if _, ok := av[suffix]; ok {
-				return false // явный allow перевешивает блок
-			}
-		}
-		if _, ok := block[suffix]; ok {
-			return true
-		}
+	if domain == "" {
+		return false
 	}
-	return false
+
+	adguardCache.Lock()
+	if e, ok := adguardCache.m[domain]; ok && time.Now().Before(e.expiry) {
+		blocked := e.blocked
+		adguardCache.Unlock()
+		return blocked
+	}
+	adguardCache.Unlock()
+
+	blocked := queryAdGuardHome(domain)
+
+	adguardCache.Lock()
+	adguardCache.m[domain] = adguardCacheEntry{blocked: blocked, expiry: time.Now().Add(adguardCacheTTL)}
+	adguardCache.Unlock()
+
+	return blocked
+}
+
+var adguardPasswordWarnOnce sync.Once
+
+func queryAdGuardHome(domain string) bool {
+	if adguardPassword == "" {
+		adguardPasswordWarnOnce.Do(func() {
+			log.Printf("adguard-filter: пароль AdGuardHome не найден в config.env — junk-фильтр отключён (fail-open)")
+		})
+		return false // пароль не настроен/не найден — fail-open, не блокируем анализ
+	}
+
+	req, err := http.NewRequest("GET", adguardAPIBase+"/control/filtering/check_host?name="+domain, nil)
+	if err != nil {
+		return false
+	}
+	req.SetBasicAuth("admin", adguardPassword)
+
+	resp, err := adguardHTTPClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	var parsed adguardCheckHostResp
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return false
+	}
+	return strings.HasPrefix(parsed.Reason, "Filtered")
 }
