@@ -10,4 +10,8 @@ ExecStart=/opt/gateway-brain/ensure-ipsets.sh
 
 [Install]
 WantedBy=sysinit.target
-RequiredBy=netfilter-persistent.service
+# Wants=, не Requires=/RequiredBy= — этот unit best-effort (см. комментарий
+# в ensure-ipsets.sh), не должен блокировать netfilter-persistent целиком
+# при своём сбое (живой баг 2026-08-16: RequiredBy= + провал скрипта =
+# netfilter-persistent вообще не стартовал, хуже исходной проблемы).
+WantedBy=netfilter-persistent.service

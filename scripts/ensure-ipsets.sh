@@ -12,11 +12,18 @@
 # не гарантированно раньше netfilter-persistent). Пустой ipset достаточно —
 # членство (реальные IP) владеющий сервис заполнит сам при своём запуске,
 # нам важно только чтобы iptables-restore не упал НА ССЫЛКЕ.
-set -uo pipefail
+# НЕ set -e/pipefail: этот скрипт по дизайну best-effort - должен ВСЕГДА
+# завершаться успешно (exit 0), что бы ни случилось. Живой баг (2026-08-16,
+# второй ребут 132): rules.v4 без match-set-строк (пустой/старый файл) ->
+# grep exit 1 (ничего не нашёл) -> с pipefail это валило весь unit ->
+# netfilter-persistent (RequiredBy=) вообще отказывался стартовать -> хуже
+# исходной проблемы (раньше хотя бы часть правил восстанавливалась).
+set -u
 
 RULES=/etc/iptables/rules.v4
-[ -f "$RULES" ] || exit 0
-
-grep -oE 'match-set [a-zA-Z0-9_]+' "$RULES" 2>/dev/null | awk '{print $2}' | sort -u | while read -r set; do
-  ipset create "$set" hash:net family inet -exist 2>/dev/null
-done
+if [ -f "$RULES" ]; then
+  for set in $(grep -oE 'match-set [a-zA-Z0-9_]+' "$RULES" 2>/dev/null | awk '{print $2}' | sort -u); do
+    ipset create "$set" hash:net family inet -exist 2>/dev/null || true
+  done
+fi
+exit 0
