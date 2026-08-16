@@ -103,8 +103,12 @@ export const removeDomain = (domain: string) =>
   })
 
 export const fetchServices = () => api<{ services: ZService[] }>('/api/zapret/services')
+// pinJobs (T-vps-pin, 2026-08-16): id сервисов, у которых mode перешёл на/с
+// "vps" этим сохранением — для каждого на шлюзе уже стартовала фоновая
+// работа (чистка DPI-групп при переходе на vps / постановка на перепроверку
+// при уходе с vps), прогресс — через fetchPinVPSJob(id).
 export const saveServices = (services: ZService[]) =>
-  api<{ ok?: boolean; error?: string }>('/api/zapret/services', {
+  api<{ ok?: boolean; error?: string; pinJobs?: string[] }>('/api/zapret/services', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(services),
@@ -251,13 +255,6 @@ export interface PinVPSJob {
   done: number
   error?: string
 }
-
-export const setPinVPS = (id: string, enabled: boolean) =>
-  api<{ ok: boolean; mode: string }>(`/api/services/${id}/pin-vps`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled }),
-  })
 
 export const fetchPinVPSJob = (id: string) => api<{ job: PinVPSJob | null }>(`/api/services/${id}/pin-vps`)
 

@@ -5,7 +5,18 @@ import { PresetsPanel } from '../components/PresetsPanel'
 import { VPSDomainsPanel } from '../components/VPSDomainsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchDomains, addDomain, fetchServices, saveServices, startScan, fetchScanStatus, fetchMonitor, type ZService } from '../lib/api'
+import {
+  fetchDomains,
+  addDomain,
+  fetchServices,
+  saveServices,
+  startScan,
+  fetchScanStatus,
+  fetchMonitor,
+  fetchPinVPSJob,
+  type ZService,
+  type PinVPSJob,
+} from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
@@ -152,6 +163,10 @@ export function DomainsPage() {
   const [saving, setSaving] = useState(false)
   const [autoServiceId, setAutoServiceId] = useState<string | null>(null)
   const autoCancelled = useRef(false)
+  // T-vps-pin (2026-08-16): id сервисов -> прогресс фоновой работы, стартующей
+  // на шлюзе, когда сохранение переводит mode на/с "vps" (чистка старых DPI-
+  // групп / постановка на перепроверку, см. zapret.go handleServices).
+  const [pinJobs, setPinJobs] = useState<Record<string, PinVPSJob | null>>({})
 
   const services = localServices ?? servicesData?.services ?? []
 
@@ -247,6 +262,9 @@ export function DomainsPage() {
       else {
         setMsg('✓ применено')
         setLocalServices(null)
+        if (res.pinJobs && res.pinJobs.length > 0) {
+          setPinJobs(Object.fromEntries(res.pinJobs.map((id) => [id, { total: 0, done: 0 }])))
+        }
       }
     } catch (e) {
       setMsg('✗ ' + (e instanceof Error ? e.message : String(e)))
@@ -254,6 +272,37 @@ export function DomainsPage() {
       setSaving(false)
     }
   }
+
+  // T-vps-pin: опрос прогресса фоновых job'ов, пока хоть один жив. Каждый
+  // сервис — своя работа (чистка/перепроверка), завершается независимо —
+  // убираем из отслеживания по одному, не ждём самый долгий, чтобы показать
+  // остальные.
+  useEffect(() => {
+    const ids = Object.keys(pinJobs)
+    if (ids.length === 0) return
+    const t = setInterval(async () => {
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const { job } = await fetchPinVPSJob(id)
+            return [id, job] as const
+          } catch {
+            return [id, null] as const
+          }
+        }),
+      )
+      setPinJobs((prev) => {
+        const next = { ...prev }
+        for (const [id, job] of results) {
+          if (job) next[id] = job
+          else delete next[id]
+        }
+        return next
+      })
+    }, 2000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Object.keys(pinJobs).join(',')])
 
   return (
     <div>
@@ -305,6 +354,15 @@ export function DomainsPage() {
             </button>
           )}
         </div>
+        {Object.keys(pinJobs).length > 0 && (
+          <div className="mb-3 flex flex-col gap-1 rounded-[--card-radius] border border-border bg-surface p-(--card-pad) font-mono text-[11px] text-text-muted">
+            {Object.entries(pinJobs).map(([id, job]) => (
+              <div key={id}>
+                {id}: {job && job.total > 0 ? `${job.done}/${job.total}` : 'подготовка…'}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
           {services.length === 0 && <div className="text-[12.5px] text-text-muted">загрузка…</div>}
           {services.map((svc) => (

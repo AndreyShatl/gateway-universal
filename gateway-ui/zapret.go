@@ -83,6 +83,14 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": msg})
 			return
 		}
+		// T-vps-pin (2026-08-16, свод в один путь): для отслеживания переходов
+		// mode -> "vps" / mode "vps" -> что-то ещё нужен старый список ДО
+		// перезаписи файла — иначе не с чем сравнивать после os.Rename ниже.
+		oldSvc, _ := s.readServices()
+		oldMode := map[string]string{}
+		for _, v := range oldSvc {
+			oldMode[v.ID] = v.Mode
+		}
 		b, _ := json.MarshalIndent(svc, "", "  ")
 		if err := os.MkdirAll(filepath.Dir(s.servicesFile), 0o755); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
@@ -108,7 +116,31 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "рестарт zapret: " + err.Error(), "output": out})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+
+		// T-vps-pin: единственный путь смены режима на/с "vps" — что через
+		// этот bulk-сейв (общий редактор, кнопки zapret/vps/direct/auto), что
+		// раньше был отдельный переключатель в VPSDomainsPanel (убран — два
+		// разных контрола на одно и то же поле только путали, см. живой
+		// разговор 2026-08-16). Здесь и мгновенная чистка старых DPI-групп
+		// (переход НА vps), и постановка на перепроверку (переход С vps) —
+		// с прогресс-баром через уже существующий /api/services/{id}/pin-vps
+		// GET (см. pinvps.go).
+		var pinJobs []string
+		for _, v := range svc {
+			was, becomes := oldMode[v.ID], v.Mode
+			if was == becomes {
+				continue
+			}
+			if becomes == "vps" {
+				go s.runPinVPSCleanup(v.ID, v.Domains)
+				pinJobs = append(pinJobs, v.ID)
+			} else if was == "vps" {
+				go s.runVPSPinRecheck(v.ID, v.Domains)
+				pinJobs = append(pinJobs, v.ID)
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pinJobs": pinJobs})
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
