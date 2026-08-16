@@ -34,7 +34,52 @@ fetch() {
     | grep -v '^$' \
     | grep -vE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
     | tr '[:upper:]' '[:lower:]' \
-    | sort -u
+    | sort -u \
+    | filter_junk
+}
+
+# filter_junk (T-junk-filter-actualize, 2026-08-16) — geosite (сторонний
+# проект, обновляется независимо от нас) изредка тащит явный мусор: живая
+# находка — instagrampartners.com (фишинг/спам-типосквоттинг Instagram) в
+# geosite:instagram, автоматически добавлен этим же скриптом раньше и
+# каждую ночь заново попадал в очередь через brain-static-reeval.sh (тот
+# путь НЕ проверяется через whitelist gwdb, в отличие от пассивного
+# детектора — см. detector/adguard_filter.go, та же логика фильтрации
+# здесь). Скрипт "только добавляет, никогда не удаляет" (см. шапку файла) —
+# без этого фильтра ручная чистка одного мусорного домена не переживает
+# следующий прогон actualize, если апстрим geosite его не уберёт сам.
+ADGUARD_FILTER_DIR=${ADGUARD_FILTER_DIR:-/opt/AdGuardHome/data/filters}
+filter_junk() {
+  python3 - "$ADGUARD_FILTER_DIR" <<'PYEOF'
+import glob, os, sys
+
+filter_dir = sys.argv[1]
+block = set()
+for path in glob.glob(os.path.join(filter_dir, "*.txt")):
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith(("!", "#", "@@")) or not line.startswith("||"):
+                continue
+            d = line[2:]
+            for sep in ("^", "$", "/"):
+                i = d.find(sep)
+                if i >= 0:
+                    d = d[:i]
+                    break
+            d = d.removeprefix("*.").lower().rstrip(".")
+            if d and "*" not in d and " " not in d:
+                block.add(d)
+
+def is_blocked(domain):
+    labels = domain.lower().split(".")
+    return any(".".join(labels[i:]) in block for i in range(len(labels) - 1))
+
+for line in sys.stdin:
+    d = line.strip()
+    if d and not is_blocked(d):
+        print(d)
+PYEOF
 }
 
 # --- youtube/discord/instagram: добавляем в zapret-services.json ---
