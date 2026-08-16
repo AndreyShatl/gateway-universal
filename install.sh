@@ -469,6 +469,20 @@ iptables-save > /etc/iptables/rules.v4
 systemctl enable netfilter-persistent >/dev/null 2>&1 || true
 ok "iptables saved to /etc/iptables/rules.v4"
 
+# T-boot-masquerade (2026-08-16): найдено вживую на реальном ребуте Pi —
+# сохранённые правила ссылаются на ipset'ы (gw_autoroute/gw_direct_fastpath/
+# brainc_grpc_*), которые создаются ДРУГИМИ сервисами при их собственном
+# старте, не гарантированно раньше netfilter-persistent на boot. Одна
+# ссылка на несуществующий ipset — iptables-restore атомарно откатывает
+# ВЕСЬ файл, включая никак не связанный с ipset MASQUERADE — интернет для
+# всей LAN пропадает после каждого ребута. См. scripts/ensure-ipsets.sh.
+cp "$SCRIPT_DIR/scripts/ensure-ipsets.sh" /opt/gateway-brain/ensure-ipsets.sh
+chmod +x /opt/gateway-brain/ensure-ipsets.sh
+cp "$SCRIPT_DIR/systemd/gateway-ensure-ipsets.service" /etc/systemd/system/gateway-ensure-ipsets.service
+systemctl daemon-reload
+systemctl enable gateway-ensure-ipsets.service >/dev/null 2>&1 || true
+ok "ensure-ipsets: ipset'ы будут созданы пустыми до netfilter-persistent на каждом ребуте"
+
 # ---------- Старт zapret (ПОСЛЕ iptables-save чтобы не сохранять NFQUEUE) ---
 if [[ "$INSTALL_ZAPRET" == "yes" ]]; then
     say "Starting zapret…"

@@ -1,0 +1,13 @@
+[Unit]
+Description=Создать пустые ipset'ы из сохранённых iptables-правил (до netfilter-persistent)
+Before=netfilter-persistent.service
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/ensure-ipsets.sh
+
+[Install]
+WantedBy=sysinit.target
+RequiredBy=netfilter-persistent.service
