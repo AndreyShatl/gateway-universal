@@ -96,6 +96,17 @@ try_enqueue() {
 
 n=0
 for sid in youtube discord instagram; do
+  # T-vps-pin (2026-08-16): сервис закреплён на VPS кнопкой в UI — пользователь
+  # явно попросил полную независимость от ночной переоценки, не только "не
+  # применять DPI" (это уже гарантирует process_domain() в brain-worker.sh),
+  # но и вообще не ставить в очередь и не трогать. Раньше закреплённый домен
+  # всё равно докидывался сюда каждую ночь и process_domain() мгновенно
+  # возвращал его на VPS — лишняя работа без всякого смысла при закреплении.
+  mode=$(jq -r --arg id "$sid" '.[] | select(.id==$id) | .mode // ""' "$SERVICES" 2>/dev/null)
+  if [ "$mode" = "vps" ]; then
+    log "$sid: закреплён на VPS — пропуск (не ставим в очередь)"
+    continue
+  fi
   domains=$(jq -r --arg id "$sid" '.[] | select(.id==$id) | .domains[]?' "$SERVICES" 2>/dev/null)
   [ -n "$domains" ] || continue
   while IFS= read -r domain; do
