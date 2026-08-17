@@ -78,6 +78,17 @@ type Entry struct {
 	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"` // подряд с последнего успеха, сбрасывается им
 	LastSuccess         string `json:"last_success,omitempty"`         // RFC3339, последняя успешная проверка
 	LastFailure         string `json:"last_failure,omitempty"`         // RFC3339, последняя проваленная проверка
+
+	// LastSeen (T-ip-engine-phase1d, 2026-08-17) — из ТЗ п.17 (aging для
+	// LEARNED IP): когда живой трафик к этому target последний раз реально
+	// наблюдался (обновляется в Apply() при каждом повторном "уже в списке"
+	// совпадении — то есть при каждом новом кандидате детектора на тот же
+	// addr, не при каждом пакете). Пусто у записей, добавленных ДО этого
+	// поля, и у geosite:/CIDR-записей (Apply матчит их только по точному
+	// совпадению строки target — CIDR/geosite target детектор никогда не
+	// формирует буквально, трогать их старение здесь сознательно не берёмся,
+	// см. PruneStale).
+	LastSeen string `json:"last_seen,omitempty"`
 }
 
 // removeCooldownFile — отдельный маленький файл (не смешан с основной схемой
@@ -334,8 +345,11 @@ func Apply(target, source string, port int) bool {
 		}
 		route = s.RouteOn()
 		collapsed := false
-		for _, e := range s.Entries {
+		now := time.Now().UTC().Format(time.RFC3339)
+		for i, e := range s.Entries {
 			if e.Addr == target {
+				s.Entries[i].LastSeen = now // T-ip-engine-phase1d: живой трафик всё ещё идёт — не устарела
+				save(s)
 				return
 			}
 			if suffix != "" && e.CollapsedSuffix == suffix {
@@ -345,7 +359,8 @@ func Apply(target, source string, port int) bool {
 		if !collapsed {
 			s.Entries = append(s.Entries, Entry{
 				Addr:            target,
-				Added:           time.Now().UTC().Format(time.RFC3339),
+				Added:           now,
+				LastSeen:        now,
 				Source:          source,
 				DPort:           port,
 				CollapsedSuffix: suffix,
@@ -457,6 +472,43 @@ func UpdateClean(remove map[string]bool, clean map[string]int, checkResults map[
 		kept = out
 	})
 	return kept
+}
+
+// staleAfter — LEARNED-запись с LastSeen старше этого считается EXPIRED
+// (T-ip-engine-phase1d, ТЗ п.17: "ACTIVE -> STALE -> EXPIRED"). Одно
+// пороговое значение вместо двух стадий — упрощение первого среза: реальное
+// действие важнее промежуточной метки состояния, которая ни на что не
+// влияет, пока сама не приведёт к удалению.
+const staleAfter = 30 * 24 * time.Hour
+
+// PruneStale — удалить LEARNED-записи, которые давно не видели живьём
+// (LastSeen старше staleAfter). STATIC никогда не трогаем (ТЗ п.7/17: "их
+// не удалять автоматически"). Записи БЕЗ LastSeen (добавлены до этого поля,
+// либо CIDR/geosite — см. комментарий у Entry.LastSeen) пропускаем — нет
+// данных для решения, значит не решаем. Возвращает удалённые addr (для
+// синка ipset у вызывающего).
+func PruneStale() []string {
+	var removed []string
+	withLock(func(s *Store) {
+		out := s.Entries[:0:0]
+		for _, e := range s.Entries {
+			if e.IsStatic() || e.LastSeen == "" {
+				out = append(out, e)
+				continue
+			}
+			t, err := time.Parse(time.RFC3339, e.LastSeen)
+			if err != nil || time.Since(t) < staleAfter {
+				out = append(out, e)
+				continue
+			}
+			removed = append(removed, e.Addr)
+		}
+		if len(removed) > 0 {
+			s.Entries = out
+			save(s)
+		}
+	})
+	return removed
 }
 
 func run(name string, args ...string) error {

@@ -348,7 +348,17 @@ func runRecheck() {
 
 	if *apply {
 		kept := applier.UpdateClean(remove, clean, checkResults)
+		// T-ip-engine-phase1d: TTL-старение LEARNED (ТЗ п.17) — отдельный
+		// проход, не смешан с probe-based удалением выше (разные причины:
+		// "разблокирован" vs "давно не видели живьём").
+		expired := applier.PruneStale()
+		if len(expired) > 0 {
+			log.Printf("🕐 устарело (30д без живого трафика), снято: %s", strings.Join(expired, ", "))
+		}
 		if s.RouteOn() {
+			if reloaded, err := applier.Load(); err == nil {
+				kept = reloaded.Entries // PruneStale могла удалить что-то ещё после UpdateClean
+			}
 			applier.Sync(kept) // ресинк ipset только когда применение включено
 		}
 	}
