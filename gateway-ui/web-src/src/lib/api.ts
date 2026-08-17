@@ -250,6 +250,16 @@ export interface VPSDomainsResponse {
 
 export const fetchVPSDomains = () => api<VPSDomainsResponse>('/api/vps-domains')
 
+export interface AutorouteStats {
+  total: number
+  static: number
+  learned: number
+  port_scoped: number
+  states: { HEALTHY: number; DEGRADED: number; FAILED: number; UNKNOWN: number }
+}
+
+export const fetchAutorouteStats = () => api<AutorouteStats>('/api/autoroute/stats')
+
 export interface PinVPSJob {
   total: number
   done: number

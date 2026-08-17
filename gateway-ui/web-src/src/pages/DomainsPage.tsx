@@ -3,6 +3,7 @@ import { Wand2 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
 import { VPSDomainsPanel } from '../components/VPSDomainsPanel'
+import { AutorouteStatsPanel } from '../components/AutorouteStatsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
 import {
@@ -408,6 +409,8 @@ export function DomainsPage() {
       </div>
 
       <VPSDomainsPanel />
+
+      <AutorouteStatsPanel />
 
       <PresetsPanel />
     </div>
