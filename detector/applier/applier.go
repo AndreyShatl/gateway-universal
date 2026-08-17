@@ -119,6 +119,23 @@ type Entry struct {
 
 func (e Entry) IsPortScoped() bool { return e.Proto == "udp" && e.DPort > 0 }
 
+// CooldownKey — ключ removal-cooldown (RegisterRemoval/IsInRemovalCooldown)
+// для этой записи. Port-scoped и whole-IP записи для одного и того же addr
+// — РАЗНЫЕ пространства блокировки (снятие игрового порта не должно
+// мешать домену на том же IP, и наоборот), поэтому ключ разный. Найдено
+// код-ревью (2026-08-18): UpdateClean раньше регистрировал cooldown по
+// голому e.Addr для ЛЮБОЙ записи — для port-scoped это не совпадает с тем,
+// что проверяет ApplyIPPort (см. её собственный key), защита была бы
+// молча пустой. Сейчас не достижимо на практике (port-scoped записи не
+// попадают в probe-based remove, см. runRecheck todo-фильтр) — фиксируем
+// на будущее, единая точка правды вместо дублирования формата в двух местах.
+func (e Entry) CooldownKey() string {
+	if e.IsPortScoped() {
+		return fmt.Sprintf("%s:%d/%s", e.Addr, e.DPort, e.Proto)
+	}
+	return e.Addr
+}
+
 // removeCooldownFile — отдельный маленький файл (не смешан с основной схемой
 // Entry — снятая запись из autoroute.json удаляется целиком, держать
 // tombstone-запись внутри самого списка означало бы учить каждого
@@ -489,8 +506,7 @@ func ApplyIPPort(ip string, port int, source string) bool {
 	if isProtected(ip) || net.ParseIP(ip) == nil || port <= 0 {
 		return false
 	}
-	key := fmt.Sprintf("%s:%d/udp", ip, port)
-	if IsInRemovalCooldown(key) {
+	if IsInRemovalCooldown((Entry{Addr: ip, DPort: port, Proto: "udp"}).CooldownKey()) {
 		return false
 	}
 	added := false
@@ -597,7 +613,7 @@ func UpdateClean(remove map[string]bool, clean map[string]int, checkResults map[
 		out := s.Entries[:0:0]
 		for _, e := range s.Entries {
 			if remove[e.Addr] {
-				RegisterRemoval(e.Addr)
+				RegisterRemoval(e.CooldownKey())
 				logRouteChange(e.Addr, "VPS", "DIRECT", "unblocked_2x_confirmed", "recheck")
 				continue
 			}
