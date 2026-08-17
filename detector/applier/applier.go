@@ -80,6 +80,61 @@ type Entry struct {
 	LastFailure         string `json:"last_failure,omitempty"`         // RFC3339, последняя проваленная проверка
 }
 
+// removeCooldownFile — отдельный маленький файл (не смешан с основной схемой
+// Entry — снятая запись из autoroute.json удаляется целиком, держать
+// tombstone-запись внутри самого списка означало бы учить каждого
+// потребителя Entries (ipset-синк, UI, recheck) отличать "реальный маршрут"
+// от "просто память о недавнем снятии", это лишняя связанность ради узкой
+// задачи). addr -> RFC3339 "cooldown_until".
+const removeCooldownFile = "/etc/gateway/autoroute-removed.json"
+const removeCooldown = 30 * time.Minute
+
+// RegisterRemoval — отметить addr как недавно снятый (T-ip-engine-phase1c).
+// Вызывается из UpdateClean для каждого реально удалённого addr.
+func RegisterRemoval(addr string) {
+	m := readRemovalCooldowns()
+	m[addr] = time.Now().UTC().Add(removeCooldown).Format(time.RFC3339)
+	saveRemovalCooldowns(m)
+}
+
+// IsInRemovalCooldown — true, если addr был снят настолько недавно, что
+// повторное добавление сейчас нужно придержать (защита от дребезга —
+// ТЗ п.15: "VPS -> DIRECT не должно моментально превратиться в DIRECT ->
+// VPS из-за одного неудачного probe"). Попутно чистит истёкшие записи —
+// файл маленький, отдельного GC-прохода не заводим.
+func IsInRemovalCooldown(addr string) bool {
+	m := readRemovalCooldowns()
+	until, ok := m[addr]
+	if !ok {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, until)
+	if err != nil || !time.Now().UTC().Before(t) {
+		delete(m, addr)
+		saveRemovalCooldowns(m)
+		return false
+	}
+	return true
+}
+
+func readRemovalCooldowns() map[string]string {
+	m := map[string]string{}
+	data, err := os.ReadFile(removeCooldownFile)
+	if err != nil {
+		return m
+	}
+	json.Unmarshal(data, &m)
+	return m
+}
+
+func saveRemovalCooldowns(m map[string]string) {
+	b, _ := json.MarshalIndent(m, "", "  ")
+	tmp := removeCooldownFile + ".tmp"
+	if os.WriteFile(tmp, b, 0o644) == nil {
+		os.Rename(tmp, removeCooldownFile)
+	}
+}
+
 func (e Entry) IsStatic() bool { return e.Type == "STATIC" }
 
 // RecordCheck — обновить health-историю записи результатом одной проверки
@@ -267,6 +322,9 @@ func Apply(target, source string, port int) bool {
 	if isProtected(target) {
 		return false
 	}
+	if IsInRemovalCooldown(target) { // T-ip-engine-phase1c: см. п.15 ТЗ, дребезг сразу после снятия
+		return false
+	}
 	added := false
 	route := false
 	suffix := collapseSuffix(target)
@@ -381,6 +439,7 @@ func UpdateClean(remove map[string]bool, clean map[string]int, checkResults map[
 		out := s.Entries[:0:0]
 		for _, e := range s.Entries {
 			if remove[e.Addr] {
+				RegisterRemoval(e.Addr)
 				continue
 			}
 			if v, ok := clean[e.Addr]; ok {
