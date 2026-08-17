@@ -36,6 +36,13 @@ const (
 	// игровой сервер на порту X идёт через VPS, а другой трафик к тому же
 	// облачному IP на другом порту — как раньше, не затронут.
 	IPSetUDPPort = "gw_autoroute_udp_pp" // type hash:ip,port
+
+	// RouteChangeLog (T-ip-engine-phase1f, 2026-08-17) — из ТЗ п.31:
+	// "каждое изменение маршрута должно иметь reason". JSON-lines, один
+	// объект на строку — отдельный журнал ТОЛЬКО автообхода (доменный
+	// gateway-brain.log живёт своей жизнью, не смешиваем, у него другая
+	// схема) для последующего разбора/метрик (ТЗ п.32) без парсинга текста.
+	RouteChangeLog = "/var/log/gateway-autoroute-changes.log"
 )
 
 // Store — содержимое autoroute.json.
@@ -423,6 +430,7 @@ func Apply(target, source string, port int) bool {
 			run("ipset", "add", IPSet, ip, "-exist")
 		}
 	}
+	logRouteChange(target, "DIRECT/DPI", "VPS", source, source)
 	return true
 }
 
@@ -473,6 +481,7 @@ func ApplyIPPort(ip string, port int, source string) bool {
 	}
 	EnsureInfra()
 	run("ipset", "add", IPSetUDPPort, fmt.Sprintf("%s,udp:%d", ip, port), "-exist")
+	logRouteChange(fmt.Sprintf("%s:%d/udp", ip, port), "DIRECT", "VPS", source, source)
 	return true
 }
 
@@ -524,6 +533,7 @@ func AddStatic(target string, port int) bool {
 			run("ipset", "add", IPSet, ip, "-exist")
 		}
 	}
+	logRouteChange(target, "unknown", "VPS", "static_pin", "operator")
 	return true
 }
 
@@ -542,6 +552,7 @@ func UpdateClean(remove map[string]bool, clean map[string]int, checkResults map[
 		for _, e := range s.Entries {
 			if remove[e.Addr] {
 				RegisterRemoval(e.Addr)
+				logRouteChange(e.Addr, "VPS", "DIRECT", "unblocked_2x_confirmed", "recheck")
 				continue
 			}
 			if v, ok := clean[e.Addr]; ok {
@@ -589,6 +600,7 @@ func PruneStale() []string {
 				continue
 			}
 			removed = append(removed, e.Addr)
+			logRouteChange(e.Addr, "VPS", "removed", "ttl_expired", "recheck")
 		}
 		if len(removed) > 0 {
 			s.Entries = out
@@ -596,6 +608,40 @@ func PruneStale() []string {
 		}
 	})
 	return removed
+}
+
+// routeChangeEntry — одна строка RouteChangeLog (ТЗ п.31).
+type routeChangeEntry struct {
+	Target    string `json:"target"`
+	OldRoute  string `json:"old_route"`
+	NewRoute  string `json:"new_route"`
+	Reason    string `json:"reason"`
+	Source    string `json:"source,omitempty"`
+	Timestamp string `json:"timestamp"`
+}
+
+// logRouteChange — дописать одну строку в RouteChangeLog. Best-effort (ошибка
+// записи в лог не должна ронять реальное применение маршрута) — на то он и
+// лог, не источник истины (тот — autoroute.json).
+func logRouteChange(target, oldRoute, newRoute, reason, source string) {
+	e := routeChangeEntry{
+		Target:    target,
+		OldRoute:  oldRoute,
+		NewRoute:  newRoute,
+		Reason:    reason,
+		Source:    source,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(RouteChangeLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(append(b, '\n'))
 }
 
 func run(name string, args ...string) error {
