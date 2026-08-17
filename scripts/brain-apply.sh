@@ -833,6 +833,13 @@ flush_domain_conntrack() {
   while IFS= read -r ip; do
     [ -n "$ip" ] && conntrack -D -d "$ip" >/dev/null 2>&1
   done < <(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+  # T-conntrack-exit-code (2026-08-17): conntrack -D возвращает 1, когда
+  # чистить нечего (запись уже истекла сама) — это НОРМАЛЬНЫЙ, самый частый
+  # случай, не ошибка. Без явного return 0 этот код молча утекал как exit
+  # code всего brain-apply.sh (это последняя команда в каждой ветке case) —
+  # живая находка: T-instant-failover логировал "не удалось перевести на
+  # VPS" для вызовов, которые на самом деле отработали успешно.
+  return 0
 }
 
 case "${1:-}" in

@@ -49,9 +49,24 @@ var liveRetriggerLast = struct {
 	m map[string]time.Time
 }{m: map[string]time.Time{}}
 
+// quic-no-response ИСКЛЮЧЁН из мгновенного форса на VPS (живая находка,
+// 2026-08-17, первый же вечер на стенде 132): наши DPI-стратегии
+// (zapret/ciadpi) десинхронизируют TCP TLS ClientHello — на QUIC (UDP/443)
+// они вообще не действуют. Хром по умолчанию сперва пробует QUIC для
+// google.com/instagram.com и т.п.; у нас он структурно ВСЕГДА не отвечает,
+// браузер тихо и штатно падает обратно на TCP — раньше это было незаметно
+// и безвредно. С мгновенным форсом это стало ложным срабатыванием на
+// каждый такой домен: рабочий по TCP DPI-обход скидывался на VPS без
+// реальной причины (quic-no-response тут ничего не говорит о состоянии
+// TCP-маршрута). TCP-сигнатуры (rst-after-clienthello/syn-timeout/
+// no-response-after-clienthello) остаются — они про тот же протокол/порт,
+// на котором реально работает наш DPI-обход.
 func maybeRetriggerBrainEntity(domain, source string) {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {
+		return
+	}
+	if source == "quic-no-response" {
 		return
 	}
 
