@@ -116,6 +116,9 @@ func reconcileDomainConflicts(apply bool) []string {
 	}
 	var conflicts []string
 	for _, e := range s.Entries {
+		if e.IsStatic() {
+			continue // STATIC — явное решение оператора, автоматика её не трогает нигде (recheck, PruneStale) — и здесь не должна
+		}
 		if brainDomains[strings.ToLower(e.Addr)] {
 			conflicts = append(conflicts, e.Addr)
 		}
