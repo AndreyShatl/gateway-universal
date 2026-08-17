@@ -124,16 +124,53 @@ func (e Entry) IsPortScoped() bool { return e.Proto == "udp" && e.DPort > 0 }
 // tombstone-запись внутри самого списка означало бы учить каждого
 // потребителя Entries (ipset-синк, UI, recheck) отличать "реальный маршрут"
 // от "просто память о недавнем снятии", это лишняя связанность ради узкой
-// задачи). addr -> RFC3339 "cooldown_until".
+// задачи). addr -> removalRecord.
 const removeCooldownFile = "/etc/gateway/autoroute-removed.json"
 const removeCooldown = 30 * time.Minute
 
-// RegisterRemoval — отметить addr как недавно снятый (T-ip-engine-phase1c).
-// Вызывается из UpdateClean для каждого реально удалённого addr.
+// removalRecord — T-ip-engine-phase1g (защита от route flapping, ТЗ п.33):
+// "если один target слишком часто меняет маршрут... необходимо увеличить
+// cooldown и/или пометить target как unstable". FlapCount копится в
+// flapWindow — каждое новое снятие внутри окна УДВАИВАЕТ cooldown
+// (экспоненциальный backoff, потолок flapMaxCooldown), тишина дольше окна
+// сбрасывает счётчик — цель, снятая один раз давно, не наказывается вечно.
+type removalRecord struct {
+	Until       string `json:"until"`
+	FlapCount   int    `json:"flap_count"`
+	WindowStart string `json:"window_start"`
+}
+
+const flapWindow = 24 * time.Hour
+const flapMaxCooldown = 6 * time.Hour
+const flapUnstableThreshold = 3
+
+// RegisterRemoval — отметить addr как недавно снятый (T-ip-engine-phase1c,
+// расширено T-ip-engine-phase1g flapping-backoff'ом). Вызывается из
+// UpdateClean для каждого реально удалённого addr.
 func RegisterRemoval(addr string) {
 	m := readRemovalCooldowns()
-	m[addr] = time.Now().UTC().Add(removeCooldown).Format(time.RFC3339)
+	r, ok := m[addr]
+	now := time.Now().UTC()
+	if !ok || r.WindowStart == "" {
+		r = removalRecord{WindowStart: now.Format(time.RFC3339)}
+	} else if ws, err := time.Parse(time.RFC3339, r.WindowStart); err != nil || now.Sub(ws) > flapWindow {
+		r = removalRecord{WindowStart: now.Format(time.RFC3339)} // тишина дольше окна — прошлые флапы не считаем
+	}
+	r.FlapCount++
+	backoff := removeCooldown
+	for i := 1; i < r.FlapCount; i++ { // 30м, 1ч, 2ч, 4ч, ... до потолка
+		backoff *= 2
+		if backoff >= flapMaxCooldown {
+			backoff = flapMaxCooldown
+			break
+		}
+	}
+	r.Until = now.Add(backoff).Format(time.RFC3339)
+	m[addr] = r
 	saveRemovalCooldowns(m)
+	if r.FlapCount >= flapUnstableThreshold {
+		logRouteChange(addr, "flapping", "flapping", fmt.Sprintf("unstable_%d_flaps_in_24h", r.FlapCount), "recheck")
+	}
 }
 
 // IsInRemovalCooldown — true, если addr был снят настолько недавно, что
@@ -143,30 +180,39 @@ func RegisterRemoval(addr string) {
 // файл маленький, отдельного GC-прохода не заводим.
 func IsInRemovalCooldown(addr string) bool {
 	m := readRemovalCooldowns()
-	until, ok := m[addr]
-	if !ok {
+	r, ok := m[addr]
+	if !ok || r.Until == "" {
 		return false
 	}
-	t, err := time.Parse(time.RFC3339, until)
+	t, err := time.Parse(time.RFC3339, r.Until)
 	if err != nil || !time.Now().UTC().Before(t) {
-		delete(m, addr)
-		saveRemovalCooldowns(m)
-		return false
+		return false // истёк cooldown — но FlapCount/WindowStart НЕ трогаем, они живут своим окном
 	}
 	return true
 }
 
-func readRemovalCooldowns() map[string]string {
-	m := map[string]string{}
+func readRemovalCooldowns() map[string]removalRecord {
+	m := map[string]removalRecord{}
 	data, err := os.ReadFile(removeCooldownFile)
 	if err != nil {
 		return m
 	}
 	json.Unmarshal(data, &m)
+	// GC: запись, у которой истёк и cooldown, и окно flap-счётчика — больше
+	// ни на что не влияет, держать её в файле незачем (иначе растёт вечно).
+	now := time.Now().UTC()
+	for addr, r := range m {
+		until, errU := time.Parse(time.RFC3339, r.Until)
+		ws, errW := time.Parse(time.RFC3339, r.WindowStart)
+		if (errU == nil && now.Before(until)) || (errW == nil && now.Sub(ws) < flapWindow) {
+			continue // ещё актуальна (либо cooldown, либо окно флапов)
+		}
+		delete(m, addr)
+	}
 	return m
 }
 
-func saveRemovalCooldowns(m map[string]string) {
+func saveRemovalCooldowns(m map[string]removalRecord) {
 	b, _ := json.MarshalIndent(m, "", "  ")
 	tmp := removeCooldownFile + ".tmp"
 	if os.WriteFile(tmp, b, 0o644) == nil {
