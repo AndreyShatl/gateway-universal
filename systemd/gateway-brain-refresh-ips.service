@@ -1,0 +1,7 @@
+[Unit]
+Description=Gateway brain — дозаполнение ipset свежими IP активных DPI-групп (T-cdn-refresh: самозаживление ротации CDN без ручных CDN_CIDR_HINTS)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-refresh-ips.sh
