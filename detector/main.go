@@ -456,6 +456,14 @@ func runRecheck() {
 		if len(expired) > 0 {
 			log.Printf("🕐 устарело (30д без живого трафика), снято: %s", strings.Join(expired, ", "))
 		}
+		// T-route-manager-phase2b: то же самое, что route-explain находит
+		// вручную — домен одновременно DPI-сущность И зависшая VPS-запись
+		// в автообходе (см. живая находка про updates.discord.com, тем же
+		// вечером). Часть regular recheck, не разовая ручная чистка.
+		conflicts := reconcileDomainConflicts(true)
+		if len(conflicts) > 0 {
+			log.Printf("⚠ конфликт domain/IP-подсистем (уже DPI-сущность, но висел в автообходе), снято: %s", strings.Join(conflicts, ", "))
+		}
 		if s.RouteOn() {
 			if reloaded, err := applier.Load(); err == nil {
 				kept = reloaded.Entries // PruneStale могла удалить что-то ещё после UpdateClean

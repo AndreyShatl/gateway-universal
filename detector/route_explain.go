@@ -16,7 +16,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"strings"
 
 	"gateway-detector/applier"
@@ -62,6 +64,101 @@ func findDomainRoute(domain string) *domainVerdict {
 		}
 	}
 	return nil
+}
+
+// allBrainDomains — множество всех доменов, входящих в ЛЮБУЮ DPI-группу
+// (все три движка). Используется reconcileDomainConflicts ниже — так же,
+// как findDomainRoute выше, но за один проход по всем целям сразу (не
+// по одной, N обращений к диску на каждую).
+func allBrainDomains() map[string]bool {
+	set := map[string]bool{}
+	for _, path := range []string{
+		"/etc/gateway/brain-services.json",
+		"/etc/gateway/brain-services-ciadpi.json",
+		"/etc/gateway/brain-services-zapret2.json",
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var groups []struct {
+			Domains []string `json:"domains"`
+		}
+		if json.Unmarshal(data, &groups) != nil {
+			continue
+		}
+		for _, g := range groups {
+			for _, d := range g.Domains {
+				set[strings.ToLower(d)] = true
+			}
+		}
+	}
+	return set
+}
+
+// reconcileDomainConflicts (T-route-manager-phase2b, 2026-08-18) — живая
+// находка тем же вечером: 37 доменов одновременно были DPI-сущностью
+// (доменная подсистема) И зависшей LEARNED-записью в IP-автообходе (VPS) —
+// артефакт более раннего состояния (домен получил DPI-стратегию ПОСЛЕ
+// того, как уже попал в автообход по старому провалу, запись не снялась
+// сама — recheck пробует DIRECT, не DPI, и часто DIRECT реально не
+// работает, так что "снятие по чистому direct" никогда не срабатывает,
+// хотя DPI уже чинит проблему другим путём). Разовая ручная чистка не
+// защищает от повторного накопления — теперь это часть regular recheck.
+// Убирает найденные конфликты: из autoroute.json (через тот же путь, что
+// TTL-удаление), из ipset, сбрасывает conntrack. apply=false — только лог
+// (тень), сколько нашли бы.
+func reconcileDomainConflicts(apply bool) []string {
+	brainDomains := allBrainDomains()
+	s, err := applier.Load()
+	if err != nil {
+		return nil
+	}
+	var conflicts []string
+	for _, e := range s.Entries {
+		if brainDomains[strings.ToLower(e.Addr)] {
+			conflicts = append(conflicts, e.Addr)
+		}
+	}
+	if len(conflicts) == 0 || !apply {
+		return conflicts
+	}
+	remove := map[string]bool{}
+	for _, c := range conflicts {
+		remove[c] = true
+	}
+	applier.UpdateClean(remove, nil, nil)
+	// ipset хранит РЕЗОЛВЛЕННЫЕ IP, не сами доменные строки — резолвим
+	// каждый конфликтующий домен и чистим и ipset, и conntrack (та же
+	// причина, что везде в этой сессии: залипшая conntrack-запись не даст
+	// новому соединению увидеть новый маршрут, пока не истечёт сама).
+	for _, addr := range conflicts {
+		for _, ip := range resolveV4ForCleanup(addr) {
+			exec.Command("ipset", "del", applier.IPSet, ip, "-exist").Run()
+			exec.Command("conntrack", "-D", "-d", ip).Run()
+		}
+	}
+	if reloaded, err := applier.Load(); err == nil && reloaded.RouteOn() {
+		applier.Sync(reloaded.Entries)
+	}
+	return conflicts
+}
+
+func resolveV4ForCleanup(host string) []string {
+	if ip := net.ParseIP(host); ip != nil {
+		return []string{host}
+	}
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return nil
+	}
+	var v4 []string
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+			v4 = append(v4, a)
+		}
+	}
+	return v4
 }
 
 // runRouteExplain — CLI: gateway-detector route-explain <target>.
