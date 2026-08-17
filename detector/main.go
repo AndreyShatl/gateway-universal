@@ -45,6 +45,9 @@ func main() {
 	case "watch-ebpf":
 		runWatchEBPF()
 		return
+	case "autoroute-static":
+		runAutorouteStatic()
+		return
 	default:
 		usage()
 	}
@@ -65,7 +68,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]\n  gateway-detector watch-ebpf --iface enp2s0 [--vps IP] [--apply]  (T59, тень/сравнение с watch)")
+	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]\n  gateway-detector watch-ebpf --iface enp2s0 [--vps IP] [--apply]  (T59, тень/сравнение с watch)\n  gateway-detector autoroute-static <ip|cidr> [--port N]  (T-ip-engine-phase1: закрепить вручную, никогда не снимается)")
 	os.Exit(2)
 }
 
@@ -103,12 +106,15 @@ func runWatch() {
 // только то, ЧТО поставляет Candidate, не то, что с ним делают.
 func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 	return func(c watcher.Candidate) {
-		// UDP-«без ответа»: НЕ авто-добавляем. Молчание UDP неоднозначно — многие
-		// сервисы (напр. latency-пинги AWS GameLift) не отвечают by design, а не
-		// из-за блока, и маршрут через VPS их не оживляет. Поэтому только логируем
-		// кандидата — можно добавить вручную, если это реально нужный адрес.
+		// UDP-«без ответа» (T-ip-engine-phase1, 2026-08-17): молчание UDP само по
+		// себе неоднозначно — многие сервисы (напр. latency-пинги AWS GameLift) не
+		// отвечают by design, не из-за блока, синтетическая проба тут невозможна
+		// (не знаем протокол игры). Раньше — только лог, никогда не добавляли.
+		// Теперь — пассивное накопление: несколько подряд no-reply для ОДНОГО И
+		// ТОГО ЖЕ ip:port в окне (см. udp_learn.go) — уже значимый сигнал, тогда
+		// добавляем. Разные порты одного IP копятся независимо (flow identity).
 		if c.Signal == "udp-no-reply" {
-			log.Printf("🔵 UDP без ответа: %s:%d (кандидат, не добавляю — UDP-молчание неоднозначно)", c.DstIP, c.Port)
+			maybeLearnUDP(c.DstIP, c.Port, *apply)
 			return
 		}
 		// whitelist (T49): не анализируем вообще (даже тенью), если SNI попадает
@@ -218,6 +224,28 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 // runRecheck — ночная перепроверка списка авто-обхода: пробим каждую запись
 // напрямую vs через VPS. Если напрямую снова работает (блок снят) ДВА прогона
 // подряд — убираем из списка. Пул воркеров: большой список — минуты, не часы.
+// runAutorouteStatic — T-ip-engine-phase1: ручное закрепление IP/CIDR (напр.
+// известный игровой сервер) на автообход. В отличие от обычного пути через
+// Apply() (LEARNED, обнаруживается детектором), эта запись помечается
+// STATIC и никогда не снимается ночной перепроверкой (runRecheck выше её
+// пропускает) — см. Entry.Type в applier.go.
+func runAutorouteStatic() {
+	fs := flag.NewFlagSet("autoroute-static", flag.ExitOnError)
+	port := fs.Int("port", 0, "порт (для справки в записи, применение всё равно на весь IP/CIDR)")
+	fs.Parse(os.Args[2:])
+	if fs.NArg() < 1 {
+		fmt.Fprintln(os.Stderr, "usage: gateway-detector autoroute-static <ip|cidr> [--port N]")
+		os.Exit(2)
+	}
+	target := fs.Arg(0)
+	if applier.AddStatic(target, *port) {
+		fmt.Printf("✅ %s закреплён (STATIC), в автообход\n", target)
+	} else {
+		fmt.Printf("⚠ %s не добавлен (защищённый адрес или ошибка)\n", target)
+		os.Exit(1)
+	}
+}
+
 func runRecheck() {
 	fs := flag.NewFlagSet("recheck", flag.ExitOnError)
 	socks := fs.String("socks", "127.0.0.1:1081", "VPS-socks5 для перепроверки")
@@ -245,6 +273,9 @@ func runRecheck() {
 	for _, e := range s.Entries {
 		if strings.HasPrefix(e.Addr, "geosite:") || strings.Contains(e.Addr, "/") {
 			continue
+		}
+		if e.IsStatic() {
+			continue // T-ip-engine-phase1: STATIC-записи не проверяем и не снимаем
 		}
 		todo = append(todo, e)
 	}

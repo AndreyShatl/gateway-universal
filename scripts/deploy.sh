@@ -34,12 +34,26 @@ deploy_detector() {
   # локального репо — сгенерированные bpf2go-файлы (sensor_x86_bpfel.go/.o)
   # туда НЕ закоммичены (генерятся на месте), rsync их не трогает, но сборка
   # без "-tags ebpf" (как было тут раньше) собирает бинарь БЕЗ eBPF-режима —
-  # gateway-detector.service падает в рестарт-луп сразу же, сервис требует
-  # именно watch-ebpf. Живой инцидент: первый же прогон deploy.sh detector
-  # после перехода на eBPF уронил детектор на стенде.
+  # gateway-detector.service падает в рестарт-луп сразу же, ЕСЛИ сервис на
+  # этой цели настроен на watch-ebpf (см. ExecStart юнита). Живой инцидент:
+  # первый же прогон deploy.sh detector после перехода на eBPF уронил
+  # детектор на стенде 132.
+  #
+  # T-deploy-arch (2026-08-17): eBPF-генерация (gen.go) жёстко зашита под
+  # "-target amd64" — Pi (ARM64/aarch64) под неё не подходит, там сервис и
+  # так настроен на обычный "watch" (pcap), не watch-ebpf. Собирать с
+  # "-tags ebpf" нужно ТОЛЬКО если ExecStart цели реально просит watch-ebpf
+  # (сейчас это только 132/x86_64) — иначе (Pi) собираем как раньше, без тега.
   sync_dir detector
-  ssh "$STAND" "cd $SRC_REMOTE/detector/ebpfsensor && go generate ./... && cd $SRC_REMOTE/detector && go build -tags ebpf -o /tmp/gw-det . && install -m755 /tmp/gw-det /opt/gateway-detector && systemctl restart gateway-detector" \
-    || die "detector build/restart"
+  local use_ebpf
+  use_ebpf=$(ssh "$STAND" "systemctl cat gateway-detector 2>/dev/null | grep -q 'watch-ebpf' && echo 1 || echo 0")
+  if [ "$use_ebpf" = "1" ]; then
+    ssh "$STAND" "cd $SRC_REMOTE/detector/ebpfsensor && go generate ./... && cd $SRC_REMOTE/detector && go build -tags ebpf -o /tmp/gw-det . && install -m755 /tmp/gw-det /opt/gateway-detector && systemctl restart gateway-detector" \
+      || die "detector build/restart"
+  else
+    ssh "$STAND" "cd $SRC_REMOTE/detector && go build -o /tmp/gw-det . && install -m755 /tmp/gw-det /opt/gateway-detector && systemctl restart gateway-detector" \
+      || die "detector build/restart"
+  fi
   say detector "PASS ($(ssh "$STAND" 'systemctl is-active gateway-detector'))"
 }
 

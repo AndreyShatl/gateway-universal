@@ -56,7 +56,18 @@ type Entry struct {
 	CollapsedSuffix string `json:"collapsed_suffix,omitempty"` // T-collapse-uuid: если есть — эта запись
 	// представитель ЦЕЛОЙ пачки случайных UUID-поддоменов с общим хвостом
 	// (см. collapseSuffix), новые "братья" не создают отдельных записей.
+
+	// Type (T-ip-engine-phase1, 2026-08-17) — STATIC | LEARNED (пусто = LEARNED,
+	// обратная совместимость со старыми записями). STATIC — добавлена вручную
+	// оператором/конфигурацией (напр. известный игровой сервер), НИКОГДА не
+	// удаляется ночной перепроверкой (runRecheck пропускает такие записи
+	// независимо от результата пробы) и не участвует в TTL-старении. LEARNED —
+	// обнаружена системой автоматически, обычный жизненный цикл (recheck может
+	// снять после 2 чистых прогонов подряд).
+	Type string `json:"type,omitempty"`
 }
+
+func (e Entry) IsStatic() bool { return e.Type == "STATIC" }
 
 // protectedIPs — адреса, которые НИКОГДА нельзя заворачивать в авто-обход
 // (VPS-туннель), даже если проба ошибочно посчитала их "заблокированными".
@@ -251,6 +262,57 @@ func Apply(target, source string, port int) bool {
 	}
 	if !route {
 		return true // добавили в список, но применение выключено — в ipset не пишем
+	}
+	EnsureInfra()
+	if net.ParseIP(target) != nil || strings.Contains(target, "/") {
+		run("ipset", "add", IPSet, target, "-exist")
+	} else {
+		for _, ip := range resolveV4(target) {
+			if isProtected(ip) {
+				continue
+			}
+			run("ipset", "add", IPSet, ip, "-exist")
+		}
+	}
+	return true
+}
+
+// AddStatic — добавить STATIC-запись (T-ip-engine-phase1, 2026-08-17):
+// оператор явно закрепляет известный target (напр. игровой сервер) — в
+// отличие от Apply() (LEARNED, авто-обнаружение), эта запись никогда не
+// удаляется ночной перепроверкой (см. runRecheck в main.go) независимо от
+// результата пробы. Игнорирует тумблер "detect" (STATIC — это явное решение
+// оператора, не результат обнаружения) но уважает "route" — как и Apply().
+func AddStatic(target string, port int) bool {
+	if isProtected(target) {
+		return false
+	}
+	added := false
+	route := false
+	withLock(func(s *Store) {
+		route = s.RouteOn()
+		for i, e := range s.Entries {
+			if e.Addr == target {
+				if !e.IsStatic() {
+					s.Entries[i].Type = "STATIC" // повысить существующую LEARNED-запись
+					save(s)
+				}
+				added = true
+				return
+			}
+		}
+		s.Entries = append(s.Entries, Entry{
+			Addr:   target,
+			Added:  time.Now().UTC().Format(time.RFC3339),
+			Source: "static",
+			DPort:  port,
+			Type:   "STATIC",
+		})
+		save(s)
+		added = true
+	})
+	if !added || !route {
+		return added
 	}
 	EnsureInfra()
 	if net.ParseIP(target) != nil || strings.Contains(target, "/") {
