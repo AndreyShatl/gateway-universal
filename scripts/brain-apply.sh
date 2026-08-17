@@ -37,6 +37,38 @@ LAN=192.168.0.0/16; MARK=0x40000000; QBASE=210; QPOOL=500
 # Google в этот момент.
 CDN_CIDR_HINTS_googlevideo_com="172.217.0.0/16 172.253.0.0/16 173.194.0.0/16 216.58.0.0/16 142.250.0.0/15 74.125.0.0/16 108.177.8.0/21 64.233.160.0/19 209.85.128.0/17 216.239.32.0/19"
 
+# CDN_CIDR_HINTS для Discord (2026-08-17) — живая находка на стенде 132:
+# updates.discord.com за Cloudflare anycast, каждый DNS-резолв возвращает
+# РАЗНОЕ подмножество edge-IP из общего пула — точечный резолв (что при
+# assign, что при restore-е с полным ребилдом ipset) ловит только один
+# снимок в моменте, реальное соединение клиента может уйти на другой IP
+# из того же пула, никогда не резолвившийся нам. 162.159.0.0/16 — реальный,
+# наблюдаемый на всех проверенных discord.com/discordapp.*/discord.gg
+# доменах диапазон (Cloudflare, стабилен). Риск (осознанный, тот же
+# паттерн что и у googlevideo.com выше): другой чужой сайт на Cloudflare
+# может случайно попасть в тот же /16 и тоже пойти через zapret-группу
+# Discord — на практике не страшно, zapret-десинхронизация прозрачна для
+# серверов, которых она не касается (тот же принцип, на котором вообще
+# держится весь DPI-обход).
+CDN_CIDR_HINTS_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_www_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_updates_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_gateway_discord_gg="162.159.0.0/16"
+CDN_CIDR_HINTS_discord_gg="162.159.0.0/16"
+CDN_CIDR_HINTS_cdn_discordapp_com="162.159.0.0/16"
+CDN_CIDR_HINTS_dl_discordapp_net="162.159.0.0/16"
+CDN_CIDR_HINTS_media_discordapp_net="162.159.0.0/16"
+CDN_CIDR_HINTS_images_ext_1_discordapp_net="162.159.0.0/16"
+CDN_CIDR_HINTS_images_ext_2_discordapp_net="162.159.0.0/16"
+CDN_CIDR_HINTS_discordapp_com="162.159.0.0/16"
+CDN_CIDR_HINTS_discordapp_net="162.159.0.0/16"
+CDN_CIDR_HINTS_status_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_support_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_blog_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_streamkit_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_canary_discord_com="162.159.0.0/16"
+CDN_CIDR_HINTS_ptb_discord_com="162.159.0.0/16"
+
 san() { echo "$1" | tr -c 'a-z0-9' '_' | sed 's/_*$//'; }
 
 # group_id — стабильный id по (proto, strategy): md5 первые 10 hex. Пустая strategy
