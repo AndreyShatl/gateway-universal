@@ -277,6 +277,9 @@ func runRecheck() {
 		if e.IsStatic() {
 			continue // T-ip-engine-phase1: STATIC-записи не проверяем и не снимаем
 		}
+		if e.IsPortScoped() {
+			continue // T-ip-engine-phase1e: UDP-игровые port-scoped — TCP-проба тут бессмысленна, живёт по TTL (PruneStale)
+		}
 		todo = append(todo, e)
 	}
 	log.Printf("recheck: записей всего=%d, проверяю=%d, воркеров=%d, apply=%v", len(s.Entries), len(todo), *workers, *apply)

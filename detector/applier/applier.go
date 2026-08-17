@@ -7,6 +7,7 @@ package applier
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -23,6 +24,18 @@ const (
 	UDPPort = "12346" // существующий tproxy-udp inbound -> proxy-mux
 	Mark    = "0x1/0xffffffff"
 	File    = "/etc/gateway/autoroute.json"
+
+	// IPSetUDPPort (T-ip-engine-phase1e, 2026-08-17) — из ТЗ п.3/5 (flow
+	// identity, most-specific-match): IPSet выше матчит ЦЕЛЫЙ IP — любой
+	// другой трафик к тому же адресу (другой порт, другой протокол) идёт
+	// тем же маршрутом, хотя мог быть не заблокирован вообще. Для доменного/
+	// TCP-автообхода это осознанно не меняем (уже стабильно работает много
+	// сессий подряд, риск регрессии не оправдан) — но для НОВЫХ UDP-
+	// обученных целей (см. udp_learn.go, сигнал по построению уже
+	// привязан к конкретному ip:port) используем отдельный ip,port-ipset:
+	// игровой сервер на порту X идёт через VPS, а другой трафик к тому же
+	// облачному IP на другом порту — как раньше, не затронут.
+	IPSetUDPPort = "gw_autoroute_udp_pp" // type hash:ip,port
 )
 
 // Store — содержимое autoroute.json.
@@ -89,7 +102,15 @@ type Entry struct {
 	// формирует буквально, трогать их старение здесь сознательно не берёмся,
 	// см. PruneStale).
 	LastSeen string `json:"last_seen,omitempty"`
+
+	// Proto (T-ip-engine-phase1e, 2026-08-17) — пусто (legacy) = маршрут
+	// применён на ВЕСЬ IP (IPSet, как раньше); "udp" = запись живёт в
+	// IPSetUDPPort (ip,port-scoped, см. ApplyIPPort) — другой трафик к
+	// тому же IP НЕ затронут. DPort обязателен при Proto="udp".
+	Proto string `json:"proto,omitempty"`
 }
+
+func (e Entry) IsPortScoped() bool { return e.Proto == "udp" && e.DPort > 0 }
 
 // removeCooldownFile — отдельный маленький файл (не смешан с основной схемой
 // Entry — снятая запись из autoroute.json удаляется целиком, держать
@@ -293,6 +314,15 @@ func EnsureInfra() {
 	ensureRule("mangle", []string{"-s", LAN, "-p", "udp",
 		"-m", "set", "--match-set", IPSet, "dst",
 		"-j", "TPROXY", "--on-port", UDPPort, "--on-ip", "0.0.0.0", "--tproxy-mark", Mark})
+
+	// T-ip-engine-phase1e: hash:ip,port — матчит КОНКРЕТНУЮ пару адрес:порт,
+	// не весь /32. Тот же UDP TPROXY-inbound (12346), отдельное правило
+	// нужно потому что --match-set с ip,port требует "dst,dst" (два
+	// измерения набора), а не просто "dst" как у hash:net выше.
+	run("ipset", "create", IPSetUDPPort, "hash:ip,port", "family", "inet", "-exist")
+	ensureRule("mangle", []string{"-s", LAN, "-p", "udp",
+		"-m", "set", "--match-set", IPSetUDPPort, "dst,dst",
+		"-j", "TPROXY", "--on-port", UDPPort, "--on-ip", "0.0.0.0", "--tproxy-mark", Mark})
 }
 
 func ensureRule(table string, spec []string) {
@@ -305,9 +335,16 @@ func ensureRule(table string, spec []string) {
 func Sync(entries []Entry) {
 	EnsureInfra()
 	run("ipset", "flush", IPSet)
+	run("ipset", "flush", IPSetUDPPort) // T-ip-engine-phase1e
 	for _, e := range entries {
 		addr := e.Addr
 		if strings.HasPrefix(addr, "geosite:") || isProtected(addr) {
+			continue
+		}
+		if e.IsPortScoped() {
+			if net.ParseIP(addr) != nil { // hash:ip,port не умеет CIDR
+				run("ipset", "add", IPSetUDPPort, fmt.Sprintf("%s,udp:%d", addr, e.DPort), "-exist")
+			}
 			continue
 		}
 		if net.ParseIP(addr) != nil || strings.Contains(addr, "/") {
@@ -386,6 +423,56 @@ func Apply(target, source string, port int) bool {
 			run("ipset", "add", IPSet, ip, "-exist")
 		}
 	}
+	return true
+}
+
+// ApplyIPPort — T-ip-engine-phase1e: аналог Apply(), но port-scoped (см.
+// IPSetUDPPort/Entry.Proto выше) — только UDP-обученные игровые цели
+// (udp_learn.go), только чистый IP (не домен, не CIDR — hash:ip,port не
+// умеет сети). Дедуп по (addr, port), не просто addr — тот же IP на другом
+// порту это отдельная запись (flow identity, ТЗ п.3).
+func ApplyIPPort(ip string, port int, source string) bool {
+	if isProtected(ip) || net.ParseIP(ip) == nil || port <= 0 {
+		return false
+	}
+	key := fmt.Sprintf("%s:%d/udp", ip, port)
+	if IsInRemovalCooldown(key) {
+		return false
+	}
+	added := false
+	route := false
+	withLock(func(s *Store) {
+		if !s.DetectOn() {
+			return
+		}
+		route = s.RouteOn()
+		now := time.Now().UTC().Format(time.RFC3339)
+		for i, e := range s.Entries {
+			if e.Addr == ip && e.DPort == port && e.Proto == "udp" {
+				s.Entries[i].LastSeen = now
+				save(s)
+				return
+			}
+		}
+		s.Entries = append(s.Entries, Entry{
+			Addr:     ip,
+			Added:    now,
+			LastSeen: now,
+			Source:   source,
+			DPort:    port,
+			Proto:    "udp",
+		})
+		save(s)
+		added = true
+	})
+	if !added {
+		return false
+	}
+	if !route {
+		return true
+	}
+	EnsureInfra()
+	run("ipset", "add", IPSetUDPPort, fmt.Sprintf("%s,udp:%d", ip, port), "-exist")
 	return true
 }
 

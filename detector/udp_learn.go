@@ -16,12 +16,10 @@ package main
 // ip) — flow identity из ТЗ: игровой UDP-порт того же IP не должен решать
 // маршрут для другого порта/протокола на нём же.
 //
-// Гранулярность применения пока НЕ port-scoped (см. TODO ниже) — Apply()
-// добавляет IP целиком в gw_autoroute (тот же ipset, что и TCP-кандидаты).
-// Честно: это ограничение первого среза, не полная реализация ТЗ (там
-// требуется отдельное правило на ip+port+proto) — CIDR/port-aware ipset и
-// свои iptables TPROXY-правила это отдельный, более рискованный кусок
-// работы, сознательно отложен на следующий этап.
+// Гранулярность применения (T-ip-engine-phase1e, тем же вечером) — port-
+// scoped: applier.ApplyIPPort() добавляет ip:port в отдельный hash:ip,port
+// ipset (gw_autoroute_udp_pp), НЕ весь IP в общий gw_autoroute. Другой
+// трафик к тому же облачному адресу на другом порту не затронут.
 
 import (
 	"fmt"
@@ -82,8 +80,8 @@ func maybeLearnUDP(dstIP string, port int, apply bool) bool {
 		log.Printf("🟡 БЫ добавил (UDP, %d подряд без ответа): %s:%d", udpLearnThreshold, dstIP, port)
 		return false
 	}
-	if applier.Apply(dstIP, "udp-no-reply", port) {
-		log.Printf("✅ мгновенно в VPS (UDP, %d подряд без ответа): %s:%d", udpLearnThreshold, dstIP, port)
+	if applier.ApplyIPPort(dstIP, port, "udp-no-reply") {
+		log.Printf("✅ мгновенно в VPS (UDP, %d подряд без ответа, только этот порт): %s:%d", udpLearnThreshold, dstIP, port)
 		return true
 	}
 	return false
