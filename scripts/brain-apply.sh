@@ -874,16 +874,41 @@ flush_domain_conntrack() {
   return 0
 }
 
+# log_route_change (T-route-manager-phase2c, 2026-08-18) — тот же журнал,
+# тот же формат (JSON-lines), что уже пишет IP-подсистема с вечера
+# (RouteChangeLog в detector/applier — /var/log/gateway-autoroute-changes.log,
+# см. ТЗ п.31: "каждое изменение маршрута должно иметь reason"). Раньше это
+# была одна единственная строка для ВСЕЙ доменной подсистемы (gateway-brain.log,
+# текстом вперемешку с остальным) — не парсится, нет единого источника для
+# ТЗ п.32 (метрики) и autoroute-stats. Best-effort, ошибка записи лога не
+# должна ронять реальное применение маршрута.
+ROUTE_CHANGE_LOG=/var/log/gateway-autoroute-changes.log
+log_route_change() { # <target> <new_route> <reason>
+  python3 - "$ROUTE_CHANGE_LOG" "$1" "$2" "$3" <<'PY' 2>/dev/null || true
+import json, sys, time
+log, target, new_route, reason = sys.argv[1:5]
+try:
+    with open(log, 'a') as f:
+        f.write(json.dumps({
+            'target': target, 'old_route': 'unknown', 'new_route': new_route,
+            'reason': reason, 'source': 'brain-apply.sh',
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        }) + '\n')
+except Exception:
+    pass
+PY
+}
+
 case "${1:-}" in
-  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d" ;;
-  ciadpi) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d" ;;
-  zapret2) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d" ;;
+  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret)" "brain_apply_zapret" ;;
+  ciadpi) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(ciadpi)" "brain_apply_ciadpi" ;;
+  zapret2) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret2)" "brain_apply_zapret2" ;;
   vps)    shift; do_remove "$1" >/dev/null 2>&1; do_remove_ciadpi "$1" >/dev/null 2>&1; do_remove_zapret2 "$1" >/dev/null 2>&1
           if has_vps; then ar_add "$1"; echo "🔵 vps: $1 в автообходе"
           else echo "⚪ $1: ни одна стратегия не пробила, VPS не настроен — остаётся заблокирован"; fi
-          flush_domain_conntrack "$1" ;;
-  remove-entity) shift; do_remove "$1"; flush_domain_conntrack "$1" ;;
-  remove) shift; do_remove "$1"; do_remove_ciadpi "$1"; do_remove_zapret2 "$1"; ar_del "$1"; flush_domain_conntrack "$1" ;;
+          flush_domain_conntrack "$1"; log_route_change "$1" "VPS" "brain_apply_vps" ;;
+  remove-entity) shift; do_remove "$1"; flush_domain_conntrack "$1"; log_route_change "$1" "removed" "brain_apply_remove_entity" ;;
+  remove) shift; do_remove "$1"; do_remove_ciadpi "$1"; do_remove_zapret2 "$1"; ar_del "$1"; flush_domain_conntrack "$1"; log_route_change "$1" "removed" "brain_apply_remove" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
   list-ciadpi) cat "$CSTATE" 2>/dev/null || echo "[]" ;;
   list-zapret2) cat "$Z2STATE" 2>/dev/null || echo "[]" ;;
