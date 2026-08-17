@@ -66,50 +66,115 @@ func findDomainRoute(domain string) *domainVerdict {
 	return nil
 }
 
-// allBrainDomains — множество всех доменов, входящих в ЛЮБУЮ DPI-группу
-// (все три движка). Используется reconcileDomainConflicts ниже — так же,
-// как findDomainRoute выше, но за один проход по всем целям сразу (не
-// по одной, N обращений к диску на каждую).
-func allBrainDomains() map[string]bool {
-	set := map[string]bool{}
-	for _, path := range []string{
-		"/etc/gateway/brain-services.json",
-		"/etc/gateway/brain-services-ciadpi.json",
-		"/etc/gateway/brain-services-zapret2.json",
-	} {
-		data, err := os.ReadFile(path)
+// dpiIpsetName — имя ipset для движка+группы (тот же паттерн префиксов,
+// что brain-refresh-ips.sh: brain_/brainc_/brainz2_).
+func dpiIpsetName(v *domainVerdict) string {
+	switch v.Engine {
+	case "ciadpi":
+		return "brainc_" + v.GroupID
+	case "zapret2":
+		return "brainz2_" + v.GroupID
+	default:
+		return "brain_" + v.GroupID
+	}
+}
+
+// dpiActuallyCoversDomain (T-route-manager-phase2e, 2026-08-18) — живая
+// находка: домен "числится" в DPI-группе (findDomainRoute находит его в
+// brain-services*.json), но это НЕ значит, что реальный трафик реально
+// перехватывается — если ipset группы устарел (та же болезнь, что чинит
+// T-cdn-refresh/brain-refresh-ips.sh: ротирующийся CDN, точечный резолв в
+// прошлом не поймал текущий IP), домен идёт мимо ipset совсем, DPI не
+// применяется, хотя "на бумаге" всё в порядке. reconcileDomainConflicts
+// раньше доверял ТОЛЬКО факту членства в группе — снимал VPS-подстраховку
+// как "избыточную", хотя она была ЕДИНСТВЕННОЙ реально работающей защитой
+// (живой инцидент: scontent.xx.fbcdn.net, Instagram "чёрный экран половины
+// видео" — VPS-запись снята при вчерашней чистке конфликтов, DPI-группа
+// на бумаге была, но ipset не покрывал текущий IP). Теперь перед снятием
+// VPS-подстраховки проверяем ФАКТ: резолвим домен сейчас, требуем чтобы
+// ВСЕ текущие IP реально были в ipset группы — не только сам факт
+// членства в JSON.
+func dpiActuallyCoversDomain(domain string, v *domainVerdict) bool {
+	ipset := dpiIpsetName(v)
+	ips, err := net.LookupHost(domain)
+	if err != nil || len(ips) == 0 {
+		return false // не смогли резолвить сейчас — не можем подтвердить покрытие, консервативно считаем "не покрыт"
+	}
+	for _, ip := range ips {
+		if net.ParseIP(ip) == nil || strings.Contains(ip, ":") {
+			continue // IPv6/мусор — ipset у нас family inet (v4), не проверяем
+		}
+		if err := exec.Command("ipset", "test", ipset, ip).Run(); err != nil {
+			return false // хотя бы один текущий IP не в ipset — реальное покрытие неполное
+		}
+	}
+	return true
+}
+
+// allBrainDomainVerdicts — domain -> *domainVerdict для ВСЕХ доменов во
+// ВСЕХ DPI-группах (все три движка), за один проход по файлам (не N
+// обращений к диску на каждую цель — reconcileDomainConflicts проверяет
+// потенциально тысячи записей). Замена прежней allBrainDomains (только
+// bool) — T-route-manager-phase2e теперь нужен Engine/GroupID для проверки
+// реального покрытия ipset, не только факт членства в JSON.
+func allBrainDomainVerdicts() map[string]*domainVerdict {
+	m := map[string]*domainVerdict{}
+	engines := []struct {
+		name string
+		path string
+	}{
+		{"zapret", "/etc/gateway/brain-services.json"},
+		{"ciadpi", "/etc/gateway/brain-services-ciadpi.json"},
+		{"zapret2", "/etc/gateway/brain-services-zapret2.json"},
+	}
+	for _, eng := range engines {
+		data, err := os.ReadFile(eng.path)
 		if err != nil {
 			continue
 		}
 		var groups []struct {
-			Domains []string `json:"domains"`
+			GroupID  string   `json:"group_id"`
+			Strategy string   `json:"strategy"`
+			Domains  []string `json:"domains"`
 		}
 		if json.Unmarshal(data, &groups) != nil {
 			continue
 		}
 		for _, g := range groups {
 			for _, d := range g.Domains {
-				set[strings.ToLower(d)] = true
+				m[strings.ToLower(d)] = &domainVerdict{Engine: eng.name, GroupID: g.GroupID, Strategy: g.Strategy}
 			}
 		}
 	}
-	return set
+	return m
 }
 
-// reconcileDomainConflicts (T-route-manager-phase2b, 2026-08-18) — живая
-// находка тем же вечером: 37 доменов одновременно были DPI-сущностью
-// (доменная подсистема) И зависшей LEARNED-записью в IP-автообходе (VPS) —
-// артефакт более раннего состояния (домен получил DPI-стратегию ПОСЛЕ
-// того, как уже попал в автообход по старому провалу, запись не снялась
-// сама — recheck пробует DIRECT, не DPI, и часто DIRECT реально не
-// работает, так что "снятие по чистому direct" никогда не срабатывает,
-// хотя DPI уже чинит проблему другим путём). Разовая ручная чистка не
+// reconcileDomainConflicts (T-route-manager-phase2b, 2026-08-18, доработано
+// T-route-manager-phase2e) — живая находка тем же вечером: 37 доменов
+// одновременно были DPI-сущностью (доменная подсистема) И зависшей
+// LEARNED-записью в IP-автообходе (VPS) — артефакт более раннего состояния
+// (домен получил DPI-стратегию ПОСЛЕ того, как уже попал в автообход по
+// старому провалу, запись не снялась сама — recheck пробует DIRECT, не
+// DPI, и часто DIRECT реально не работает). Разовая ручная чистка не
 // защищает от повторного накопления — теперь это часть regular recheck.
+//
+// T-route-manager-phase2e (доработка после живого инцидента): раньше
+// доверяли ТОЛЬКО факту членства в DPI-группе (JSON) — снимали VPS-
+// подстраховку как "избыточную", не проверяя, реально ли ipset группы
+// покрывает ТЕКУЩИЕ IP домена. Для доменов с устаревшим ipset (та же
+// болезнь, что чинит T-cdn-refresh) это снимало ЕДИНСТВЕННУЮ реально
+// работающую защиту (Instagram-инцидент: scontent.xx.fbcdn.net — DPI-
+// группа на бумаге была, ipset не покрывал текущий IP, VPS-подстраховку
+// сняли, домен остался вообще без защиты). Теперь перед снятием — реальная
+// проверка (dpiActuallyCoversDomain): резолвим домен сейчас, требуем чтобы
+// ВСЕ текущие IP были в ipset. Не покрыт — оставляем VPS-запись как есть,
+// не смотря на формальное членство в группе.
+//
 // Убирает найденные конфликты: из autoroute.json (через тот же путь, что
 // TTL-удаление), из ipset, сбрасывает conntrack. apply=false — только лог
 // (тень), сколько нашли бы.
 func reconcileDomainConflicts(apply bool) []string {
-	brainDomains := allBrainDomains()
+	brainDomains := allBrainDomainVerdicts()
 	s, err := applier.Load()
 	if err != nil {
 		return nil
@@ -119,9 +184,14 @@ func reconcileDomainConflicts(apply bool) []string {
 		if e.IsStatic() {
 			continue // STATIC — явное решение оператора, автоматика её не трогает нигде (recheck, PruneStale) — и здесь не должна
 		}
-		if brainDomains[strings.ToLower(e.Addr)] {
-			conflicts = append(conflicts, e.Addr)
+		v, ok := brainDomains[strings.ToLower(e.Addr)]
+		if !ok {
+			continue
 		}
+		if !dpiActuallyCoversDomain(e.Addr, v) {
+			continue // числится в группе, но ipset реально не покрывает текущие IP — VPS-подстраховка нужна, не трогаем
+		}
+		conflicts = append(conflicts, e.Addr)
 	}
 	if len(conflicts) == 0 || !apply {
 		return conflicts
@@ -176,7 +246,11 @@ func runRouteExplain() {
 
 	// Доменная подсистема
 	if dv := findDomainRoute(target); dv != nil {
-		fmt.Printf("[domain-подсистема]  DPI, движок=%s группа=%s стратегия=%q\n", dv.Engine, dv.GroupID, dv.Strategy)
+		covered := "да"
+		if !dpiActuallyCoversDomain(target, dv) {
+			covered = "НЕТ — числится в группе, но ipset не покрывает текущие резолвящиеся IP (см. T-cdn-refresh/brain-refresh-ips.sh)"
+		}
+		fmt.Printf("[domain-подсистема]  DPI, движок=%s группа=%s стратегия=%q реально_покрыт=%s\n", dv.Engine, dv.GroupID, dv.Strategy, covered)
 	} else if inAutoroute(target) {
 		fmt.Printf("[domain-подсистема]  в общем автообходе (VPS) как домен — совпадение по строке в autoroute.json\n")
 	} else if inZapretHostlist(target) {
