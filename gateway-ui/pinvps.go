@@ -171,6 +171,16 @@ func (s *server) runVPSPinRecheck(id string, domains []string) {
 // очереди"), что enqueueBrain в detector/main.go, просто со стороны
 // gateway-ui и сразу для целого списка доменов. Возвращает те, что реально
 // добавлены (уже стоявшие в очереди не отслеживаем повторно).
+//
+// T-queue-priority (2026-08-17): раньше дописывали в КОНЕЦ очереди — живой
+// случай: переключили discord с VPS на zapret, 20 доменов ушли в конец уже
+// забитой на сотни доменов общей очереди (brain-worker.sh — строго FIFO,
+// pop() через head -1), и discord.com/gateway.discord.gg реально ждали
+// своей очереди часами, всё это время оставаясь БЕЗ какой-либо защиты
+// (mode уже не "vps" — статический бейзлайн их не покрывает, см.
+// brain-static-reeval.sh). Домены featured-сервисов (discord/youtube/
+// instagram) — то, что пользователь явно переключил руками через UI и
+// ждёт результата — теперь встают В НАЧАЛО очереди, а не в конец.
 func enqueueDomainsForRecheck(domains []string) []string {
 	lf, err := os.OpenFile(brainQueueLockFile, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -181,22 +191,28 @@ func enqueueDomainsForRecheck(domains []string) []string {
 	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
 
 	existing := readQueueDomainSetLocked()
-	f, err := os.OpenFile(brainQueueFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
+	rest, err := os.ReadFile(brainQueueFile)
+	if err != nil && !os.IsNotExist(err) {
 		return nil
 	}
-	defer f.Close()
 
 	var added []string
+	var prefix strings.Builder
 	for _, d := range domains {
 		d = strings.ToLower(strings.TrimSpace(d))
 		if d == "" || existing[d] {
 			continue
 		}
-		if _, err := f.WriteString(d + "\treeval\n"); err == nil {
-			added = append(added, d)
-			existing[d] = true
-		}
+		prefix.WriteString(d + "\treeval\n")
+		added = append(added, d)
+		existing[d] = true
+	}
+	if len(added) == 0 {
+		return nil
+	}
+
+	if err := os.WriteFile(brainQueueFile, append([]byte(prefix.String()), rest...), 0o644); err != nil {
+		return nil
 	}
 	return added
 }
