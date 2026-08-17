@@ -48,6 +48,9 @@ func main() {
 	case "autoroute-static":
 		runAutorouteStatic()
 		return
+	case "autoroute-stats":
+		runAutorouteStats()
+		return
 	default:
 		usage()
 	}
@@ -68,7 +71,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]\n  gateway-detector watch-ebpf --iface enp2s0 [--vps IP] [--apply]  (T59, тень/сравнение с watch)\n  gateway-detector autoroute-static <ip|cidr> [--port N]  (T-ip-engine-phase1: закрепить вручную, никогда не снимается)")
+	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]\n  gateway-detector watch-ebpf --iface enp2s0 [--vps IP] [--apply]  (T59, тень/сравнение с watch)\n  gateway-detector autoroute-static <ip|cidr> [--port N]  (T-ip-engine-phase1: закрепить вручную, никогда не снимается)\n  gateway-detector autoroute-stats [--since 24h]  (T-ip-engine-phase1h: сводка по ТЗ п.32)")
 	os.Exit(2)
 }
 
@@ -243,6 +246,98 @@ func runAutorouteStatic() {
 	} else {
 		fmt.Printf("⚠ %s не добавлен (защищённый адрес или ошибка)\n", target)
 		os.Exit(1)
+	}
+}
+
+// runAutorouteStats — T-ip-engine-phase1h: сводка по ТЗ п.32 ("route_changes_
+// total, direct/dpi/vps_success_rate, fallback_count, recovery_count,
+// learned_ips, expired_ips, ..."). Часть метрик из документа у нас
+// структурно не существует как отдельная категория (мы не различаем route
+// "dpi" для IP-only целей вообще — см. комментарий у runAutorouteStats
+// выше про syn-timeout) — считаем то, что реально измеримо по нашим данным:
+// текущий состав autoroute.json + история переходов из RouteChangeLog.
+func runAutorouteStats() {
+	fs := flag.NewFlagSet("autoroute-stats", flag.ExitOnError)
+	since := fs.Duration("since", 24*time.Hour, "окно для событий из журнала (route_changes_total и разбивка по reason)")
+	fs.Parse(os.Args[2:])
+
+	s, err := applier.Load()
+	if err != nil {
+		log.Fatalf("autoroute-stats: чтение %s: %v", applier.File, err)
+	}
+	var learned, static, portScoped, unstableFlag int
+	stateCounts := map[string]int{}
+	for _, e := range s.Entries {
+		if e.IsStatic() {
+			static++
+		} else {
+			learned++
+		}
+		if e.IsPortScoped() {
+			portScoped++
+		}
+		st := e.State
+		if st == "" {
+			st = "UNKNOWN"
+		}
+		stateCounts[st]++
+	}
+
+	data, _ := os.ReadFile(applier.RouteChangeLog)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	cutoff := time.Now().UTC().Add(-*since)
+	var total int
+	byReason := map[string]int{}
+	byDirection := map[string]int{}
+	unstableAddrs := map[string]bool{}
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		var e struct {
+			OldRoute  string `json:"old_route"`
+			NewRoute  string `json:"new_route"`
+			Reason    string `json:"reason"`
+			Target    string `json:"target"`
+			Timestamp string `json:"timestamp"`
+		}
+		if json.Unmarshal([]byte(line), &e) != nil {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, e.Timestamp)
+		if err != nil || t.Before(cutoff) {
+			continue
+		}
+		total++
+		byReason[e.Reason]++
+		byDirection[e.OldRoute+" → "+e.NewRoute]++
+		if strings.HasPrefix(e.Reason, "unstable_") {
+			unstableAddrs[e.Target] = true
+			unstableFlag++
+		}
+	}
+
+	fmt.Printf("=== autoroute-stats (окно журнала: %s) ===\n", since.String())
+	fmt.Printf("записей всего: %d (learned=%d, static=%d, port-scoped-udp=%d)\n", len(s.Entries), learned, static, portScoped)
+	fmt.Printf("health state: ")
+	for _, k := range []string{"HEALTHY", "DEGRADED", "FAILED", "UNKNOWN"} {
+		fmt.Printf("%s=%d  ", k, stateCounts[k])
+	}
+	fmt.Println()
+	fmt.Printf("route_changes_total (в окне): %d\n", total)
+	for reason, n := range byReason {
+		fmt.Printf("  reason=%-28s %d\n", reason, n)
+	}
+	fmt.Println("направления:")
+	for dir, n := range byDirection {
+		fmt.Printf("  %-28s %d\n", dir, n)
+	}
+	if len(unstableAddrs) > 0 {
+		var addrs []string
+		for a := range unstableAddrs {
+			addrs = append(addrs, a)
+		}
+		fmt.Printf("unstable (route flapping) в окне: %s\n", strings.Join(addrs, ", "))
 	}
 }
 
