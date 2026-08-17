@@ -48,12 +48,21 @@ fetch() {
 # здесь). Скрипт "только добавляет, никогда не удаляет" (см. шапку файла) —
 # без этого фильтра ручная чистка одного мусорного домена не переживает
 # следующий прогон actualize, если апстрим geosite его не уберёт сам.
+#
+# 2026-08-17: массовая находка — 60 доменов-тайпсквотов/скам-сайтов
+# ("накрутка подписчиков", фейковые instagram-login и т.п.) в geosite:
+# instagram разом, ни один не попал в блок-листы AdGuardHome (это не
+# реклама/фишинг для самого AdGuardHome, просто мусорные записи апстрима) —
+# AdGuardHome-фильтр один их не ловит. Добавлен второй, ручной источник —
+# DENYLIST_FILE — для случаев, когда апстрим тащит мусор, которого нет ни в
+# одном блок-листе.
 ADGUARD_FILTER_DIR=${ADGUARD_FILTER_DIR:-/opt/AdGuardHome/data/filters}
+DENYLIST_FILE=${DENYLIST_FILE:-/etc/gateway/domain-denylist.txt}
 filter_junk() {
-  python3 - "$ADGUARD_FILTER_DIR" <<'PYEOF'
+  python3 - "$ADGUARD_FILTER_DIR" "$DENYLIST_FILE" <<'PYEOF'
 import glob, os, sys
 
-filter_dir = sys.argv[1]
+filter_dir, denylist_file = sys.argv[1:3]
 block = set()
 for path in glob.glob(os.path.join(filter_dir, "*.txt")):
     with open(path, encoding="utf-8", errors="ignore") as f:
@@ -69,6 +78,13 @@ for path in glob.glob(os.path.join(filter_dir, "*.txt")):
                     break
             d = d.removeprefix("*.").lower().rstrip(".")
             if d and "*" not in d and " " not in d:
+                block.add(d)
+
+if os.path.isfile(denylist_file):
+    with open(denylist_file, encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            d = line.strip().lower()
+            if d and not d.startswith("#"):
                 block.add(d)
 
 def is_blocked(domain):
