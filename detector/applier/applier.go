@@ -65,9 +65,48 @@ type Entry struct {
 	// обнаружена системой автоматически, обычный жизненный цикл (recheck может
 	// снять после 2 чистых прогонов подряд).
 	Type string `json:"type,omitempty"`
+
+	// Health state (T-ip-engine-phase1b, 2026-08-17) — из ТЗ п.9: "результат
+	// probe должен быть отделён от изменения маршрута", здесь — минимальная
+	// часть этого: копим историю без немедленной реакции на неё (recheck и
+	// live-путь пока принимают решения как раньше, эти поля пока НАБЛЮДЕНИЕ,
+	// не управление — заготовка под настоящий hysteresis/cooldown следующим
+	// шагом, чтобы не смешивать в одном коммите схему и поведение).
+	State               string `json:"state,omitempty"`                // UNKNOWN|HEALTHY|DEGRADED|FAILED (пусто = UNKNOWN)
+	SuccessCount        int    `json:"success_count,omitempty"`        // всего успешных проверок за всё время
+	FailureCount        int    `json:"failure_count,omitempty"`        // всего проваленных проверок за всё время
+	ConsecutiveFailures int    `json:"consecutive_failures,omitempty"` // подряд с последнего успеха, сбрасывается им
+	LastSuccess         string `json:"last_success,omitempty"`         // RFC3339, последняя успешная проверка
+	LastFailure         string `json:"last_failure,omitempty"`         // RFC3339, последняя проваленная проверка
 }
 
 func (e Entry) IsStatic() bool { return e.Type == "STATIC" }
+
+// RecordCheck — обновить health-историю записи результатом одной проверки
+// (T-ip-engine-phase1b). Правило state (без гистерезиса — это наблюдение,
+// не решение о маршруте, см. комментарий у полей выше):
+//
+//	успех              -> HEALTHY, сброс ConsecutiveFailures
+//	1-й провал подряд  -> DEGRADED
+//	2+ провалов подряд -> FAILED
+func (e *Entry) RecordCheck(ok bool) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if ok {
+		e.SuccessCount++
+		e.LastSuccess = now
+		e.ConsecutiveFailures = 0
+		e.State = "HEALTHY"
+		return
+	}
+	e.FailureCount++
+	e.LastFailure = now
+	e.ConsecutiveFailures++
+	if e.ConsecutiveFailures >= 2 {
+		e.State = "FAILED"
+	} else {
+		e.State = "DEGRADED"
+	}
+}
 
 // protectedIPs — адреса, которые НИКОГДА нельзя заворачивать в авто-обход
 // (VPS-туннель), даже если проба ошибочно посчитала их "заблокированными".
@@ -332,7 +371,11 @@ func AddStatic(target string, port int) bool {
 // (мерж по addr, чтобы не затереть параллельные добавления ночью). remove — набор
 // addr на удаление; clean — новые значения счётчика для оставшихся. Возвращает
 // оставшиеся записи (для ресинка ipset).
-func UpdateClean(remove map[string]bool, clean map[string]int) []Entry {
+// checkResults — T-ip-engine-phase1b: результат последней ночной пробы по
+// addr (true=direct работает), для RecordCheck(). Опционально — recheck
+// может не передавать (nil), тогда health-история не трогается (совместимо
+// со старыми вызовами).
+func UpdateClean(remove map[string]bool, clean map[string]int, checkResults map[string]bool) []Entry {
 	var kept []Entry
 	withLock(func(s *Store) {
 		out := s.Entries[:0:0]
@@ -342,6 +385,11 @@ func UpdateClean(remove map[string]bool, clean map[string]int) []Entry {
 			}
 			if v, ok := clean[e.Addr]; ok {
 				e.Clean = v
+			}
+			if checkResults != nil {
+				if ok, seen := checkResults[e.Addr]; seen {
+					e.RecordCheck(ok)
+				}
 			}
 			out = append(out, e)
 		}

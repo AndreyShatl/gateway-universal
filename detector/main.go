@@ -324,8 +324,10 @@ func runRecheck() {
 	}
 	remove := map[string]bool{}
 	clean := map[string]int{}
+	checkResults := map[string]bool{} // T-ip-engine-phase1b: health-история (State/*Count/*Time)
 	var okCnt, stillCnt int
 	for r := range out {
+		checkResults[r.addr] = r.ok
 		if r.ok {
 			okCnt++
 			c := cur[r.addr] + 1
@@ -345,7 +347,7 @@ func runRecheck() {
 	}
 
 	if *apply {
-		kept := applier.UpdateClean(remove, clean)
+		kept := applier.UpdateClean(remove, clean, checkResults)
 		if s.RouteOn() {
 			applier.Sync(kept) // ресинк ipset только когда применение включено
 		}
