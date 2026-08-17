@@ -51,6 +51,9 @@ func main() {
 	case "autoroute-stats":
 		runAutorouteStats()
 		return
+	case "route-explain":
+		runRouteExplain()
+		return
 	default:
 		usage()
 	}
@@ -71,7 +74,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]\n  gateway-detector watch-ebpf --iface enp2s0 [--vps IP] [--apply]  (T59, тень/сравнение с watch)\n  gateway-detector autoroute-static <ip|cidr> [--port N]  (T-ip-engine-phase1: закрепить вручную, никогда не снимается)\n  gateway-detector autoroute-stats [--since 24h]  (T-ip-engine-phase1h: сводка по ТЗ п.32)")
+	fmt.Fprintln(os.Stderr, "usage:\n  gateway-detector probe <target> [--port N] [--sni name] [--socks addr] [--no-tls]\n  gateway-detector watch --iface enp2s0 [--vps IP] [--apply]\n  gateway-detector recheck [--socks addr] [--workers N] [--apply]\n  gateway-detector watch-ebpf --iface enp2s0 [--vps IP] [--apply]  (T59, тень/сравнение с watch)\n  gateway-detector autoroute-static <ip|cidr> [--port N]  (T-ip-engine-phase1: закрепить вручную, никогда не снимается)\n  gateway-detector autoroute-stats [--since 24h]  (T-ip-engine-phase1h: сводка по ТЗ п.32)\n  gateway-detector route-explain <domain|ip>  (T-route-manager-phase2a: что говорят обе подсистемы про цель)")
 	os.Exit(2)
 }
 
