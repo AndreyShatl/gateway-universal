@@ -30,8 +30,15 @@ sync_dir() { # локальный подкаталог -> стенд
 }
 
 deploy_detector() {
+  # T-deploy-ebpf-tag (2026-08-17): sync_dir rsync'ит detector/ebpfsensor из
+  # локального репо — сгенерированные bpf2go-файлы (sensor_x86_bpfel.go/.o)
+  # туда НЕ закоммичены (генерятся на месте), rsync их не трогает, но сборка
+  # без "-tags ebpf" (как было тут раньше) собирает бинарь БЕЗ eBPF-режима —
+  # gateway-detector.service падает в рестарт-луп сразу же, сервис требует
+  # именно watch-ebpf. Живой инцидент: первый же прогон deploy.sh detector
+  # после перехода на eBPF уронил детектор на стенде.
   sync_dir detector
-  ssh "$STAND" "cd $SRC_REMOTE/detector && go build -o /tmp/gw-det . && install -m755 /tmp/gw-det /opt/gateway-detector && systemctl restart gateway-detector" \
+  ssh "$STAND" "cd $SRC_REMOTE/detector/ebpfsensor && go generate ./... && cd $SRC_REMOTE/detector && go build -tags ebpf -o /tmp/gw-det . && install -m755 /tmp/gw-det /opt/gateway-detector && systemctl restart gateway-detector" \
     || die "detector build/restart"
   say detector "PASS ($(ssh "$STAND" 'systemctl is-active gateway-detector'))"
 }

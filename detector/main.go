@@ -544,18 +544,40 @@ func inZapretHostlist(domain string) bool {
 	return false
 }
 
+// brainServiceStateFiles — состояние DPI-групп по всем трём движкам
+// (T-consolidate, 2026-07-23: формат ГРУППОВОЙ — [{group_id, proto,
+// strategy, domains:[...]}], не {domain: ...}). isBrainEntity() ниже до
+// 2026-08-17 читал только zapret-файл со СТАРЫМ полем "domain" (в
+// единственном числе) — после T-consolidate это поле нигде не пишется,
+// проверка молча всегда возвращала false. На деле это означало, что
+// T-live-retrigger/T-circuit-breaker (см. live_retrigger.go) НИКОГДА не
+// срабатывали для доменов на ciadpi/zapret2 (де-факто основной движок) —
+// живые сигналы провала для них уходили в обычный enqueueBrain путь как
+// для совсем новых доменов, а не в переоценку уже назначенной сущности.
+var brainServiceStateFiles = []string{
+	"/etc/gateway/brain-services.json",         // zapret (nfqws)
+	"/etc/gateway/brain-services-ciadpi.json",  // ciadpi (ByeDPI)
+	"/etc/gateway/brain-services-zapret2.json", // zapret2
+}
+
 func isBrainEntity(domain string) bool {
-	data, err := os.ReadFile("/etc/gateway/brain-services.json")
-	if err != nil {
-		return false
-	}
-	var svc []struct {
-		Domain string `json:"domain"`
-	}
-	json.Unmarshal(data, &svc)
-	for _, s := range svc {
-		if s.Domain == domain {
-			return true
+	for _, path := range brainServiceStateFiles {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var groups []struct {
+			Domains []string `json:"domains"`
+		}
+		if err := json.Unmarshal(data, &groups); err != nil {
+			continue
+		}
+		for _, g := range groups {
+			for _, d := range g.Domains {
+				if strings.EqualFold(d, domain) {
+					return true
+				}
+			}
 		}
 	}
 	return false

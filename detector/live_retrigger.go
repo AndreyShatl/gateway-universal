@@ -28,30 +28,26 @@ import (
 
 const liveRetriggerCooldown = 15 * time.Minute
 
-// T-circuit-breaker (2026-08-16) — живой кейс: updates.discord.com имел
-// ciadpi-стратегию, которую НАШ curl-тест считал рабочей, а реальный .NET-
-// клиент апдейтера — нет (другой TLS-отпечаток). T-live-retrigger сам по
-// себе тут бессилен зациклится: переоценка тем же curl-тестом переназначит
-// ТУ ЖЕ "рабочую по нашим меркам" стратегию, реальный клиент снова
-// сломается, живой сигнал провала придёт снова через cooldown — бесконечный
-// цикл без реального решения. Предохранитель: если домен получил
-// liveRetriggerBreakerThreshold живых сигналов провала БЕЗ достаточного
-// периода тишины между ними (liveRetriggerBreakerWindow) — значит наш тест
-// структурно не видит проблему для этого домена, и дальнейшие попытки
-// переназначить стратегию бессмысленны. Принудительный VPS вместо ещё
-// одной попытки — VPS не зависит от TLS-отпечатка клиента вообще.
-const liveRetriggerBreakerThreshold = 3
-const liveRetriggerBreakerWindow = time.Hour
-
-type liveRetriggerState struct {
-	lastSeen time.Time
-	count    int
-}
-
+// T-instant-failover (2026-08-17) — было: T-circuit-breaker ждал
+// liveRetriggerBreakerThreshold=3 живых сигналов провала за час, прежде чем
+// принудительно перевести домен на VPS — реальный пользователь мог словить
+// несколько обрывов подряд (живой кейс: Discord "checking for update"),
+// прежде чем защита срабатывала. Разобрали с пользователем: сигнатуры
+// watcher'а (rst-after-clienthello/syn-timeout/no-response-after-
+// clienthello/quic-no-response) по конструкции УЖЕ означают подозрение на
+// реальную блокировку, не общий шум — ждать подтверждения тем же
+// структурно слепым curl-тестом (см. исходный комментарий T-circuit-breaker
+// про updates.discord.com) только продлевает боль без выигрыша в
+// надёжности. Теперь первый же сигнал (после cooldown — не дребезжим на
+// потоке пакетов одного и того же обрыва) сразу переводит домен на VPS.
+// Дальнейший подбор DPI-стратегии — не здесь и не тем же тестом сразу же
+// (это и был первоначальный источник бесконечного цикла), а обычной ночной
+// переоценкой (brain-nightly.sh перебирает ВСЕ управляемые домены, включая
+// только что форсированные на VPS).
 var liveRetriggerLast = struct {
 	sync.Mutex
-	m map[string]*liveRetriggerState
-}{m: map[string]*liveRetriggerState{}}
+	m map[string]time.Time
+}{m: map[string]time.Time{}}
 
 func maybeRetriggerBrainEntity(domain, source string) {
 	domain = strings.ToLower(strings.TrimSpace(domain))
@@ -60,50 +56,29 @@ func maybeRetriggerBrainEntity(domain, source string) {
 	}
 
 	liveRetriggerLast.Lock()
-	st, ok := liveRetriggerLast.m[domain]
-	if ok && time.Since(st.lastSeen) < liveRetriggerCooldown {
+	last, ok := liveRetriggerLast.m[domain]
+	if ok && time.Since(last) < liveRetriggerCooldown {
 		liveRetriggerLast.Unlock()
 		return // тот же обрыв уже отреагирован недавно, не дребезжим
 	}
-	if !ok {
-		st = &liveRetriggerState{}
-		liveRetriggerLast.m[domain] = st
-	}
-	if time.Since(st.lastSeen) > liveRetriggerBreakerWindow {
-		st.count = 0 // было достаточно тихо — считаем прошлые провалы устаревшими
-	}
-	st.count++
-	st.lastSeen = time.Now()
-	tripped := st.count >= liveRetriggerBreakerThreshold
-	if tripped {
-		st.count = 0 // сбрасываем после срабатывания предохранителя
-	}
+	liveRetriggerLast.m[domain] = time.Now()
 	liveRetriggerLast.Unlock()
 
-	if tripped {
-		forceVPSCircuitBreaker(domain, source)
-		return
-	}
-
-	if enqueueBrainForRecheck(domain, source) {
-		log.Printf("⚠ живой сигнал провала (%s) для уже назначенного домена %s — на переоценку", source, domain)
-	}
+	forceVPSInstant(domain, source)
 }
 
-// forceVPSCircuitBreaker — та же команда, что кнопка "закрепить на VPS" в UI
+// forceVPSInstant — та же команда, что кнопка "закрепить на VPS" в UI
 // (T-vps-pin) применяет к одному домену, но БЕЗ закрепления сервиса целиком
-// (mode сервиса не трогаем — это именно предохранитель для одного проблемного
-// домена, не решение "весь Discord теперь навсегда на VPS"). Следующая
-// ночная/живая переоценка сможет снова попробовать DPI для ЭТОГО домена
-// (счётчик сброшен) — предохранитель не постоянный запрет, а пауза от
-// зацикливания прямо сейчас.
-func forceVPSCircuitBreaker(domain, source string) {
+// (mode сервиса не трогаем — это защита для одного проблемного домена, не
+// решение "весь Discord теперь навсегда на VPS"). Ближайшая ночная
+// переоценка (brain-nightly.sh) сама попробует DPI для этого домена заново.
+func forceVPSInstant(domain, source string) {
 	cmd := exec.Command("bash", "/opt/gateway-brain/brain-apply.sh", "vps", domain)
 	if err := cmd.Run(); err != nil {
-		log.Printf("⚠ предохранитель: не удалось перевести %s на VPS: %v", domain, err)
+		log.Printf("⚠ живой сигнал провала (%s) для %s — не удалось перевести на VPS: %v", source, domain, err)
 		return
 	}
-	log.Printf("🔴 предохранитель: %s получил %d живых провалов подряд (%s) — тест не видит проблему, принудительно на VPS", domain, liveRetriggerBreakerThreshold, source)
+	log.Printf("🔴 живой сигнал провала (%s) для %s — мгновенно переведён на VPS", source, domain)
 }
 
 // enqueueBrainForRecheck — та же механика, что enqueueBrain (дедуп через
