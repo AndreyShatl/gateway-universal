@@ -277,6 +277,25 @@ tcx с 6.6+, `clsact`/netlink не нужен).
 **Приёмка (де-факто, стенд, реальный интерфейс enp2s0):** счётчик реально растёт на живом
 трафике (269→458→664→965→1214 пакетов за 5 секунд), без единой ошибки загрузки/атача.
 
+### T-shattl-brain · Этап 5: Shattl Brain (видение → реализация) · H · in-progress
+Основа — схема и «Полная логика» владельца (33 раздела, сентябрь 2026; копия описания —
+Obsidian «Shattl-Brain»). Покрытие видения текущим — см. таблицу там же (~70% уже есть:
+fast-failover, background discovery, ночная ревалидация, гистерезис, восстановление).
+Миграция по стадиям раздела 30 схемы:
+- **STAGE 1-3 (аудит/архитектура/план) — done 2026-09-07** (документ Shattl-Brain.md).
+- **STAGE 4 OBSERVE — done 2026-09-07:** `detector route-state` (единый снапшот
+  per-destination из brain-services*.json + autoroute.json + gwdb services + xray
+  config.json; формат = раздел 7 схемы) и `detector brain-observe` (PolicyEngine-скелет,
+  правила R1 «DPI не покрывает ipset → держал бы VPS» и R2 «VPS HEALTHY>72ч → ночной
+  кандидат на LOCAL»; ноль мутаций, единственная запись — собственный снапшот
+  /etc/gateway/observe/route-state.json). Первый живой прогон: 1332 назначения,
+  R1=39 (класс Instagram-инцидента!), R2=6. Таймеры: быстрый каждые 30 мин,
+  --coverage суточно 04:40 (после ночной цепочки; ~6 мин DNS). API: /api/route-state.
+- **STAGE 5 SHADOW — не начато:** decisions.jsonl + сверка с реальными исходами brain-worker.
+- **STAGE 6 TEST DESTINATIONS — не начато:** apply для 3-5 тестовых доменов с полным
+  VALIDATE→APPLY→CHECK→COMMIT/ROLLBACK (раздел 21 схемы).
+- **STAGE 7-8 — не начато.**
+
 ### T59 · Перенос сигналов детектора в eBPF (по одному, сверяя с pcap) · H · in-progress
 Сигналы для переноса (см. [detector/watcher/watcher.go](detector/watcher/watcher.go) и
 [quic.go](detector/watcher/quic.go)): `syn-timeout` (SYN без SYN-ACK, порог 5 попыток/окно),
