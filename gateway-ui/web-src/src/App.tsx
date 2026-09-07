@@ -9,6 +9,7 @@ import { UpdatesPage } from './pages/UpdatesPage'
 import { DomainsPage } from './pages/DomainsPage'
 import { WhitelistPage } from './pages/WhitelistPage'
 import { MonitorPage } from './pages/MonitorPage'
+import { ObservePage } from './pages/ObservePage'
 import { LogsPage } from './pages/LogsPage'
 import { DiagnosticsPage } from './pages/DiagnosticsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -32,6 +33,7 @@ function AnimatedRoutes() {
           <Route path="/domains" element={<DomainsPage />} />
           <Route path="/whitelist" element={<WhitelistPage />} />
           <Route path="/monitor" element={<MonitorPage />} />
+          <Route path="/observe" element={<ObservePage />} />
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage />} />
           <Route path="/network" element={<NetworkPage />} />

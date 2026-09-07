@@ -451,3 +451,69 @@ export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | '
     body: JSON.stringify({ owner, domains, http: true, tls12: true, tls13: true, quic: true, scanlevel, parallel: true }),
   })
 export const stopScan = () => api<{ ok?: boolean }>('/api/scan/stop', { method: 'POST' })
+
+// --- Shattl Brain Observe (Этап 5): снимок маршрутов, теневые решения, сверка, дайджест ---
+
+export interface RouteTotals {
+  local_zapret: number
+  local_ciadpi: number
+  local_zapret2: number
+  vps_auto_domain: number
+  vps_auto_ip: number
+  vps_static: number
+  conflicts: number
+}
+
+export interface ObserveDecision {
+  rule: string
+  domain?: string
+  action: string
+  reason: string
+}
+
+export interface RouteStateResponse {
+  generated: string | null
+  totals: RouteTotals | null
+  destinations?: { domain: string; current_route: string }[]
+  decisions?: ObserveDecision[]
+  hint?: string
+}
+
+export interface ShadowR1Entry {
+  domain: string
+  first_seen: string
+  days_open: number
+  now_covered: boolean | null
+  outcome: string
+}
+
+export interface ShadowR2Entry {
+  domain: string
+  decided_at: string
+  route_now: string
+  outcome: string
+  history_last?: string
+}
+
+export interface ShadowReportResponse {
+  generated: string | null
+  r1: ShadowR1Entry[] | null
+  r2: ShadowR2Entry[] | null
+  notes: string[] | null
+  hint?: string
+}
+
+export interface DailyDigestResponse {
+  generated: string | null
+  window: string
+  brain: { probes: number; success: number; fail: number; domains: number; engines?: Record<string, number> }
+  route_totals: RouteTotals | null
+  shadow: { as_of: string; r1_open: number; r1_still: number; r1_healed: number; r2_moved: number; r2_still: number }
+  system: { disk_avail_pct: number; mem_avail_mb: number; brain_worker_active: boolean; queue_len: number; failed_units?: string[]; silence_watchdog: string }
+  notes?: string[]
+  hint?: string
+}
+
+export const fetchRouteState = () => api<RouteStateResponse>('/api/route-state')
+export const fetchShadowReport = () => api<ShadowReportResponse>('/api/shadow-report')
+export const fetchDailyDigest = () => api<DailyDigestResponse>('/api/daily-digest')

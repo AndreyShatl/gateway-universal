@@ -1,4 +1,4 @@
-import { LayoutGrid, Globe, ShieldCheck, Activity, ScrollText, Settings, Boxes, TerminalSquare, Wifi, DownloadCloud, Stethoscope } from 'lucide-react'
+import { LayoutGrid, Globe, ShieldCheck, Activity, ScrollText, Settings, Boxes, TerminalSquare, Wifi, DownloadCloud, Stethoscope, Radar } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
@@ -11,6 +11,7 @@ const items = [
   { to: '/domains', icon: Globe, label: 'Domains' },
   { to: '/whitelist', icon: ShieldCheck, label: 'Whitelist' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },
+  { to: '/observe', icon: Radar, label: 'Observe' },
   { to: '/logs', icon: ScrollText, label: 'Logs' },
   { to: '/diagnostics', icon: Stethoscope, label: 'Diagnostics' },
 ]
