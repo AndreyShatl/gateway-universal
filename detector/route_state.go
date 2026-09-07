@@ -775,10 +775,9 @@ func firstLineOfFile(path string) string {
 }
 
 func shellOut(cmd string, args ...string) string {
-	out, err := exec.Command(cmd, args...).Output()
-	if err != nil {
-		return ""
-	}
+	// systemctl is-active возвращает не-0 для inactive/failed, но ПЕЧАТАЕТ
+	// состояние в stdout — не выбрасываем его при ошибке
+	out, _ := exec.Command(cmd, args...).Output()
 	return strings.TrimSpace(string(out))
 }
 
