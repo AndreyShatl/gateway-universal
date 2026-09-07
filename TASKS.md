@@ -291,7 +291,15 @@ fast-failover, background discovery, ночная ревалидация, гис
   /etc/gateway/observe/route-state.json). Первый живой прогон: 1332 назначения,
   R1=39 (класс Instagram-инцидента!), R2=6. Таймеры: быстрый каждые 30 мин,
   --coverage суточно 04:40 (после ночной цепочки; ~6 мин DNS). API: /api/route-state.
-- **STAGE 5 SHADOW — не начато:** decisions.jsonl + сверка с реальными исходами brain-worker.
+- **STAGE 5 SHADOW — задеплоено 2026-09-07 (вечер):** brain-observe пишет ПЕРЕХОДЫ решений
+  (new/resolved, не каждый прогон — только изменения) в decisions.jsonl; gwdb добавлена
+  read-only `history-last DOMAIN [N]`; `shadow-verify` (таймер 05:10, после coverage и
+  ночной цепочки) сверяет: R1 открытые >N дней (refresh-ips не справляется → кандидат на
+  CDN_CIDR_HINTS) и R2 исходы (переехали ли на LOCAL ночью). API: /api/shadow-report.
+  **Первый живой прогон:** R1=73, из них 63 долечились brain-refresh-ips за 8 минут
+  (самозаживление T-cdn-refresh доказано числом; важен только персистентный хвост),
+  R2=6 кандидатов ждут первую ночь (akamai/apple/facebook.design — завтра будет видно,
+  кому ночной перебор реально поможет).
 - **STAGE 6 TEST DESTINATIONS — не начато:** apply для 3-5 тестовых доменов с полным
   VALIDATE→APPLY→CHECK→COMMIT/ROLLBACK (раздел 21 схемы).
 - **STAGE 7-8 — не начато.**
