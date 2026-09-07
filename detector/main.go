@@ -145,7 +145,14 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 		if c.SNI != "" {
 			ip := c.DstIP
 			if isBrainEntity(c.SNI) {
-				addToSet("brain_"+sanitizeDomain(c.SNI), ip) // сущность: и NFQUEUE, и RETURN по этому ipset
+				// Тень (apply=false) не трогает ipset/brain-apply: раньше обе
+				// мутации ниже выполнялись без проверки флага — теневой прогон
+				// `watch` реально изменял прод (найдено живьём 2026-09-07 при
+				// сверке pcap↔eBPF: тень залогировала "переведён на VPS" и
+				// запустила brain-apply.sh). Тень теперь только логирует.
+				if *apply {
+					addToSet("brain_"+sanitizeDomain(c.SNI), ip) // сущность: и NFQUEUE, и RETURN по этому ipset
+				}
 				// T-live-retrigger (2026-08-16): живой кейс — updates.discord.com
 				// уже имел назначенную ciadpi-стратегию, «подтверждённую» нашей
 				// ночной curl-проверкой, но реально не пробивавшую .NET-клиента
@@ -159,11 +166,13 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 				// переставить на переоценку, с cooldown против дребезга (та же
 				// сигнатура может прийти многократно за секунды при потоке
 				// реальных запросов клиента).
-				maybeRetriggerBrainEntity(c.SNI, c.Signal)
+				maybeRetriggerBrainEntity(c.SNI, c.Signal, *apply)
 				return
 			}
 			if inAutoroute(c.SNI) {
-				addToSet(applier.IPSet, ip) // VPS
+				if *apply {
+					addToSet(applier.IPSet, ip) // VPS
+				}
 				return
 			}
 			if inZapretHostlist(c.SNI) {

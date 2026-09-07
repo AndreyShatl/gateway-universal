@@ -61,7 +61,7 @@ var liveRetriggerLast = struct {
 // TCP-маршрута). TCP-сигнатуры (rst-after-clienthello/syn-timeout/
 // no-response-after-clienthello) остаются — они про тот же протокол/порт,
 // на котором реально работает наш DPI-обход.
-func maybeRetriggerBrainEntity(domain, source string) {
+func maybeRetriggerBrainEntity(domain, source string, apply bool) {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {
 		return
@@ -79,6 +79,11 @@ func maybeRetriggerBrainEntity(domain, source string) {
 	liveRetriggerLast.m[domain] = time.Now()
 	liveRetriggerLast.Unlock()
 
+	if !apply {
+		// тень (watch без --apply): ничего не исполняем, только честный лог
+		log.Printf("🟡 тень: живой сигнал провала (%s) для %s — БЫ перевёл на VPS", source, domain)
+		return
+	}
 	forceVPSInstant(domain, source)
 }
 
