@@ -100,12 +100,22 @@ func runRouteSwitch() {
 	engine := fs.String("engine", "", "для --to local: zapret|ciadpi|zapret2")
 	strategy := fs.String("strategy", "", "для --to local: полные args стратегии (как в brain-services)")
 	commit := fs.Bool("commit", false, "РЕАЛЬНО применить (иначе dry-run: только VALIDATE + план)")
-	fs.Parse(os.Args[2:])
-	if fs.NArg() < 1 || *to == "" || (*to != "vps" && *to != "local") {
+	// домен можно писать до или после флагов (go flag не переваривает
+	// позиционный аргумент перед флагами — разложим руками)
+	var flagsOnly, positional []string
+	for _, a := range os.Args[2:] {
+		if strings.HasPrefix(a, "-") {
+			flagsOnly = append(flagsOnly, a)
+		} else {
+			positional = append(positional, a)
+		}
+	}
+	fs.Parse(flagsOnly)
+	if len(positional) == 0 || *to == "" || (*to != "vps" && *to != "local") {
 		fmt.Fprintln(os.Stderr, "usage: gateway-detector route-switch <domain> --to vps|local [--engine E --strategy \"args\"] [--commit]")
 		os.Exit(2)
 	}
-	domain := strings.ToLower(strings.TrimSpace(fs.Arg(0)))
+	domain := strings.ToLower(strings.TrimSpace(positional[0]))
 	tx := &TxRecord{TS: time.Now().UTC().Format(time.RFC3339), Domain: domain, To: *to, Commit: *commit}
 
 	fmt.Printf("=== route-switch %s → %s (%s) ===\n", domain, *to, map[bool]string{true: "COMMIT", false: "DRY-RUN"}[*commit])
