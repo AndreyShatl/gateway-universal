@@ -371,9 +371,10 @@ func runRouteState() {
 // /etc/gateway/observe/route-state.json для gateway-ui.
 func runBrainObserve() {
 	fs := flag.NewFlagSet("brain-observe", flag.ExitOnError)
+	coverage := fs.Bool("coverage", false, "проверять реальное покрытие ipset (медленно: DNS-резолвы, ~6 мин на 1300 доменов)")
 	fs.Parse(os.Args[2:])
 
-	snap, decisions := buildRouteSnapshot(true)
+	snap, decisions := buildRouteSnapshot(*coverage)
 	snap.Decisions = decisions
 	if err := writeSnapshot(snap); err != nil {
 		fmt.Fprintf(os.Stderr, "brain-observe: снапшот не записан: %v\n", err)

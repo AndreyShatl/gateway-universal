@@ -1,0 +1,10 @@
+[Unit]
+Description=Ежедневно 04:40: brain-observe --coverage (после ночной цепочки recheck->nightly->actualize->static-reeval)
+
+[Timer]
+OnCalendar=*-*-* 04:40:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

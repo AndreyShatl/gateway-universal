@@ -188,6 +188,7 @@ func main() {
 	mux.HandleFunc("/api/autoroute", s.requireAuth(s.handleAutoRoute))
 	mux.HandleFunc("/api/autoroute/stats", s.requireAuth(s.handleAutoRouteStats))
 	mux.HandleFunc("/api/monitor", s.requireAuth(s.handleMonitor))
+	mux.HandleFunc("/api/route-state", s.requireAuth(s.handleRouteState))
 	mux.HandleFunc("/api/vps-domains", s.requireAuth(s.handleVPSDomains))
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))

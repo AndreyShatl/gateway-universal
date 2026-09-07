@@ -1,0 +1,9 @@
+[Unit]
+Description=Gateway brain-observe — полная версия с проверкой покрытия ipset (R1)
+# Раз в сутки после ночной цепочки: медленный режим (~6 мин DNS-резолвов)
+# обновляет actually_covered у всех LOCAL-доменов и решения R1/R2 в снапшоте.
+# Быстрый brain-observe (без coverage) крутится каждые 30 мин отдельным таймером.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-detector brain-observe --coverage
