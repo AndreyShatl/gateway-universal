@@ -1,0 +1,11 @@
+[Unit]
+Description=Gateway brain — сторож тихого молчания (свежесть history + brain-worker active)
+# Инцидент 26.08–07.09: мозг молчал 12 дней (диск 100%), воркер был "active",
+# простой был невидим. Этот юнит намеренно ПАДАЕТ (failed) при молчании —
+# чтобы попасть в systemctl --failed / gateway-ui / GMP-дашборд.
+# Самоочищается: следующий успешный прогон переводит в inactive.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-silence-watchdog.sh
+# ничего не чиним: read-only проверка

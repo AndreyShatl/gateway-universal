@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly: проверка, что мозг не молчит (history свежая)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

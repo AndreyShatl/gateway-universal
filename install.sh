@@ -792,6 +792,7 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
              gateway-brain-static-reeval.service gateway-brain-static-reeval.timer \
              gateway-brain-domain-actualize.service gateway-brain-domain-actualize.timer \
              gateway-brain-healthcheck.service gateway-brain-healthcheck.timer \
+             gateway-brain-silence-watchdog.service gateway-brain-silence-watchdog.timer \
              gateway-zapret-autoupdate.service gateway-zapret-autoupdate.timer; do
         cp "$SCRIPT_DIR/systemd/$u" /etc/systemd/system/"$u"
     done
@@ -806,8 +807,12 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
     # копируются (см. цикл выше) для наличия файла, но НЕ enable — если
     # когда-нибудь понадобится вернуть независимый таймер, достаточно
     # systemctl enable --now без правки install.sh.
+    # Сторож "тихого молчания" (2026-09-07, инцидент 26.08–07.09): отдельный
+    # hourly-таймер, юнит ПАДАЕТ при молчании history — чтобы быть видным в
+    # systemctl --failed / gateway-ui / GMP-дашборде.
     systemctl enable --now gateway-brain-activity.timer \
         gateway-brain-idle-stop.timer gateway-brain-healthcheck.timer \
+        gateway-brain-silence-watchdog.timer \
         gateway-zapret-autoupdate.timer >/dev/null 2>&1 || true
     ok "brain установлен (воркер + цепочка ночных проверок от gateway-recheck 03:00 + автообновление движков-обходов по воскресеньям от 02:00)"
 fi
