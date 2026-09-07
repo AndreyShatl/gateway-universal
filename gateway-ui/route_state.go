@@ -14,6 +14,22 @@ import (
 
 const routeStateFile = "/etc/gateway/observe/route-state.json"
 const shadowReportFile = "/etc/gateway/observe/shadow-report.json"
+const dailyDigestFile = "/etc/gateway/observe/daily-digest.json"
+
+func (s *server) handleDailyDigest(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(dailyDigestFile)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{
+			"generated": nil,
+			"hint":      "дайджест ещё не создан — ждём первый gateway-brain-digest (05:30)",
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
 
 func (s *server) handleShadowReport(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(shadowReportFile)

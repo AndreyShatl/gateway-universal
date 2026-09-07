@@ -1,0 +1,9 @@
+[Unit]
+Description=Gateway daily-digest — утренняя сводка (мозг + observe/shadow + система) для доработки Этапа 5
+# 05:30, после ночной цепочки (03:11+), coverage-observe (04:40) и shadow-verify (05:10).
+# Снапшот: /etc/gateway/observe/daily-digest.json, тренд по дням: digest-history.jsonl.
+# API: /api/daily-digest. Read-only.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-detector daily-digest

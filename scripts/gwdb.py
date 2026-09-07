@@ -440,6 +440,28 @@ def cmd_history_last(args):
         print("\t".join("" if x is None else str(x) for x in r))
 
 
+def cmd_history_stats(args):
+    """history-stats [HOURS] — агрегаты history за последние N часов (default 24),
+    read-only. Для ежедневного дайджеста (Этап 5): сколько проб сделал мозг,
+    сколько успехов/провалов, по каким движкам. Формат:
+    строка 1: total<TAB>success<TAB>fail<TAB>domains
+    дальше:   engine<TAB>имя<TAB>проб<TAB>успехов"""
+    hours = int(args[0]) if args else 24
+    conn = db()
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - hours * 3600))
+    total = conn.execute(
+        "SELECT COUNT(*), SUM(result='success'), SUM(result='fail'), COUNT(DISTINCT domain) "
+        "FROM history WHERE tested_at >= ?",
+        (since,),
+    ).fetchone()
+    print(f"{total[0]}\t{total[1] or 0}\t{total[2] or 0}\t{total[3]}")
+    for e in conn.execute(
+        "SELECT engine, COUNT(*), SUM(result='success') FROM history WHERE tested_at >= ? GROUP BY engine",
+        (since,),
+    ):
+        print(f"engine\t{e[0]}\t{e[1]}\t{e[2] or 0}")
+
+
 def cmd_history_add(args):
     sid, domain, result = args[0], args[1], args[2]
     latency = args[3] if len(args) > 3 and args[3] else None
@@ -614,6 +636,7 @@ COMMANDS = {
     "strategy-find": cmd_strategy_find,
     "history-add": cmd_history_add,
     "history-last": cmd_history_last,
+    "history-stats": cmd_history_stats,
     "strategy-mark-success": cmd_strategy_mark_success,
     "strategy-mark-fail": cmd_strategy_mark_fail,
 }

@@ -60,6 +60,9 @@ func main() {
 	case "brain-observe":
 		runBrainObserve()
 		return
+	case "daily-digest":
+		runDailyDigest()
+		return
 	case "shadow-verify":
 		runShadowVerify()
 		return

@@ -14,6 +14,7 @@ package main
 // командой, прежде чем строить арбитраж (STAGE 5+).
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -712,4 +713,184 @@ func runShadowVerify() {
 		fmt.Printf("  note: %s\n", n)
 	}
 	fmt.Printf("отчёт: %s\n", shadowReportFile)
+}
+
+// ============================================================================
+// Ежедневный дайджест (2026-09-07) — «приборный щиток» для доработки Этапа 5:
+// одна команда утром показывает всё, что нужно для решения «двигаемся дальше
+// правильно»: активность мозга за сутки, состояние observe/shadow, здоровье
+// системы. История по дням копится в digest-history.jsonl (тренды STAGE 5→6).
+// ============================================================================
+
+const (
+	digestFile        = observeStateDir + "/daily-digest.json"
+	digestHistoryFile = observeStateDir + "/digest-history.jsonl"
+)
+
+type DigestBrain struct {
+	Probes  int            `json:"probes"`
+	Success int            `json:"success"`
+	Fail    int            `json:"fail"`
+	Domains int            `json:"domains"`
+	Engines map[string]int `json:"engines,omitempty"` // engine -> probes
+}
+
+type DigestShadow struct {
+	AsOf     string `json:"as_of"`
+	R1Open   int    `json:"r1_open"`
+	R1Still  int    `json:"r1_still"`
+	R1Healed int    `json:"r1_healed"`
+	R2Moved  int    `json:"r2_moved"`
+	R2Still  int    `json:"r2_still"`
+}
+
+type DigestSystem struct {
+	DiskAvailPct      int      `json:"disk_avail_pct"`
+	MemAvailMB        int      `json:"mem_avail_mb"`
+	BrainWorkerActive bool     `json:"brain_worker_active"`
+	QueueLen          int      `json:"queue_len"`
+	FailedUnits       []string `json:"failed_units,omitempty"`
+	SilenceWatchdog   string   `json:"silence_watchdog"` // active|failed|inactive
+}
+
+type DailyDigest struct {
+	Generated time.Time    `json:"generated"`
+	Window    string       `json:"window"`
+	Brain     DigestBrain  `json:"brain"`
+	Route     RouteTotals  `json:"route_totals"`
+	Shadow    DigestShadow `json:"shadow"`
+	System    DigestSystem `json:"system"`
+	Notes     []string     `json:"notes,omitempty"`
+}
+
+func firstLineOfFile(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if i := bytes.IndexByte(raw, '\n'); i >= 0 {
+		return string(raw[:i])
+	}
+	return string(raw)
+}
+
+func shellOut(cmd string, args ...string) string {
+	out, err := exec.Command(cmd, args...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func runDailyDigest() {
+	fs := flag.NewFlagSet("daily-digest", flag.ExitOnError)
+	hours := fs.Int("hours", 24, "окно агрегации истории мозга")
+	fs.Parse(os.Args[2:])
+
+	d := DailyDigest{Generated: time.Now().UTC(), Window: fmt.Sprintf("%dh", *hours), System: DigestSystem{FailedUnits: []string{}}}
+
+	// --- мозг: агрегаты history за окно ---
+	if raw, err := exec.Command("python3", gwdbScript, "history-stats", fmt.Sprint(*hours)).Output(); err == nil {
+		d.Brain.Engines = map[string]int{}
+		for i, ln := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			f := strings.Split(ln, "\t")
+			if i == 0 && len(f) == 4 {
+				d.Brain.Probes, d.Brain.Success, d.Brain.Fail, d.Brain.Domains = atoiSafe(f[0]), atoiSafe(f[1]), atoiSafe(f[2]), atoiSafe(f[3])
+			} else if len(f) == 4 && f[0] == "engine" {
+				d.Brain.Engines[f[1]] = atoiSafe(f[2])
+			}
+		}
+	}
+
+	// --- маршруты: последний снапшот route-state ---
+	if raw, err := os.ReadFile(observeStateFile); err == nil {
+		var snap RouteSnapshot
+		if json.Unmarshal(raw, &snap) == nil {
+			d.Route = snap.Totals
+		}
+	}
+
+	// --- shadow: последний отчёт ---
+	if raw, err := os.ReadFile(shadowReportFile); err == nil {
+		var rep ShadowReport
+		if json.Unmarshal(raw, &rep) == nil {
+			d.Shadow.AsOf = rep.Generated.Format(time.RFC3339)
+			d.Shadow.R1Open = len(rep.R1)
+			for _, r := range rep.R1 {
+				if r.Outcome == "still_open" {
+					d.Shadow.R1Still++
+				} else {
+					d.Shadow.R1Healed++
+				}
+			}
+			for _, r := range rep.R2 {
+				if r.Outcome == "moved_to_local" {
+					d.Shadow.R2Moved++
+				} else if r.Outcome == "still_vps" {
+					d.Shadow.R2Still++
+				}
+			}
+		}
+	}
+
+	// --- система ---
+	if out := shellOut("sh", "-c", "df -P / | awk 'NR==2{gsub(\"%\",\"\",$5); print 100-$5}'"); out != "" {
+		d.System.DiskAvailPct = atoiSafe(out)
+	}
+	if out := shellOut("sh", "-c", "free -m | awk '/^Mem:/{print $7}'"); out != "" {
+		d.System.MemAvailMB = atoiSafe(out)
+	}
+	d.System.BrainWorkerActive = shellOut("systemctl", "is-active", "gateway-brain-worker") == "active"
+	if entries, err := os.ReadDir("/etc/gateway/brain-queue"); err == nil {
+		d.System.QueueLen = len(entries)
+	}
+	if out := shellOut("sh", "-c", "systemctl list-units --failed --no-legend --plain | awk '{print $1}'"); out != "" {
+		for _, ln := range strings.Split(out, "\n") {
+			if ln = strings.TrimSpace(ln); ln != "" {
+				d.System.FailedUnits = append(d.System.FailedUnits, ln)
+			}
+		}
+	}
+	d.System.SilenceWatchdog = shellOut("systemctl", "is-active", "gateway-brain-silence-watchdog")
+
+	// --- авто-заметки: на что смотреть утром ---
+	if d.System.DiskAvailPct < 15 {
+		d.Notes = append(d.Notes, fmt.Sprintf("диск: свободно %d%% < 15%% — чистить (см. инцидент 26.08)", d.System.DiskAvailPct))
+	}
+	if !d.System.BrainWorkerActive || d.System.SilenceWatchdog == "failed" {
+		d.Notes = append(d.Notes, "мозг: воркер не активен или сторож молчания в failed — разберись до всего остального")
+	}
+	if d.Brain.Probes == 0 {
+		d.Notes = append(d.Notes, "мозг: 0 проб за окно — ночная цепочка не писала history (класс инцидента 26.08–07.09)")
+	}
+	if d.Shadow.R1Still > 0 {
+		d.Notes = append(d.Notes, fmt.Sprintf("R1: %d персистентных непокрытых — кандидаты на CDN_CIDR_HINTS (см. shadow-report)", d.Shadow.R1Still))
+	}
+
+	// --- запись: снапшот + строка в историю ---
+	os.MkdirAll(observeStateDir, 0o755)
+	if raw, err := json.MarshalIndent(d, "", "  "); err == nil {
+		os.WriteFile(digestFile, raw, 0o644)
+	}
+	if b, err := json.Marshal(d); err == nil {
+		if f, err := os.OpenFile(digestHistoryFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+			f.Write(append(b, '\n'))
+			f.Close()
+		}
+	}
+
+	// --- человекочитаемый итог ---
+	fmt.Printf("=== DAILY DIGEST @ %s (окно %s) ===\n", d.Generated.Format("2006-01-02 15:04 MST"), d.Window)
+	fmt.Printf("МОЗГ:      проб=%d (успех=%d провал=%d) доменов=%d движки=%v очередь=%d\n",
+		d.Brain.Probes, d.Brain.Success, d.Brain.Fail, d.Brain.Domains, d.Brain.Engines, d.System.QueueLen)
+	fmt.Printf("МАРШРУТЫ:  local(zapret=%d ciadpi=%d zapret2=%d) vps(авто-домены=%d IP=%d static=%d) конфликтов=%d\n",
+		d.Route.LocalZapret, d.Route.LocalCiadpi, d.Route.LocalZapret2, d.Route.VPSAutoDomain, d.Route.VPSAutoIP, d.Route.VPSStatic, d.Route.Conflicts)
+	fmt.Printf("SHADOW:    R1 открытых=%d (персистентных=%d, долечено=%d) | R2 переехали=%d остались=%d (отчёт %s)\n",
+		d.Shadow.R1Open, d.Shadow.R1Still, d.Shadow.R1Healed, d.Shadow.R2Moved, d.Shadow.R2Still, d.Shadow.AsOf)
+	fmt.Printf("СИСТЕМА:   диск свободен %d%%, память доступна %dМБ, воркер=%v сторож=%s, failed=%v\n",
+		d.System.DiskAvailPct, d.System.MemAvailMB, d.System.BrainWorkerActive, d.System.SilenceWatchdog, d.System.FailedUnits)
+	for _, n := range d.Notes {
+		fmt.Printf("⚠ %s\n", n)
+	}
+	fmt.Printf("снапшот: %s | история: %s\n", digestFile, digestHistoryFile)
 }

@@ -796,6 +796,7 @@ if [[ "$INSTALL_BRAIN" == "yes" ]]; then
              gateway-brain-observe.service gateway-brain-observe.timer \
              gateway-brain-observe-coverage.service gateway-brain-observe-coverage.timer \
              gateway-brain-shadow-verify.service gateway-brain-shadow-verify.timer \
+             gateway-brain-digest.service gateway-brain-digest.timer \
              gateway-zapret-autoupdate.service gateway-zapret-autoupdate.timer; do
         cp "$SCRIPT_DIR/systemd/$u" /etc/systemd/system/"$u"
     done

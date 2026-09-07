@@ -1,0 +1,10 @@
+[Unit]
+Description=Ежедневно 05:30: daily-digest
+
+[Timer]
+OnCalendar=*-*-* 05:30:00
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
