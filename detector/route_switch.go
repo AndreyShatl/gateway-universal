@@ -101,13 +101,20 @@ func runRouteSwitch() {
 	strategy := fs.String("strategy", "", "для --to local: полные args стратегии (как в brain-services)")
 	commit := fs.Bool("commit", false, "РЕАЛЬНО применить (иначе dry-run: только VALIDATE + план)")
 	// домен можно писать до или после флагов (go flag не переваривает
-	// позиционный аргумент перед флагами — разложим руками)
+	// позиционный аргумент перед флагами — разложим руками, зная какие
+	// флаги забирают значение следующим токеном)
+	takesValue := map[string]bool{"-to": true, "--to": true, "-engine": true, "--engine": true, "-strategy": true, "--strategy": true}
 	var flagsOnly, positional []string
-	for _, a := range os.Args[2:] {
-		if strings.HasPrefix(a, "-") {
-			flagsOnly = append(flagsOnly, a)
+	args := os.Args[2:]
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			flagsOnly = append(flagsOnly, args[i])
+			if takesValue[args[i]] && !strings.Contains(args[i], "=") && i+1 < len(args) {
+				i++
+				flagsOnly = append(flagsOnly, args[i])
+			}
 		} else {
-			positional = append(positional, a)
+			positional = append(positional, args[i])
 		}
 	}
 	fs.Parse(flagsOnly)
