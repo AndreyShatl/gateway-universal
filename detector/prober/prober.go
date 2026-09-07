@@ -20,10 +20,33 @@ import (
 )
 
 // resolve — резолв через системный резолвер (локальный dnscrypt), с таймаутом.
+// Fallback (2026-09-07): при таймауте/ошибке локального резолвера — прямые
+// запросы к 1.1.1.1/8.8.8.8. Живой кейс из сверке T59: eBPF поймал блок x.com,
+// но prober=unknown — lookup на 127.0.0.1:53 упал в i/o timeout — и кандидат
+// был тихо потерян, хотя сигнал был настоящий. Блокировки DNS-запросов к
+// публичным резолверам обычно нет (режут ответы, а не запросы), а даже
+// подменённый A-рекорд для prober не критичен: он меряет TCP/TLS-досягаемость.
 func resolve(host string, timeout time.Duration) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	return net.DefaultResolver.LookupHost(ctx, host)
+	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+	if err == nil {
+		return addrs, nil
+	}
+	for _, dns := range []string{"1.1.1.1", "8.8.8.8"} {
+		r := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: timeout}
+				return d.DialContext(ctx, "udp", net.JoinHostPort(dns, "53"))
+			},
+		}
+		addrs, fbErr := r.LookupHost(ctx, host)
+		if fbErr == nil {
+			return addrs, nil
+		}
+	}
+	return nil, err
 }
 
 func errStr(err error) string {
