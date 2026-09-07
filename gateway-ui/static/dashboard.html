@@ -995,8 +995,16 @@
         }));
       const cp = (d.ciadpi_profiles || []);
       document.getElementById('monCiadpiCount').textContent = cp.length;
+      // длинные списки доменов (>5) сворачиваем в <details>, чтобы группа на
+      // 147 доменов не растягивала таблицу в одну бесконечную строку
+      const domCell = s => {
+        if (!s) return '<span class="muted">—</span>';
+        const parts = s.split(',').map(x => x.trim()).filter(Boolean);
+        if (parts.length <= 5) return esc(s);
+        return `<details style="margin:2px 0"><summary style="cursor:pointer">${esc(parts.slice(0,3).join(', '))} <span class="muted">… ещё ${parts.length-3}</span></summary><div class="muted" style="margin:4px 0 0 16px; font-size:.85em">${parts.map(esc).join(', ')}</div></details>`;
+      };
       tbl(document.getElementById('monCiadpi'), ['Домены', 'Порт', 'PID', 'RSS', 'Стратегия'],
-        cp.length ? cp.map(x => [esc(x.domains || '—'), x.port, x.pid, (x.rss_kb ? (x.rss_kb/1024).toFixed(1)+' МБ' : '—'), stratCell(x.strategy)])
+        cp.length ? cp.map(x => [domCell(x.domains), x.port, x.pid, (x.rss_kb ? (x.rss_kb/1024).toFixed(1)+' МБ' : '—'), stratCell(x.strategy)])
                    : [['<span class="muted">пусто</span>', '', '', '', '']]);
       const rs = (d.reeval_schedule || []).slice().sort((a,b) => (b.confidence||0) - (a.confidence||0));
       document.getElementById('monReevalCount').textContent = rs.length;
