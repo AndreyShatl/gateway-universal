@@ -1,9 +1,9 @@
 [Unit]
-Description=Дозаполнение ipset свежими IP активных DPI-групп каждые 5 минут (T-cdn-refresh)
+Description=Дозаполнение ipset свежими IP активных DPI-групп каждые 2 минуты (T-cdn-refresh, тестовый интервал по просьбе пользователя 2026-08-18 — было 5 мин)
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=5min
+OnUnitActiveSec=2min
 Persistent=false
 
 [Install]
