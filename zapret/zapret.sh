@@ -69,6 +69,16 @@ start() {
     done
     echo "  Allowed QUIC to Meta IPs (Instagram bypass)"
 
+    # === Глобальный запрет QUIC (инвариант шлюза, 2026-09-07) ===
+    # Раньше это правило ставилось ТОЛЬКО install.sh (BLOCK_QUIC=yes) и жило
+    # в rules.v4 — без владельца. Любая пересборка FORWARD его стирала (живой
+    # инцидент: телефоны молча теряли видео YouTube/Insta — QUIC уходил напрямую
+    # в ТСПУ без TCP-фолбэка). Теперь zapret.sh ensure-ит его при каждом старте:
+    # Meta-ACCEPT'ы выше уже прошли, DROP хвостом ловит всё остальное.
+    iptables -C FORWARD -s $LAN -p udp --dport 443 -j DROP 2>/dev/null \
+        || iptables -A FORWARD -s $LAN -p udp --dport 443 -j DROP
+    echo "  QUIC DROP ensured (UDP/443 кроме исключений выше)"
+
     # Материализовать hostlist'ы из inline-доменов JSON
     rm -rf "$GENDIR"; mkdir -p "$GENDIR"
     local sid
