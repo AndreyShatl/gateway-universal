@@ -60,6 +60,9 @@ func main() {
 	case "brain-observe":
 		runBrainObserve()
 		return
+	case "shadow-verify":
+		runShadowVerify()
+		return
 	default:
 		usage()
 	}

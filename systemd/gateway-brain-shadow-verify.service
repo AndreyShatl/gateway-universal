@@ -1,0 +1,10 @@
+[Unit]
+Description=Gateway shadow-verify (STAGE 5) — сверка observe-решений с реальными исходами мозга
+# Ночью после brain-observe --coverage (04:40) и ночной цепочки мозга:
+# R1-домены всё ещё не покрыты ipset? R2-домены реально переехали на LOCAL?
+# Отчёт: /etc/gateway/observe/shadow-report.json (+ /api/shadow-report).
+# Read-only по отношению к маршрутизации.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-detector shadow-verify

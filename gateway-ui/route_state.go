@@ -13,6 +13,22 @@ import (
 )
 
 const routeStateFile = "/etc/gateway/observe/route-state.json"
+const shadowReportFile = "/etc/gateway/observe/shadow-report.json"
+
+func (s *server) handleShadowReport(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(shadowReportFile)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{
+			"generated": nil,
+			"hint":      "отчёт ещё не создан — ждём первый ночной gateway-brain-shadow-verify (05:10)",
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
 
 func (s *server) handleRouteState(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(routeStateFile)

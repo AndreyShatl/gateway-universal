@@ -379,6 +379,12 @@ func runBrainObserve() {
 	if err := writeSnapshot(snap); err != nil {
 		fmt.Fprintf(os.Stderr, "brain-observe: снапшот не записан: %v\n", err)
 	}
+	// STAGE 5: переходы решений (new/resolved) в decisions.jsonl — только
+	// по правилам, реально вычисленным в этом прогоне (см. journalDecisions)
+	events := journalDecisions(decisions, evaluatedRuleSet(decisions, *coverage))
+	if len(events) > 0 {
+		fmt.Printf("переходы решений: %d (журнал: %s)\n", len(events), decisionsLog)
+	}
 
 	fmt.Printf("brain-observe (STAGE 4, ноль мутаций) @ %s\n", snap.Generated.Format("2006-01-02 15:04:05Z07:00"))
 	t := snap.Totals
@@ -391,4 +397,319 @@ func runBrainObserve() {
 		fmt.Printf("[%s] %-35s %s: %s\n", d.Rule, d.Domain, d.Action, d.Reason)
 	}
 	fmt.Printf("снапшот: %s (%d назначений)\n", filepath.Base(observeStateFile), len(snap.Destinations))
+}
+
+// ============================================================================
+// STAGE 5 SHADOW (2026-09-07): журнал решений + ночная сверка с реальностью.
+//
+// Схема владельца, раздел 30: Shadow Mode = «мозг принимает решения параллельно
+// существующей системе и сравнивает результаты». Здесь это материализовано так:
+//   - brain-observe пишет ПЕРЕХОДЫ решений (появилось/пропало) в decisions.jsonl
+//     — не каждый прогон целиком (шум), а только изменения состояния;
+//   - shadow-verify (ночами, после coverage-прогона и ночной цепочки мозга)
+//     сверяет: R1-домены всё ещё не покрыты? (refresh-ips справился?) и
+//     R2-домены реально переехали на LOCAL ночью? — отчёт в shadow-report.json.
+// По-прежнему ноль мутаций маршрутизации: только свои файлы в /etc/gateway/observe.
+// ============================================================================
+
+const (
+	lastDecisionsFile = observeStateDir + "/last-decisions.json"
+	decisionsLog      = observeStateDir + "/decisions.jsonl"
+	shadowReportFile  = observeStateDir + "/shadow-report.json"
+	shadowHistoryDays = 7
+)
+
+// DecisionEvent — строка decisions.jsonl. Один переход: решение появилось
+// (new) или исчезло (resolved: домен починился/переехал/ушёл из группы).
+type DecisionEvent struct {
+	TS     string `json:"ts"`
+	Event  string `json:"event"` // new|resolved
+	Rule   string `json:"rule"`
+	Domain string `json:"domain"`
+	Action string `json:"action"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// journalDecisions — дифф против last-decisions.json ПОДМНОЖЕСТВОМ правил,
+// реально вычисленных в этом прогоне (быстрый прогон считает только R2;
+// R1 живёт в coverage-прогоне). Без этого быстрый прогон каждые 30 минут
+// стирал бы R1-решения как «resolved» и через сутки создавал их заново.
+// Возвращает события для лога.
+func journalDecisions(decisions []ObserveDecision, evaluatedRules map[string]bool) []DecisionEvent {
+	now := time.Now().UTC().Format(time.RFC3339)
+	last := map[string]ObserveDecision{}
+	if raw, err := os.ReadFile(lastDecisionsFile); err == nil {
+		var prev []ObserveDecision
+		if json.Unmarshal(raw, &prev) == nil {
+			for _, d := range prev {
+				last[d.Rule+"|"+d.Domain] = d
+			}
+		}
+	}
+	// новые текущие — только по вычисленным правилам
+	cur := map[string]ObserveDecision{}
+	for _, d := range decisions {
+		if !evaluatedRules[d.Rule] {
+			continue
+		}
+		cur[d.Rule+"|"+d.Domain] = d
+	}
+	var events []DecisionEvent
+	// появившиеся (в текущем есть, в прошлых по этим правилам нет)
+	for k, d := range cur {
+		if _, ok := last[k]; !ok {
+			events = append(events, DecisionEvent{TS: now, Event: "new", Rule: d.Rule, Domain: d.Domain, Action: d.Action, Reason: d.Reason})
+		}
+	}
+	// исчезнувшие: были в last ПО ЭТИМ ЖЕ правилам, в текущих нет
+	for k, d := range last {
+		if !evaluatedRules[d.Rule] {
+			continue // правило в этом прогоне не вычислялось — не трогаем
+		}
+		if _, ok := cur[k]; !ok {
+			events = append(events, DecisionEvent{TS: now, Event: "resolved", Rule: d.Rule, Domain: d.Domain, Action: d.Action, Reason: d.Reason})
+		}
+	}
+	// объединение: нетронутые правила остаются от last, вычисленные — от cur
+	merged := make([]ObserveDecision, 0, len(last)+len(cur))
+	seenCur := map[string]bool{}
+	for _, d := range cur {
+		merged = append(merged, d)
+		seenCur[d.Rule+"|"+d.Domain] = true
+	}
+	for _, d := range last {
+		if !seenCur[d.Rule+"|"+d.Domain] {
+			merged = append(merged, d)
+		}
+	}
+	if raw, err := json.MarshalIndent(merged, "", "  "); err == nil {
+		os.MkdirAll(observeStateDir, 0o755)
+		os.WriteFile(lastDecisionsFile, raw, 0o644)
+	}
+	if len(events) > 0 {
+		f, err := os.OpenFile(decisionsLog, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err == nil {
+			defer f.Close()
+			for _, ev := range events {
+				if b, err := json.Marshal(ev); err == nil {
+					f.Write(append(b, '\n'))
+				}
+			}
+		}
+	}
+	return events
+}
+
+func evaluatedRuleSet(decisions []ObserveDecision, coverage bool) map[string]bool {
+	rules := map[string]bool{}
+	for _, d := range decisions {
+		rules[d.Rule] = true
+	}
+	if coverage {
+		rules["R1_dpi_not_covering"] = true // даже если пусто — покрытие реально проверяли
+	}
+	return rules
+}
+
+// --- shadow-verify: ночная сверка «что бы решил» vs «что реально произошло» ---
+
+type R1Verify struct {
+	Domain     string `json:"domain"`
+	FirstSeen  string `json:"first_seen"`
+	LastNew    string `json:"last_new"`
+	DaysOpen   int    `json:"days_open"`
+	NowCovered *bool  `json:"now_covered"` // свежая перепроверка в момент отчёта
+	Outcome    string `json:"outcome"`     // still_open|healed_pending_resolved
+}
+
+type R2Verify struct {
+	Domain   string `json:"domain"`
+	Decided  string `json:"decided_at"`
+	RouteNow string `json:"route_now"`
+	Outcome  string `json:"outcome"`                // moved_to_local|still_vps|gone
+	History  string `json:"history_last,omitempty"` // последняя реальная проба мозга
+}
+
+type ShadowReport struct {
+	Generated time.Time  `json:"generated"`
+	R1        []R1Verify `json:"r1"`
+	R2        []R2Verify `json:"r2"`
+	Notes     []string   `json:"notes"`
+}
+
+func loadDecisionEvents() []DecisionEvent {
+	var out []DecisionEvent
+	raw, err := os.ReadFile(decisionsLog)
+	if err != nil {
+		return out
+	}
+	for _, ln := range strings.Split(string(raw), "\n") {
+		if ln == "" {
+			continue
+		}
+		var ev DecisionEvent
+		if json.Unmarshal([]byte(ln), &ev) == nil {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func gwdbHistoryLast(domain string, n int) string {
+	out, err := exec.Command("python3", gwdbScript, "history-last", domain, fmt.Sprint(n)).Output()
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return ""
+	}
+	return strings.Join(lines, "; ")
+}
+
+// runShadowVerify — сравнить observe-решения последних N дней с реальностью.
+// Вызов: после ночного brain-observe --coverage (04:40) и ночной цепочки мозга.
+func runShadowVerify() {
+	fs := flag.NewFlagSet("shadow-verify", flag.ExitOnError)
+	fs.Parse(os.Args[2:])
+
+	report := ShadowReport{Generated: time.Now().UTC(), Notes: []string{}}
+	events := loadDecisionEvents()
+	cutoff := time.Now().UTC().AddDate(0, 0, -shadowHistoryDays)
+
+	// R1: открытые (последнее событие new, без resolved после него)
+	type span struct{ firstNew, lastNew time.Time }
+	openR1 := map[string]*span{}
+	resolvedAfter := map[string]bool{}
+	for _, ev := range events {
+		if ev.Rule != "R1_dpi_not_covering" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, ev.TS)
+		if err != nil || ts.Before(cutoff) {
+			continue
+		}
+		switch ev.Event {
+		case "new":
+			if _, ok := openR1[ev.Domain]; !ok {
+				openR1[ev.Domain] = &span{firstNew: ts, lastNew: ts}
+			} else {
+				openR1[ev.Domain].lastNew = ts
+			}
+			resolvedAfter[ev.Domain] = false
+		case "resolved":
+			resolvedAfter[ev.Domain] = true
+		}
+	}
+
+	// свежий быстрый снапшот для текущих маршрутов
+	snap, _ := buildRouteSnapshot(false)
+	routes := map[string]string{}
+	for _, d := range snap.Destinations {
+		routes[d.Domain] = d.CurrentRoute
+	}
+
+	// открытые R1: перепроверить покрытие прямо сейчас (их обычно десятки)
+	sortedR1 := make([]string, 0, len(openR1))
+	for d := range openR1 {
+		if !resolvedAfter[d] {
+			sortedR1 = append(sortedR1, d)
+		}
+	}
+	sort.Strings(sortedR1)
+	for _, d := range sortedR1 {
+		v := R1Verify{Domain: d, FirstSeen: openR1[d].firstNew.Format(time.RFC3339), LastNew: openR1[d].lastNew.Format(time.RFC3339), DaysOpen: int(time.Since(openR1[d].firstNew).Hours() / 24)}
+		cov := false
+		if verdict := allBrainDomainVerdicts()[d]; verdict != nil {
+			cov = dpiActuallyCoversDomain(d, verdict)
+		}
+		v.NowCovered = &cov
+		if cov {
+			v.Outcome = "healed_pending_resolved" // refresh-ips долечил, ждём resolved в ближайшем coverage-прогоне
+		} else {
+			v.Outcome = "still_open"
+		}
+		report.R1 = append(report.R1, v)
+		if !cov && v.DaysOpen >= 1 {
+			report.Notes = append(report.Notes, fmt.Sprintf("R1 %s открыт уже %d дн. — brain-refresh-ips не справляется, кандидат на CDN_CIDR_HINTS (наблюдение, не действие)", d, v.DaysOpen))
+		}
+	}
+
+	// R2: домены с решением за N дней — переехали ли на LOCAL
+	r2seen := map[string]string{}
+	var r2order []string
+	for _, ev := range events {
+		if ev.Rule != "R2_vps_stable_try_local" || ev.Event != "new" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, ev.TS)
+		if err != nil || ts.Before(cutoff) {
+			continue
+		}
+		if _, ok := r2seen[ev.Domain]; !ok {
+			r2order = append(r2order, ev.Domain)
+		}
+		r2seen[ev.Domain] = ev.TS
+	}
+	sort.Strings(r2order)
+	for _, d := range r2order {
+		v := R2Verify{Domain: d, Decided: r2seen[d]}
+		route, ok := routes[d]
+		if !ok {
+			v.RouteNow, v.Outcome = "", "gone" // исчез из всех источников (снята/переименован)
+		} else {
+			v.RouteNow = route
+			switch {
+			case strings.HasPrefix(route, "local_"):
+				v.Outcome = "moved_to_local" // ночной мозг согласился с observe
+			case route == "vps_auto" || route == "vps_static":
+				v.Outcome = "still_vps" // ночная попытка не удалась или ещё не было
+			default:
+				v.Outcome = "route_" + route
+			}
+		}
+		v.History = gwdbHistoryLast(d, 3)
+		report.R2 = append(report.R2, v)
+	}
+
+	os.MkdirAll(observeStateDir, 0o755)
+	if raw, err := json.MarshalIndent(report, "", "  "); err == nil {
+		os.WriteFile(shadowReportFile, raw, 0o644)
+	}
+
+	// человекочитаемый итог
+	fmt.Printf("shadow-verify @ %s (окно %d дн.)\n", report.Generated.Format("2006-01-02 15:04"), shadowHistoryDays)
+	still, healed := 0, 0
+	for _, r := range report.R1 {
+		if r.Outcome == "still_open" {
+			still++
+		} else {
+			healed++
+		}
+	}
+	fmt.Printf("R1 (DPI не покрывает): открытых=%d, из них всё ещё=%d, долечилось refresh-ips=%d\n", len(report.R1), still, healed)
+	for _, r := range report.R1 {
+		mark := "✓ долечен"
+		if r.Outcome == "still_open" {
+			mark = fmt.Sprintf("⚠ открыт %d дн.", r.DaysOpen)
+		}
+		fmt.Printf("  %-38s %s\n", r.Domain, mark)
+	}
+	moved, stillVps := 0, 0
+	for _, r := range report.R2 {
+		switch r.Outcome {
+		case "moved_to_local":
+			moved++
+		case "still_vps":
+			stillVps++
+		}
+	}
+	fmt.Printf("R2 (VPS→LOCAL кандидаты): переехали=%d, остались на VPS=%d\n", moved, stillVps)
+	for _, r := range report.R2 {
+		fmt.Printf("  %-38s %s (%s)\n", r.Domain, r.Outcome, r.RouteNow)
+	}
+	for _, n := range report.Notes {
+		fmt.Printf("  note: %s\n", n)
+	}
+	fmt.Printf("отчёт: %s\n", shadowReportFile)
 }

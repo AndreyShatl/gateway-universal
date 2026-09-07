@@ -426,6 +426,20 @@ def cmd_strategy_find(args):
     print(row[0] if row else "")
 
 
+def cmd_history_last(args):
+    """history-last DOMAIN [N] — последние N записей history по домену (read-only).
+    Для STAGE 5 SHADOW (Этап 5 Shattl Brain): ночная сверка «что бы решил observe»
+    против «что реально произошло» — нужны исходы реальных проверок домена."""
+    domain, n = args[0], (int(args[1]) if len(args) > 1 else 5)
+    conn = db()
+    rows = conn.execute(
+        "SELECT tested_at, engine, result, latency_ms FROM history WHERE domain=? ORDER BY tested_at DESC LIMIT ?",
+        (domain, n),
+    ).fetchall()
+    for r in rows:
+        print("\t".join("" if x is None else str(x) for x in r))
+
+
 def cmd_history_add(args):
     sid, domain, result = args[0], args[1], args[2]
     latency = args[3] if len(args) > 3 and args[3] else None
@@ -599,6 +613,7 @@ COMMANDS = {
     "strategies-explore": cmd_strategies_explore,
     "strategy-find": cmd_strategy_find,
     "history-add": cmd_history_add,
+    "history-last": cmd_history_last,
     "strategy-mark-success": cmd_strategy_mark_success,
     "strategy-mark-fail": cmd_strategy_mark_fail,
 }
