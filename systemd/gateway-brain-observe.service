@@ -1,0 +1,12 @@
+[Unit]
+Description=Gateway brain-observe (STAGE 4 Shattl Brain) — снапшот route-state + решения правил БЕЗ мутаций
+# Этап 5 / STAGE 4 OBSERVE (см. Obsidian «Shattl-Brain» и схему владельца,
+# раздел 30): PolicyEngine-скелет применяет правила видения к единому
+# снапшоту состояния и ТОЛЬКО логирует «я бы решил». Ничего не применяет:
+# ни autoroute, ни ipset, ни очередь мозга. Пишет только собственный
+# снапшот /etc/gateway/observe/route-state.json (его читает gateway-ui).
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-detector brain-observe
+# read-only по построению; даже при падении прод не задет

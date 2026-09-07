@@ -54,6 +54,12 @@ func main() {
 	case "route-explain":
 		runRouteExplain()
 		return
+	case "route-state":
+		runRouteState()
+		return
+	case "brain-observe":
+		runBrainObserve()
+		return
 	default:
 		usage()
 	}
