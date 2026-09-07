@@ -140,6 +140,27 @@ PYEOF
   fi
 done
 
+# T-actualize-render (2026-09-07, живой разрыв из инцидента googlevideo):
+# новые домены youtube/discord/instagram раньше ложились в
+# zapret-services.json и ждали ручного рендера, которого не было — в
+# VPS-списке xray они не появлялись никогда (для mode=vps это единственный
+# путь в туннель). Теперь: изменились сервисы → перерендер тем же паттерном,
+# что ai-ветка ниже (валидация через xray -test встроена в render-config.sh;
+# при падении рендера боевой конфиг не трогается).
+if [ "$services_changed" = "1" ]; then
+  if bash "$REPO_DIR/xray/render-config.sh" \
+      --template "$REPO_DIR/xray/config.template.json" \
+      --out /opt/xray/config.json \
+      --config "$REPO_DIR/config.env" \
+      --xray /opt/xray/xray \
+      --user-domains-dir /etc/gateway/domains \
+      >> "$LOG" 2>&1; then
+    systemctl restart xray.service && log "сервисы: новые домены отрендерены в VPS-список, xray перезапущен"
+  else
+    log "сервисы: render-config.sh упал — домены в json, xray НЕ перезапущен (старый конфиг работает)"
+  fi
+fi
+
 # --- ai-services: добавляем в xray/domains/ai-services.txt + рендер xray ---
 ai_new="$(fetch "category-ai-chat-!cn")"
 if [ -n "$ai_new" ]; then
