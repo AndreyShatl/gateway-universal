@@ -408,7 +408,11 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	// Легаси-панель живёт ТОЛЬКО на /legacy (на "/" — React-SPA, см. маршрут
+	// ниже). Проверка "!=" /" осталась от времён, когда этот хендлер висел
+	// на корне — после переезда на /legacy она отправляла легаси-панель в
+	// 404 (ссылки из ComingSoon-заглушек вели в никуда).
+	if r.URL.Path != "/legacy" {
 		http.NotFound(w, r)
 		return
 	}
