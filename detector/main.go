@@ -63,6 +63,9 @@ func main() {
 	case "daily-digest":
 		runDailyDigest()
 		return
+	case "route-switch":
+		runRouteSwitch()
+		return
 	case "shadow-verify":
 		runShadowVerify()
 		return
