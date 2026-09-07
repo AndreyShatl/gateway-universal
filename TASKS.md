@@ -300,8 +300,14 @@ fast-failover, background discovery, ночная ревалидация, гис
   (самозаживление T-cdn-refresh доказано числом; важен только персистентный хвост),
   R2=6 кандидатов ждут первую ночь (akamai/apple/facebook.design — завтра будет видно,
   кому ночной перебор реально поможет).
-- **STAGE 6 TEST DESTINATIONS — не начато:** apply для 3-5 тестовых доменов с полным
-  VALIDATE→APPLY→CHECK→COMMIT/ROLLBACK (раздел 21 схемы).
+- **STAGE 6 TEST DESTINATIONS — каркас готов 2026-09-07:** `route-switch <domain> --to vps|local
+  [--engine E --strategy "args"] [--commit]` — транзакция VALIDATE→APPLY→CHECK→COMMIT/ROLLBACK
+  (раздел 21 схемы): прежнее состояние из снапшота, apply через brain-apply.sh, check через
+  prober (vps=через socks, local=напрямую с TLS), при провале — автоматический rollback и
+  rollback-check. ДЕФОЛТ dry-run (только валидация+план); реальное переключение — только
+  флагом --commit, по одному домену. Аудит: observe/transactions.jsonl. Пиннед-домены
+  (ai-services) и бессмысленные переключения валидно отклоняются. Первый commit-прогон —
+  после выбора тестовых доменов по утренним digest/shadow-отчётам (явное решение владельца).
 - **STAGE 7-8 — не начато.**
 
 ### T59 · Перенос сигналов детектора в eBPF (по одному, сверяя с pcap) · H · in-progress
