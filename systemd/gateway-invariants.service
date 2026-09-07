@@ -1,0 +1,9 @@
+[Unit]
+Description=Gateway invariants — самовосстановитель сетевых инвариантов (Meta QUIC ACCEPT + глобальный QUIC DROP)
+# Класс инцидентов 2026-09-07: критичные правила были "сиротами" и тихо
+# терялись. Этот юнит каждые 10 мин идемпотентно проверяет и возвращает
+# пропавшее (молчит, когда всё на месте). Read-only ко всему остальному.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/invariants-ensure.sh

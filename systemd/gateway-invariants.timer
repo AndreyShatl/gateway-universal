@@ -1,0 +1,10 @@
+[Unit]
+Description=Каждые 10 минут: проверка/восстановление сетевых инвариантов
+
+[Timer]
+OnCalendar=*:0/10
+RandomizedDelaySec=1m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
