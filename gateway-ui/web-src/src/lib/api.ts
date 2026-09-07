@@ -78,6 +78,16 @@ export interface ZService {
 
 export const fetchStatus = () => api<StatusResponse>('/api/status')
 export const fetchEngineStatus = () => api<EngineStatus>('/api/engine/status')
+
+export interface EngineSnapshot {
+  id: string
+  at: string
+  component: string
+  reason: string
+  data: Record<string, string>
+}
+
+export const fetchEngineSnapshots = () => api<EngineSnapshot[]>('/api/engine/snapshots')
 export const fetchDomains = () => api<DomainsResponse>('/api/domains')
 export const addDomain = (domain: string) =>
   api<{ ok?: boolean; error?: string }>('/api/domains', {
@@ -217,6 +227,35 @@ export interface MonitorResponse {
 }
 
 export const fetchMonitor = () => api<MonitorResponse>('/api/monitor')
+
+export interface VPSDomainEntry {
+  domain: string
+  route: 'vps' | 'dpi'
+  engine?: string
+  group_id?: string
+  last_active?: string
+}
+
+export interface VPSDomainsResponse {
+  discord: VPSDomainEntry[]
+  instagram: VPSDomainEntry[]
+  youtube: VPSDomainEntry[]
+  other: VPSDomainEntry[]
+}
+
+export const fetchVPSDomains = () => api<VPSDomainsResponse>('/api/vps-domains')
+
+export interface NightlyProgress {
+  total: number
+  done: number
+  remaining: number
+  started_at: string
+  running: boolean
+  feed: string[]
+}
+
+export const fetchNightlyProgress = () => api<NightlyProgress>('/api/nightly-progress')
+export const triggerNightly = () => api<{ ok?: boolean; error?: string }>('/api/nightly-trigger', { method: 'POST' })
 
 export const LOGGABLE_SERVICES = [
   'gateway-brain',
@@ -379,6 +418,7 @@ export interface InternetChecks {
 export const fetchInternetChecks = () => api<InternetChecks>('/api/internet-checks')
 
 export const fetchExitIP = () => api<{ provider: string; vps: string }>('/api/exit-ip')
+export const fetchHostname = () => api<{ hostname: string }>('/api/hostname')
 
 export const fetchScanStatus = () => api<ScanStatus>('/api/scan')
 export const startScan = (domains: string[], scanlevel: 'quick' | 'standard' | 'force' = 'standard', owner = 'manual') =>

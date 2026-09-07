@@ -1,0 +1,17 @@
+[Unit]
+Description=Создать пустые ipset'ы из сохранённых iptables-правил (до netfilter-persistent)
+Before=netfilter-persistent.service
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/ensure-ipsets.sh
+
+[Install]
+WantedBy=sysinit.target
+# Wants=, не Requires=/RequiredBy= — этот unit best-effort (см. комментарий
+# в ensure-ipsets.sh), не должен блокировать netfilter-persistent целиком
+# при своём сбое (живой баг 2026-08-16: RequiredBy= + провал скрипта =
+# netfilter-persistent вообще не стартовал, хуже исходной проблемы).
+WantedBy=netfilter-persistent.service

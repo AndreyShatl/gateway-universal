@@ -24,6 +24,19 @@ STATE=/etc/gateway/brain-services.json
 ZAPRET=${ZAPRET:-/opt/zapret}; NFQWS=$ZAPRET/nfq/nfqws; FAKEDIR=$ZAPRET/files/fake
 LAN=192.168.0.0/16; MARK=0x40000000; QBASE=210; QPOOL=500
 
+# CDN_CIDR_HINTS (2026-08-13) — googlevideo.com сам по себе резолвится в свои
+# несколько IP, но реальное видео льётся с ДИНАМИЧЕСКИХ поддоменов вида
+# rrN---sn-xxxxx.googlevideo.com — Google назначает их индивидуально под каждую
+# видеосессию, IP разные и непредсказуемые, никаким getent их заранее не
+# поймать. Найдено живым разбором: "youtube.com грузится, видео не играет" —
+# страница/миниатюры используют youtube.com/ytimg.com (фиксированные IP,
+# обход уже работал), а сам поток шёл мимо ipset совсем. Фикс — вместо
+# точечных IP добавлять в ipset группы известные CIDR-блоки Google CDN
+# (публичные, стабильные годами), тогда любой rrN---sn-xxxxx.googlevideo.com
+# попадёт под перехват независимо от того, в какой конкретно IP его резолвит
+# Google в этот момент.
+CDN_CIDR_HINTS_googlevideo_com="172.217.0.0/16 172.253.0.0/16 173.194.0.0/16 216.58.0.0/16 142.250.0.0/15 74.125.0.0/16 108.177.8.0/21 64.233.160.0/19 209.85.128.0/17 216.239.32.0/19"
+
 san() { echo "$1" | tr -c 'a-z0-9' '_' | sed 's/_*$//'; }
 
 # group_id — стабильный id по (proto, strategy): md5 первые 10 hex. Пустая strategy
@@ -159,7 +172,7 @@ state_remove_group() { python3 -c "import json,os;f='$STATE';d=[g for g in (json
 # риска оставить чужой устаревший IP в общем ipset группы).
 rebuild_group_ipset() { # <ipset> <domain...>
   local ipset=$1; shift
-  ipset create $ipset hash:ip family inet -exist
+  ipset create $ipset hash:net family inet -exist
   ipset flush $ipset
   [ $# -eq 0 ] && return 0
   # T-restore-perf (2026-08-09): раньше getent по одному домену за раз —
@@ -173,6 +186,16 @@ rebuild_group_ipset() { # <ipset> <domain...>
   printf '%s\n' "$@" | xargs -P 16 -I{} getent ahostsv4 {} 2>/dev/null \
     | awk '{print $1}' | sort -u \
     | while read -r ip; do ipset add $ipset $ip -exist; done
+  # CDN_CIDR_HINTS — см. определение выше: для доменов с известными широкими
+  # CDN-диапазонами добавляем их в ТОТ ЖЕ ipset группы поверх точечных
+  # резолвленных IP (ipset теперь hash:net — держит и /32, и настоящие сети).
+  local d hintvar hint
+  for d in "$@"; do
+    hintvar="CDN_CIDR_HINTS_$(san "$d")"
+    hint="${!hintvar:-}"
+    [ -n "$hint" ] || continue
+    for cidr in $hint; do ipset add $ipset "$cidr" -exist; done
+  done
 }
 
 # ensure_group — найти группу с этой proto+strategy, иначе создать (очередь+правила+
@@ -187,7 +210,7 @@ ensure_group() { # <proto> <strategy>
     return 0
   fi
   local ipset=brain_$gid
-  ipset create $ipset hash:ip family inet -exist   # ipset ДОЛЖЕН существовать до svc_rules -A (--match-set)
+  ipset create $ipset hash:net family inet -exist   # ipset ДОЛЖЕН существовать до svc_rules -A (--match-set)
   if [ -n "$strat" ]; then
     q=$(alloc_queue) || { echo "❌ группа $gid: не удалось выделить очередь" >&2; return 1; }
   else
@@ -394,7 +417,7 @@ ensure_cgroup() { # <proto> <strategy> -> "group_id<TAB>port"
     return 0
   fi
   local ipset=brainc_$gid
-  ipset create $ipset hash:ip family inet -exist
+  ipset create $ipset hash:net family inet -exist
   port=$(alloc_port) || { echo "❌ ciadpi-группа $gid: не удалось выделить порт" >&2; return 1; }
   csvc_rules -A "$proto" $ipset "$port" || return 1
   local chain; chain=$(build_auto_chain "$strat")
@@ -605,7 +628,7 @@ ensure_group2() { # <proto> <strategy> -> "group_id<TAB>queue"
     return 0
   fi
   local ipset=brainz2_$gid
-  ipset create $ipset hash:ip family inet -exist
+  ipset create $ipset hash:net family inet -exist
   q=$(alloc_queue2) || { echo "❌ zapret2-группа $gid: не удалось выделить очередь" >&2; return 1; }
   svc_rules2 -A "$proto" $ipset "$q"
   start_daemon2 "$gid" "$proto" "$q" $strat

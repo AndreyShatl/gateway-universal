@@ -1,6 +1,14 @@
 [Unit]
 Description=Еженедельное автообновление движка zapret (bol-van/zapret) + восстановление brain-групп
 After=network-online.target zapret.service
+# T-timer-chaining (2026-08-16): цепочка вместо независимых таймеров с
+# разнесённым временем "на глаз" - следующий шаг стартует по ФАКТУ
+# завершения этого, а не по расчётному времени (не важно, уложился шаг в
+# отведённое окно или нет, и не важно, если предыдущий закончился раньше).
+# OnFailure тоже ведёт дальше по цепочке - сломавшийся апдейт одного
+# движка не должен блокировать апдейт остальных.
+OnSuccess=gateway-ciadpi-autoupdate.service
+OnFailure=gateway-ciadpi-autoupdate.service
 
 [Service]
 Type=oneshot

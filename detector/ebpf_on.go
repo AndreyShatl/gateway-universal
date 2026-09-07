@@ -38,6 +38,7 @@ func runWatchEBPF() {
 		log.Fatal("не удалось определить WAN-интерфейс, задайте --iface")
 	}
 	gwdbScript = filepath.Join(filepath.Dir(*configEnv), "scripts", "gwdb.py")
+	adguardPassword = configVar(*configEnv, "ADGUARD_PASSWORD")
 	log.Printf("detector(ebpf): iface=%s vps=%s apply=%v", *iface, *vps, *apply)
 
 	sensor, err := ebpfsensor.Load(*iface)

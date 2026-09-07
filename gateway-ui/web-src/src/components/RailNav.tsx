@@ -1,4 +1,4 @@
-import { LayoutGrid, Globe, ShieldCheck, Activity, ScrollText, Settings, Boxes, TerminalSquare, Wifi, DownloadCloud } from 'lucide-react'
+import { LayoutGrid, Globe, ShieldCheck, Activity, ScrollText, Settings, Boxes, TerminalSquare, Wifi, DownloadCloud, Stethoscope } from 'lucide-react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 
@@ -12,6 +12,7 @@ const items = [
   { to: '/whitelist', icon: ShieldCheck, label: 'Whitelist' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/logs', icon: ScrollText, label: 'Logs' },
+  { to: '/diagnostics', icon: Stethoscope, label: 'Diagnostics' },
 ]
 
 function RailLink({ to, end, label, icon: Icon }: { to: string; end?: boolean; label: string; icon: typeof LayoutGrid }) {

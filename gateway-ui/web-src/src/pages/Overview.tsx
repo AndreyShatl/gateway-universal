@@ -5,6 +5,7 @@ import { HealthPanel } from '../components/HealthPanel'
 import { InternetPanel } from '../components/InternetPanel'
 import { TrafficEngineCard } from '../components/TrafficEngineCard'
 import { InfoTip } from '../components/InfoTip'
+import { BlurReveal } from '../components/BlurReveal'
 import { usePoll } from '../hooks/usePoll'
 import { fetchConnection } from '../lib/api'
 
@@ -16,7 +17,7 @@ function SectionHead({ title }: { title: string }) {
   )
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex justify-between border-b border-border py-2.5 text-[12.5px] last:border-b-0">
       <span className="text-text-muted">{label}</span>
@@ -53,7 +54,7 @@ export function Overview() {
             hint="Параметры VLESS Reality gRPC-туннеля до вашего VPS — тот канал, через который идёт трафик в режиме vps (Instagram/Discord и т.п.) и весь трафик при включённом VPS-режиме."
           >
             <Field label="Настроено" value={conn?.configured ? 'да' : 'нет'} />
-            <Field label="Адрес" value={conn?.addr || '—'} />
+            <Field label="Адрес" value={<BlurReveal value={conn?.addr || '—'} />} />
             <Field label="Порт gRPC" value={conn?.port_grpc || '—'} />
             <Field label="SNI" value={conn?.sni || '—'} />
           </Panel>

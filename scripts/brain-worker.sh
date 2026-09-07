@@ -105,16 +105,17 @@ for g in groups: print(g['strategy'])
   return 1
 }
 
-# try_existing_z2groups — то же самое для zapret2-групп (T-zapret2). Только tcp
-# (пока, как и ciadpi). Тест — --test-zapret2-args (netns+NFQUEUE, своя очередь).
+# try_existing_z2groups — то же самое для zapret2-групп (T-zapret2/T-zapret2-udp).
+# Оба протокола — свой набор групп на каждый (совпадение $proto с группой
+# обязательно, домен tcp не должен присоединяться к udp-группе и наоборот).
+# Тест — --test-zapret2-args (netns+NFQUEUE, своя очередь на каждый proto).
 try_existing_z2groups() {
   local domain=$1 proto=$2 exclude=${3:-}
-  [ "$proto" = "tcp" ] || return 1
   local strategies
   strategies=$(bash "$APPLY" list-zapret2 2>/dev/null | python3 -c "
 import json,sys
 data=json.load(sys.stdin)
-groups=[g for g in data if g.get('proto')=='tcp' and g.get('strategy') and g.get('group_id')!='$exclude']
+groups=[g for g in data if g.get('proto')=='$proto' and g.get('strategy') and g.get('group_id')!='$exclude']
 groups.sort(key=lambda g: -len(g.get('domains',[])))
 for g in groups: print(g['strategy'])
 " 2>/dev/null)
@@ -122,11 +123,11 @@ for g in groups: print(g['strategy'])
   local strat res
   while IFS= read -r strat; do
     [ -n "$strat" ] || continue
-    res=$(bash "$SOLVE" --test-zapret2-args "$domain" $strat 2>/dev/null | tail -1)
+    res=$(bash "$SOLVE" --test-zapret2-args "$domain" "$proto" $strat 2>/dev/null | tail -1)
     if [[ "$res" == OK* ]]; then
-      bash "$APPLY" zapret2 "$domain" tcp $strat >/dev/null 2>&1
-      log "✅ $domain → существующая zapret2-группа (без полного перебора)"
-      local sid; sid=$(python3 "$GWDB" strategy-find tcp zapret2 "$strat" 2>/dev/null)
+      bash "$APPLY" zapret2 "$domain" "$proto" $strat >/dev/null 2>&1
+      log "✅ $domain → существующая zapret2-группа/$proto (без полного перебора)"
+      local sid; sid=$(python3 "$GWDB" strategy-find "$proto" zapret2 "$strat" 2>/dev/null)
       [ -n "$sid" ] && python3 "$GWDB" service-touch "$domain" "$sid" >/dev/null 2>&1
       return 0
     fi
@@ -154,6 +155,13 @@ process_domain() {
         return 0
       fi
       log "⚠ $domain — группа $cur_gid больше не работает для этого домена, ищу замену"
+      # T-vps-safety-net (2026-08-15): пока идёт поиск замены (полный перебор
+      # может занимать несколько минут), домен временно уходит на VPS —
+      # иначе он бы висел на уже подтверждённо СЛОМАННОЙ стратегии всё это
+      # время, реально не работая ни через DPI, ни через VPS. Найдётся
+      # замена — try_existing_groups/полный перебор ниже сами применят её и
+      # снимут этот временный откат.
+      bash "$APPLY" remove "$domain" >/dev/null 2>&1
     fi
   else
     ccur=$(bash "$APPLY" cgroup-of "$domain" 2>/dev/null)
@@ -168,6 +176,8 @@ process_domain() {
           return 0
         fi
         log "⚠ $domain — ciadpi-группа $ccur_gid больше не работает для этого домена, ищу замену"
+        # T-vps-safety-net (2026-08-15) — см. комментарий выше по zapret-ветке.
+        bash "$APPLY" remove "$domain" >/dev/null 2>&1
       fi
     else
       zcur=$(bash "$APPLY" z2group-of "$domain" 2>/dev/null)
@@ -182,6 +192,8 @@ process_domain() {
             return 0
           fi
           log "⚠ $domain — zapret2-группа $zcur_gid больше не работает для этого домена, ищу замену"
+          # T-vps-safety-net (2026-08-15) — см. комментарий выше по zapret-ветке.
+          bash "$APPLY" remove "$domain" >/dev/null 2>&1
         fi
       fi
     fi
@@ -198,6 +210,17 @@ process_domain() {
   if try_existing_z2groups "$domain" "$proto" "${zcur_gid:-}"; then
     return 0
   fi
+
+  # T-vps-safety-net-new (2026-08-16): домен совсем новый (шаги 1-2 выше не
+  # нашли для него вообще НИКАКОЙ группы) — полный перебор ниже (solve.sh сам
+  # по себе НЕ трогает боевой трафик, это песочница в netns) может занимать
+  # несколько минут, а brain-apply.sh vps раньше вызывался только ПОСЛЕ его
+  # завершения (ветка VPS* ниже). Всё это время домен был голый — ни DPI-
+  # обхода, ни VPS (живой случай: stable.dl2.discordapp.net на Pi завис
+  # именно так). Симметрично уже сделанному фиксу для «старая стратегия
+  # сломалась» — сразу ставим VPS-заглушку, полный перебор её при успехе
+  # сам заменит на найденную стратегию (case ниже).
+  bash "$APPLY" vps "$domain" >/dev/null 2>&1
 
   # 3. Полный перебор (как раньше) — solve.sh сам пробует zapret, потом ciadpi
   #    (только tcp), и только если ничего не подошло — отдаёт VPS.
@@ -231,11 +254,12 @@ process_domain() {
       fi
       ;;
     ZAPRET2*)
-      local strat4
+      local proto4 strat4
+      proto4=$(echo "$verdict" | cut -f2)
       strat4=$(echo "$verdict" | cut -f4-)
-      if bash "$APPLY" zapret2 "$domain" tcp $strat4 >/dev/null 2>&1; then
-        log "✅ $domain → zapret2/tcp (новая стратегия)"
-        local sid4; sid4=$(python3 "$GWDB" strategy-find tcp zapret2 "$strat4" 2>/dev/null)
+      if bash "$APPLY" zapret2 "$domain" "$proto4" $strat4 >/dev/null 2>&1; then
+        log "✅ $domain → zapret2/$proto4 (новая стратегия)"
+        local sid4; sid4=$(python3 "$GWDB" strategy-find "$proto4" zapret2 "$strat4" 2>/dev/null)
         [ -n "$sid4" ] && python3 "$GWDB" service-touch "$domain" "$sid4" >/dev/null 2>&1
       else
         log "⚠ $domain → zapret2 ошибка применения"

@@ -87,6 +87,7 @@ func runWatch() {
 		log.Fatal("не удалось определить WAN-интерфейс, задайте --iface")
 	}
 	gwdbScript = filepath.Join(filepath.Dir(*configEnv), "scripts", "gwdb.py")
+	adguardPassword = configVar(*configEnv, "ADGUARD_PASSWORD")
 	log.Printf("detector: iface=%s vps=%s apply=%v", *iface, *vps, *apply)
 	// watcher -> prober (подтверждение) -> [тень: лог | apply: применить]
 	handler := buildCandidateHandler(apply, socks)
@@ -116,6 +117,15 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 		if c.SNI != "" && isWhitelisted(c.SNI) && !inCuratedRouting(c.SNI) {
 			return
 		}
+		// adguard-filter (T-junk-filter, 2026-08-16): реклама/трекеры/фишинг-
+		// типосквоттинг из уже загруженных блок-листов AdGuardHome — те же
+		// правила, что и так режут DNS-запрос до этого момента в норме, но
+		// пассивный детектор слушает сырой трафик (pcap/eBPF) и иногда ловит
+		// то, что резолвилось раньше/через другой DNS. См. adguard_filter.go.
+		if c.SNI != "" && !inCuratedRouting(c.SNI) && isAdGuardBlocked(c.SNI) {
+			log.Printf("🚫 мусор (AdGuardHome-блоклист): %s — не анализирую", c.SNI)
+			return
+		}
 		// уже обрабатывается — не пере-обрабатываем (иначе петля: свой трафик
 		// стенда zapret не десинхронизирует, прямая проба всегда «блок»). НО держим
 		// ipset свежим наблюдаемым IP клиента: Cloudflare/DoH отдают клиенту другие
@@ -124,6 +134,20 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 			ip := c.DstIP
 			if isBrainEntity(c.SNI) {
 				addToSet("brain_"+sanitizeDomain(c.SNI), ip) // сущность: и NFQUEUE, и RETURN по этому ipset
+				// T-live-retrigger (2026-08-16): живой кейс — updates.discord.com
+				// уже имел назначенную ciadpi-стратегию, «подтверждённую» нашей
+				// ночной curl-проверкой, но реально не пробивавшую .NET-клиента
+				// апдейтера Discord (другой TLS-отпечаток). Ночная переоценка
+				// проверяет ТЕМ ЖЕ методом, что и назначила стратегию — слепое
+				// пятно, которое сама себя не видит. Пассивный детектор слушает
+				// РЕАЛЬНЫЙ трафик и как раз ловил эти обрывы живьём — но раньше
+				// вот этот `return` их тихо съедал (единственная причина —
+				// избежать петли от собственного трафика solve.sh, не задумано
+				// как "игнорировать провалы у уже решённых доменов"). Теперь —
+				// переставить на переоценку, с cooldown против дребезга (та же
+				// сигнатура может прийти многократно за секунды при потоке
+				// реальных запросов клиента).
+				maybeRetriggerBrainEntity(c.SNI, c.Signal)
 				return
 			}
 			if inAutoroute(c.SNI) {

@@ -2,6 +2,13 @@
 Description=Gateway auto-route nightly recheck (снятие разблокированных из списка)
 After=network-online.target xray.service
 Wants=network-online.target
+# T-timer-chaining (2026-08-16): ежедневная цепочка проверок - следующий
+# шаг стартует по факту завершения этого, не по расчётному времени (см.
+# комментарий в gateway-zapret-autoupdate.service, та же идея для weekly-
+# цепочки движков). OnFailure тоже ведёт дальше - сорвавшийся recheck не
+# должен блокировать ночную переоценку стратегий.
+OnSuccess=gateway-brain-nightly.service
+OnFailure=gateway-brain-nightly.service
 
 [Service]
 Type=oneshot

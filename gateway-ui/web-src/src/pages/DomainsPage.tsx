@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, Wand2 } from 'lucide-react'
+import { Wand2 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { PresetsPanel } from '../components/PresetsPanel'
+import { VPSDomainsPanel } from '../components/VPSDomainsPanel'
 import { InfoTip } from '../components/InfoTip'
 import { usePoll } from '../hooks/usePoll'
-import { fetchDomains, addDomain, removeDomain, fetchServices, saveServices, startScan, fetchScanStatus, type ZService } from '../lib/api'
+import { fetchDomains, addDomain, fetchServices, saveServices, startScan, fetchScanStatus, fetchMonitor, type ZService } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
   return (
@@ -94,31 +94,48 @@ function ServiceRow({
   onModeChange,
   onAuto,
   autoBusy,
+  bypassedDomains,
 }: {
   svc: ZService
   onModeChange: (id: string, mode: string) => void
   onAuto: (svc: ZService) => void
   autoBusy: boolean
+  bypassedDomains: Set<string>
 }) {
+  // п.15 ТЗ: badge сервиса — это mode из zapret-services.json, а не то, что
+  // реально происходит по доменам. Домен из vps-сервиса может уже успешно
+  // обходиться через ciadpi/zapret2 индивидуально (brain сам так решил по
+  // per-domain стратегиям) — тогда badge "vps" вводит в заблуждение. Считаем
+  // фактическое пересечение с активными brain-группами и показываем как
+  // подсказку, не трогая сам механизм хранения одного mode на сервис целиком.
+  const bypassedCount = svc.mode === 'vps' ? svc.domains.filter((d) => bypassedDomains.has(d)).length : 0
   return (
-    <div className="flex items-center justify-between border-b border-border py-3 text-[12.5px] last:border-b-0">
-      <div>
-        <div className="flex items-center gap-1.5 font-medium">
-          {svc.name}
-          {serviceHints[svc.id] && <InfoTip text={serviceHints[svc.id]} />}
-          {svc.auto_at && (
-            <span
-              className="flex items-center gap-1 rounded-md bg-[--accent-dim] px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-accent"
-              title={`Режим подобран кнопкой auto ${new Date(svc.auto_at).toLocaleString()}`}
-            >
-              <Wand2 size={9} strokeWidth={2} />
-              auto {fmtAgo(svc.auto_at)}
-            </span>
-          )}
+    <div className="border-b border-border py-3 text-[12.5px] last:border-b-0">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-1.5 font-medium">
+            {svc.name}
+            {serviceHints[svc.id] && <InfoTip text={serviceHints[svc.id]} />}
+            {svc.auto_at && (
+              <span
+                className="flex items-center gap-1 rounded-md bg-[--accent-dim] px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-accent"
+                title={`Режим подобран кнопкой auto ${new Date(svc.auto_at).toLocaleString()}`}
+              >
+                <Wand2 size={9} strokeWidth={2} />
+                auto {fmtAgo(svc.auto_at)}
+              </span>
+            )}
+          </div>
+          <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
         </div>
-        <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
+        <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
       </div>
-      <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
+      {bypassedCount > 0 && (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-text-muted">
+          <InfoTip text="Brain индивидуально подобрал рабочую zapret/zapret2/ciadpi-стратегию для части доменов этого сервиса, хотя у самого сервиса режим 'vps'. Реальный трафик по ним уже идёт в обход VPS — можно понизить режим сервиса на zapret, если это устраивает по остальным доменам." />
+          {bypassedCount}/{svc.domains.length} доменов уже реально обходится (не через VPS)
+        </div>
+      )}
     </div>
   )
 }
@@ -126,6 +143,8 @@ function ServiceRow({
 export function DomainsPage() {
   const { data: domainsData } = usePoll(fetchDomains, 5000)
   const { data: servicesData, error: servicesError } = usePoll(fetchServices, 5000)
+  const { data: monitorData } = usePoll(fetchMonitor, 10000)
+  const bypassedDomains = new Set((monitorData?.brain_groups ?? []).flatMap((g) => g.domains))
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -151,14 +170,6 @@ export function DomainsPage() {
       setMsg('✗ ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setBusy(false)
-    }
-  }
-
-  async function onRemove(domain: string) {
-    try {
-      await removeDomain(domain)
-    } catch {
-      /* список обновится на следующем polling-тике вне зависимости от исхода */
     }
   }
 
@@ -274,28 +285,7 @@ export function DomainsPage() {
               Добавить
             </button>
           </div>
-          {msg && <div className="mb-3 text-[11px] text-text-muted">{msg}</div>}
-          <div className="flex flex-wrap gap-1.5">
-            <AnimatePresence initial={false}>
-              {(domainsData?.domains ?? []).map((d) => (
-                <motion.span
-                  key={d}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-surface-raised px-2.5 py-1 font-mono text-[11.5px]"
-                >
-                  {d}
-                  <button onClick={() => onRemove(d)} className="text-text-muted hover:text-danger">
-                    <X size={12} strokeWidth={2} />
-                  </button>
-                </motion.span>
-              ))}
-            </AnimatePresence>
-            {domainsData && domainsData.domains.length === 0 && (
-              <span className="text-[12.5px] text-text-muted">нет добавленных вручную доменов</span>
-            )}
-          </div>
+          {msg && <div className="text-[11px] text-text-muted">{msg}</div>}
         </div>
       </div>
 
@@ -318,10 +308,19 @@ export function DomainsPage() {
         <div className="rounded-[--card-radius] border border-border bg-surface p-(--card-pad)">
           {services.length === 0 && <div className="text-[12.5px] text-text-muted">загрузка…</div>}
           {services.map((svc) => (
-            <ServiceRow key={svc.id} svc={svc} onModeChange={onModeChange} onAuto={onAuto} autoBusy={autoServiceId === svc.id} />
+            <ServiceRow
+              key={svc.id}
+              svc={svc}
+              onModeChange={onModeChange}
+              onAuto={onAuto}
+              autoBusy={autoServiceId === svc.id}
+              bypassedDomains={bypassedDomains}
+            />
           ))}
         </div>
       </div>
+
+      <VPSDomainsPanel />
 
       <PresetsPanel />
     </div>

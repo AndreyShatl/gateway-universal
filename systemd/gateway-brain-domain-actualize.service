@@ -1,6 +1,9 @@
 [Unit]
 Description=Gateway brain — актуализация списков доменов discord/instagram/youtube/ai-services из geosite (MetaCubeX/meta-rules-dat)
 After=network-online.target
+# T-timer-chaining (2026-08-16): см. комментарий в gateway-recheck.service
+OnSuccess=gateway-brain-static-reeval.service
+OnFailure=gateway-brain-static-reeval.service
 
 [Service]
 Type=oneshot
