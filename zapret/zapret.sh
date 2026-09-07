@@ -62,7 +62,7 @@ start() {
 
     # === Instagram QUIC bypass: allow UDP/443 to Meta IPs before global DROP ===
     # Без этого QUIC к Instagram блокируется и падает на TCP, который режет ТСПУ
-    META_IPS="31.13.24.0/21 31.13.64.0/18 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 179.60.192.0/22 185.60.216.0/22"
+    META_IPS="31.13.24.0/21 31.13.64.0/18 69.171.224.0/19 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 173.252.64.0/18 179.60.192.0/22 185.60.216.0/22 204.15.20.0/22"
     for cidr in $META_IPS; do
         iptables -t mangle -I PREROUTING 1 -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT
         iptables -I FORWARD 1 -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT
@@ -99,7 +99,7 @@ stop() {
     iptables -t mangle -F POSTROUTING 2>/dev/null
 
     # Удалить Meta QUIC ACCEPT правила
-    META_IPS="31.13.24.0/21 31.13.64.0/18 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 179.60.192.0/22 185.60.216.0/22"
+    META_IPS="31.13.24.0/21 31.13.64.0/18 69.171.224.0/19 102.132.96.0/20 129.134.0.0/17 157.240.0.0/16 173.252.64.0/18 179.60.192.0/22 185.60.216.0/22 204.15.20.0/22"
     for cidr in $META_IPS; do
         iptables -t mangle -D PREROUTING -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT 2>/dev/null
         iptables -D FORWARD -p udp --dport 443 -s $LAN -d $cidr -j ACCEPT 2>/dev/null
