@@ -117,7 +117,7 @@ sudo bash install.sh
 | ssh-tunnel.service (опц.) | `/etc/systemd/system/ssh-tunnel.service` |
 | dnscrypt-proxy (шифрованный DNS) | `/etc/dnscrypt-proxy/`, редирект всего :53 (`dns/`) |
 | "мозг" — авто-подбор zapret-стратегии на домен | `/opt/gateway-brain/` (solve/apply/worker/nightly) |
-| gateway-detector (авто-обнаружение блокировок) | `/opt/gateway-detector` (pcap по умолчанию; eBPF — опционально, см. ниже) |
+| gateway-detector (авто-обнаружение блокировок) | `/opt/gateway-detector` (eBPF — боевой режим на amd64 с 2026-07-23, `watch-ebpf --apply`; pcap — fallback на arm64, где eBPF-сенсор не собран) |
 | gateway-ui (веб-интерфейс) | `/opt/gateway-ui/gateway-ui`, порт 8088 |
 | AdGuard Home (блокировка рекламы, DNS-уровень) | `/opt/AdGuardHome/`, порт 3000 |
 | Game Mode (низкая задержка для игр, выключен по умолчанию) | `/opt/gateway/game-mode.sh` |
