@@ -91,3 +91,36 @@ refresh_state_file "$CSTATE" "$IPSET_PREFIX_CIADPI"
 refresh_state_file "$Z2STATE" "$IPSET_PREFIX_ZAPRET2"
 
 log "готово: групп=$total_groups доменов=$total_domains новых_IP=$total_new"
+
+# T-autoroute-refresh (2026-09-07, живой инцидент "видео YouTube/Insta на
+# телефонах"): тот же класс ротации CDN — но в ДРУГОЙ подсистеме. Домены,
+# переведённые мозгом на VPS-автообход (autoroute.json), получают ipset
+# gw_autoroute один раз при добавлении; их тысячи ротирующихся edge
+# (googlevideo!) никогда не резолвились нам — клиент уходит на незнакомый IP
+# мимо ipset. refresh_state_file выше лечит это для DPI-групп; здесь — тот
+# же паттерн для VPS-доменов: подборавляем свежие резолвы в gw_autoroute.
+# Защита (инцидент 2026-08-09 DoH, см. gateway-ui/autoroute.go): AdGuard
+# резолвит DoH-домены в 127.0.0.1 — приватные/loopback IP НЕ добавляем.
+ar_domains=0
+ar_new=0
+while IFS= read -r domain; do
+  [ -n "$domain" ] || continue
+  ar_domains=$((ar_domains+1))
+  while read -r ip; do
+    [ -n "$ip" ] || continue
+    ipset add gw_autoroute "$ip" -exist 2>/dev/null && ar_new=$((ar_new+1))
+  done < <(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u | awk '
+    function bad(ip,  a) { split(ip,a,".");
+      return (a[1]==0 || a[1]==10 || a[1]==127 || (a[1]==172 && a[2]>=16 && a[2]<=31) ||
+              (a[1]==192 && a[2]==168) || (a[1]==169 && a[2]==254)) }
+    !bad($0)')
+done < <(python3 -c "
+import json
+d = json.load(open('/etc/gateway/autoroute.json'))
+for e in d.get('entries', []):
+    a = e.get('addr', '')
+    # только доменные записи: не IP, не CIDR, не geosite:
+    if a and ':' not in a and '/' not in a and not a.replace('.', '').isdigit():
+        print(a)
+" | sort -u)
+log "autoroute-домены: $ar_domains, подобрано IP (вкл. существующие): $ar_new"

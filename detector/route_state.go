@@ -275,6 +275,37 @@ func buildRouteSnapshot(checkCoverage bool) (*RouteSnapshot, []ObserveDecision) 
 		}
 	}
 
+	// R6 (2026-09-07, инцидент googlevideo): VPS-домен из autoroute — а его
+	// текущие резолвы не в ipset gw_autoroute? refresh-ips теперь подборавляет
+	// их каждые 5 мин (T-autoroute-refresh); персистентный R6 = резолв даёт IP,
+	// которых refresh не догоняет, или refresh не работает. Кап 150/прогон.
+	arChecked := 0
+	for d, s := range union {
+		if s.CurrentRoute != "vps_auto" || s.Pinned || s.VPSAuto == nil || !checkCoverage || arChecked >= 150 {
+			continue
+		}
+		arChecked++
+		ips, err := net.LookupHost(d)
+		if err != nil || len(ips) == 0 {
+			continue
+		}
+		missing := 0
+		for _, ip := range ips {
+			if net.ParseIP(ip) == nil || strings.Contains(ip, ":") {
+				continue
+			}
+			if err := exec.Command("ipset", "test", "gw_autoroute", ip).Run(); err != nil {
+				missing++
+			}
+		}
+		if missing > 0 {
+			decisions = append(decisions, ObserveDecision{
+				Rule: "R6_autoroute_not_covering", Domain: d, Action: "would_refresh",
+				Reason: fmt.Sprintf("%d из %d текущих IP не в gw_autoroute — refresh-ips должен подобрать за 1-2 цикла; персистентность = сигнал что не догоняет", missing, len(ips)),
+			})
+		}
+	}
+
 	// R2: VPS-автообход домена стабильно HEALTHY давно — ночной кандидат на LOCAL
 	for d, s := range union {
 		if s.CurrentRoute != "vps_auto" || s.Pinned || s.VPSAuto == nil {
@@ -851,6 +882,15 @@ func runDailyDigest() {
 		}
 	}
 	d.System.SilenceWatchdog = shellOut("systemctl", "is-active", "gateway-brain-silence-watchdog")
+
+	// --- инвариант QUIC DROP (инцидент 2026-09-07: правило-сирота потерялось) ---
+	quicDrop := false
+	if out := shellOut("sh", "-c", "iptables -S FORWARD 2>/dev/null | grep -c 'udp.*--dport 443 -j DROP'"); out != "" && atoiSafe(out) > 0 {
+		quicDrop = true
+	}
+	if !quicDrop {
+		d.Notes = append(d.Notes, "инвариант: глобальный DROP UDP/443 ОТСУТСТВОВЕТ — телефоны теряют видео (см. DECISIONS 2026-09-07); восстановить: zapret.sh start (теперь ensure-ит сам)")
+	}
 
 	// --- авто-заметки: на что смотреть утром ---
 	if d.System.DiskAvailPct < 15 {
