@@ -45,3 +45,22 @@ fi
 
 [ "$fixed" -gt 0 ] && log "итог: восстановлено правил=$fixed" || true
 exit 0
+
+# Инвариант 3 (2026-09-08, живой инцидент: dnscrypt вис с 20:04 предыдущего
+# дня, LAN без DNS, никто не заметил): DNS-цепочка жива. Проверяем dnscrypt
+# напрямую (127.0.0.1:5353) — если молчит, рестартим. Полная цепочка
+# (AdGuard→dnscrypt) поднимется сама: AdGuard кэширует и повторяет.
+if ! dig +short +time=3 +tries=1 -p 5353 @127.0.0.1 ya.ru >/dev/null 2>&1; then
+  log "DNS: dnscrypt не отвечает — рестарт dnscrypt-proxy"
+  systemctl restart dnscrypt-proxy 2>/dev/null
+  sleep 3
+  if dig +short +time=3 +tries=1 -p 5353 @127.0.0.1 ya.ru >/dev/null 2>&1; then
+    log "DNS: dnscrypt восстановлен рестартом"
+  else
+    log "DNS: dnscrypt НЕ восстановился рестартом — требует внимания (см. daily-digest)"
+  fi
+  fixed=$((fixed+1))
+fi
+
+[ "$fixed" -gt 0 ] && log "итог: восстановлено правил/сервисов=$fixed" || true
+exit 0
