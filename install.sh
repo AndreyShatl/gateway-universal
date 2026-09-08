@@ -286,7 +286,11 @@ cat > /etc/sysctl.d/99-gateway.conf <<'EOF'
 net.ipv4.ip_forward=1
 net.ipv4.conf.all.rp_filter=0
 net.ipv4.conf.default.rp_filter=0
-net.ipv6.conf.all.forwarding=0
+# IPv6 полностью выключен (владелец, 2026-09-08): весь обход — v4; v6-пути
+# не маршрутизируются шлюзом и создают неожиданные обходные маршруты
+net.ipv6.conf.all.disable_ipv6=1
+net.ipv6.conf.default.disable_ipv6=1
+net.ipv6.conf.lo.disable_ipv6=1
 EOF
 sysctl --system >/dev/null
 ok "sysctl applied"
