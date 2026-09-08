@@ -59,7 +59,13 @@ fetch() {
 ADGUARD_FILTER_DIR=${ADGUARD_FILTER_DIR:-/opt/AdGuardHome/data/filters}
 DENYLIST_FILE=${DENYLIST_FILE:-/etc/gateway/domain-denylist.txt}
 filter_junk() {
-  python3 - "$ADGUARD_FILTER_DIR" "$DENYLIST_FILE" <<'PYEOF'
+  # T-fix-junk-stdin (2026-09-08): раньше `python3 - args <<'PYEOF'` читал
+  # СКРИПТ из heredoc, который заодно подменял stdin — пайп с доменами
+  # терялся, функция всегда возвращала пустоту, и актуализация доменов
+  # молча умерла 2026-08-16 (день ввода junk-фильтра). Скрипт теперь во
+  # временный файл — stdin остаётся доменам.
+  local _fj_tmp; _fj_tmp=$(mktemp)
+  cat > "$_fj_tmp" <<'PYEOF'
 import glob, os, sys
 
 filter_dir, denylist_file = sys.argv[1:3]
@@ -96,6 +102,10 @@ for line in sys.stdin:
     if d and not is_blocked(d):
         print(d)
 PYEOF
+  python3 "$_fj_tmp" "$ADGUARD_FILTER_DIR" "$DENYLIST_FILE"
+  local _rc=$?
+  rm -f "$_fj_tmp"
+  return $_rc
 }
 
 # --- youtube/discord/instagram: добавляем в zapret-services.json ---
