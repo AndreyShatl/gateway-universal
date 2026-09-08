@@ -201,6 +201,24 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 		// прогон QUIC через VPS-socks не поддержан) перед обычным TCP-путём.
 		if c.Signal == "quic-no-response" && c.SNI != "" {
 			if quicBlocked(c.SNI) {
+				// T-quic-cooldown (2026-09-08, живой маятник): пока активен наш
+				// глобальный DROP UDP/443, клиенты бесконечно ретраят QUIC, и
+				// каждый ретрай генерил «мгновенно в VPS» — meetings.google-
+				// apis.com уходит в VPS 817 раз за 2 дня, каждое переключение
+				// пересобирает общие brain-группы (задевает чужое покрытие) и
+				// кладёт домен в очередь. Повтор внутри окна — чистый шум:
+				// домен уже в VPS, aplicator идемпотентен, пользы ноль.
+				quicApplyLast.Lock()
+				last, seen := quicApplyLast.m[c.SNI]
+				recent := seen && time.Since(last) < quicApplyCooldown
+				if !recent {
+					quicApplyLast.m[c.SNI] = time.Now()
+				}
+				quicApplyLast.Unlock()
+				if recent {
+					addToSet(applier.IPSet, c.DstIP) // ipset поддерживаем, маршрут не дёргаем
+					return
+				}
 				if *apply {
 					if applier.Apply(c.SNI, c.Signal, 443) {
 						log.Printf("✅ мгновенно в VPS (QUIC): %s (dst=%s)", c.SNI, c.DstIP)

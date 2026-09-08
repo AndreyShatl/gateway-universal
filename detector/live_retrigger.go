@@ -44,6 +44,17 @@ const liveRetriggerCooldown = 15 * time.Minute
 // (это и был первоначальный источник бесконечного цикла), а обычной ночной
 // переоценкой (brain-nightly.sh перебирает ВСЕ управляемые домены, включая
 // только что форсированные на VPS).
+// T-quic-cooldown (2026-09-08): окно против бесконечных «мгновенно в VPS (QUIC)»
+// повторов — пока стоит глобальный DROP UDP/443, клиенты ретраят QUIC вечно,
+// и без окна один домен уходит в VPS сотни раз (817 у meetings.googleapis.com
+// за 2 дня), пересобирая общие группы и раскачивая чужое покрытие.
+var quicApplyCooldown = time.Hour
+
+var quicApplyLast = struct {
+	sync.Mutex
+	m map[string]time.Time
+}{m: map[string]time.Time{}}
+
 var liveRetriggerLast = struct {
 	sync.Mutex
 	m map[string]time.Time
