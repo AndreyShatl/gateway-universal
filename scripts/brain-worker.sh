@@ -56,6 +56,28 @@ for svc in data:
 " 2>/dev/null
 }
 
+# GGC — особый случай pinned YouTube: сам сервис остаётся на VPS как безопасный
+# baseline, но потоковый rr* hostname может быть доставлен только через LOCAL
+# (провайдерский GGC недоступен с VPS). Для него разрешён только поиск уже
+# проверенной LOCAL-стратегии; при неудаче VPS-пин не снимается.
+ggc_delivery_host() {
+  local host
+  host=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$host" in
+    googlevideo.com|*.googlevideo.com|gvt1.com|*.gvt1.com) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# После первого LOCAL-успеха autoroute нарочно остаётся как VPS-fallback.
+# Только ночной reeval подтверждает, что локальная стратегия не была разовой
+# удачей, и снимает fallback. Это даёт CDN время пережить ротацию edge-IP.
+confirm_local_at_nightly() { # <domain> <source>
+  [ "$2" = "reeval" ] || return 0
+  bash "$APPLY" confirm-local "$1" >/dev/null 2>&1
+  log "🌙 $1 — LOCAL подтверждён ночью, VPS-fallback снят"
+}
+
 # strategy-find для zapret получает строки уже с ПОДСТАВЛЕННЫМ $FAKE (brain-apply.sh
 # и ZAPRET-вердикт solve.sh отдают резолвленный путь /opt/zapret/files/fake/...,
 # а в strategies.args хранится литеральный плейсхолдер "$FAKE") — без обратной
@@ -172,13 +194,26 @@ process_domain() {
   #    даже пробовать не нужно. Снимаем любую существующую группу (на случай
   #    гонки: пин поставили ПОСЛЕ того, как домен уже получил DPI-стратегию)
   #    и гарантируем VPS. Всегда return — шаги 1-3 ниже не должны выполняться.
-  if [ -n "$(pinned_vps_service "$domain")" ]; then
+  if [ -n "$(pinned_vps_service "$domain")" ] && ! ggc_delivery_host "$domain"; then
     local cur_any; cur_any=$(bash "$APPLY" group-of "$domain" 2>/dev/null)$(bash "$APPLY" cgroup-of "$domain" 2>/dev/null)$(bash "$APPLY" z2group-of "$domain" 2>/dev/null)
     bash "$APPLY" vps "$domain" >/dev/null 2>&1
     if [ -n "$cur_any" ]; then
       log "📌 $domain — сервис закреплён на VPS, снят с DPI-обхода"
     fi
     python3 "$GWDB" vps-touch "$domain" success >/dev/null 2>&1
+    return 0
+  fi
+
+  if [ -n "$(pinned_vps_service "$domain")" ]; then
+    # Не перебираем пресеты для pinned YouTube: это дорого и может снять
+    # проверенный baseline. Ищем только среди уже работающих LOCAL-групп.
+    bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
+    if try_existing_groups "$domain" "$proto" || try_existing_cgroups "$domain" "$proto" || try_existing_z2groups "$domain" "$proto"; then
+      log "✅ $domain — GGC переведён с VPS на существующий LOCAL-обход"
+      confirm_local_at_nightly "$domain" "$source"
+    else
+      log "📌 $domain — GGC остаётся на VPS: существующая LOCAL-стратегия не подтвердилась"
+    fi
     return 0
   fi
 
@@ -195,6 +230,7 @@ process_domain() {
         log "✅ $domain — текущая группа ($cur_gid) всё ещё работает"
         local sid0; sid0=$(python3 "$GWDB" strategy-find "$cur_proto" zapret "$(unfake "$cur_strat")" 2>/dev/null)
         [ -n "$sid0" ] && python3 "$GWDB" service-touch "$domain" "$sid0" >/dev/null 2>&1
+        confirm_local_at_nightly "$domain" "$source"
         return 0
       fi
       log "⚠ $domain — группа $cur_gid больше не работает для этого домена, ищу замену"
@@ -216,6 +252,7 @@ process_domain() {
           log "✅ $domain — текущая ciadpi-группа ($ccur_gid) всё ещё работает"
           local sid0c; sid0c=$(python3 "$GWDB" strategy-find tcp ciadpi "$ccur_strat" 2>/dev/null)
           [ -n "$sid0c" ] && python3 "$GWDB" service-touch "$domain" "$sid0c" >/dev/null 2>&1
+          confirm_local_at_nightly "$domain" "$source"
           return 0
         fi
         log "⚠ $domain — ciadpi-группа $ccur_gid больше не работает для этого домена, ищу замену"
@@ -232,6 +269,7 @@ process_domain() {
             log "✅ $domain — текущая zapret2-группа ($zcur_gid) всё ещё работает"
             local sid0z; sid0z=$(python3 "$GWDB" strategy-find tcp zapret2 "$zcur_strat" 2>/dev/null)
             [ -n "$sid0z" ] && python3 "$GWDB" service-touch "$domain" "$sid0z" >/dev/null 2>&1
+            confirm_local_at_nightly "$domain" "$source"
             return 0
           fi
           log "⚠ $domain — zapret2-группа $zcur_gid больше не работает для этого домена, ищу замену"

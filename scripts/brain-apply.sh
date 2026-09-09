@@ -283,6 +283,26 @@ rebuild_group_ipset() { # <ipset> <domain...>
     [ -n "$hint" ] || continue
     for cidr in $hint; do ipset add $ipset "$cidr" -exist; done
   done
+
+  # T-ggc-local-cache (2026-09-09): публичные Google CIDR выше не включают
+  # GGC внутри сети провайдера.  Такие адреса (напр. 128.75.236.207) выдаются
+  # только для конкретного rr* hostname и потому не могут быть покрыты одним
+  # getent googlevideo.com.  Когда LOCAL-стратегия уже подтвердилась для GGC,
+  # берём /24 каждого наблюдаемого video-host в ту же группу. Это достаточно
+  # узко, чтобы не перехватывать всю сеть провайдера, и покрывает ротацию IP
+  # внутри кластера. Никакие другие домены и сети этим кодом не расширяются.
+  local ggc_ip ggc_cidr
+  for d in "$@"; do
+    case "$d" in
+      googlevideo.com|*.googlevideo.com|gvt1.com|*.gvt1.com)
+        while read -r ggc_ip; do
+          [ -n "$ggc_ip" ] || continue
+          ggc_cidr=$(awk -F. 'NF==4 {print $1 "." $2 "." $3 ".0/24"}' <<< "$ggc_ip")
+          [ -n "$ggc_cidr" ] && ipset add "$ipset" "$ggc_cidr" -exist
+        done < <(getent ahostsv4 "$d" 2>/dev/null | awk '{print $1}' | sort -u)
+        ;;
+    esac
+  done
 }
 
 # ensure_group — найти группу с этой proto+strategy, иначе создать (очередь+правила+
@@ -955,14 +975,23 @@ PY
 }
 
 case "${1:-}" in
-  zapret) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret)" "brain_apply_zapret" ;;
-  ciadpi) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(ciadpi)" "brain_apply_ciadpi" ;;
-  zapret2) shift; d=$1; shift; proto=$1; shift; ar_del "$d"; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret2)" "brain_apply_zapret2" ;;
+  # T-parallel-fallback (2026-09-09): при первом успехе LOCAL намеренно НЕ
+  # удаляем autoroute/VPS. Правила LOCAL стоят выше gw_autoroute, поэтому
+  # известный IP идёт напрямую через DPI, а новый CDN-IP остаётся доступен
+  # через VPS. Удаление fallback делает только confirm-local после ночной
+  # успешной перепроверки работающей LOCAL-группы.
+  zapret) shift; d=$1; shift; proto=$1; shift; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret)+VPS-fallback" "brain_apply_zapret" ;;
+  ciadpi) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(ciadpi)+VPS-fallback" "brain_apply_ciadpi" ;;
+  zapret2) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret2)+VPS-fallback" "brain_apply_zapret2" ;;
   vps)    shift; do_remove "$1" >/dev/null 2>&1; do_remove_ciadpi "$1" >/dev/null 2>&1; do_remove_zapret2 "$1" >/dev/null 2>&1
           if has_vps; then ar_add "$1"; echo "🔵 vps: $1 в автообходе"
           else echo "⚪ $1: ни одна стратегия не пробила, VPS не настроен — остаётся заблокирован"; fi
           flush_domain_conntrack "$1"; log_route_change "$1" "VPS" "brain_apply_vps" ;;
+  vps-fallback) shift
+          if has_vps; then ar_add "$1"; echo "🟣 vps-fallback: $1 сохранён в автообходе"
+          else echo "⚪ $1: VPS не настроен, fallback не добавлен"; fi ;;
   remove-entity) shift; do_remove "$1"; flush_domain_conntrack "$1"; log_route_change "$1" "removed" "brain_apply_remove_entity" ;;
+  confirm-local) shift; ar_del "$1"; log_route_change "$1" "LOCAL" "nightly_local_confirmed" ;;
   remove) shift; do_remove "$1"; do_remove_ciadpi "$1"; do_remove_zapret2 "$1"; ar_del "$1"; flush_domain_conntrack "$1"; log_route_change "$1" "removed" "brain_apply_remove" ;;
   list)   cat "$STATE" 2>/dev/null || echo "[]" ;;
   list-ciadpi) cat "$CSTATE" 2>/dev/null || echo "[]" ;;
@@ -981,5 +1010,5 @@ case "${1:-}" in
   restore) do_restore & do_restore_ciadpi & do_restore_zapret2 & wait ;;
   restore-ciadpi) do_restore_ciadpi ;;
   restore-zapret2) do_restore_zapret2 ;;
-  *) echo "usage: brain-apply.sh {zapret <d> <tcp|udp> <strat>|ciadpi <d> <tcp> <strat>|zapret2 <d> <tcp|udp> <strat>|vps <d>|remove <d>|list|list-ciadpi|list-zapret2|groups|group-of <d>|move <d> <gid>|restore|restore-ciadpi|restore-zapret2}" >&2; exit 2 ;;
+  *) echo "usage: brain-apply.sh {zapret <d> <tcp|udp> <strat>|ciadpi <d> <tcp> <strat>|zapret2 <d> <tcp|udp> <strat>|vps <d>|vps-fallback <d>|confirm-local <d>|remove <d>|list|list-ciadpi|list-zapret2|groups|group-of <d>|move <d> <gid>|restore|restore-ciadpi|restore-zapret2}" >&2; exit 2 ;;
 esac

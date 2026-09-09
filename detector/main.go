@@ -166,7 +166,11 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 				// сверке pcap↔eBPF: тень залогировала "переведён на VPS" и
 				// запустила brain-apply.sh). Тень теперь только логирует.
 				if *apply {
-					addToSet("brain_"+sanitizeDomain(c.SNI), ip) // сущность: и NFQUEUE, и RETURN по этому ipset
+					// Группы больше не создаются по имени домена: один ipset
+					// принадлежит стратегии и обслуживает несколько доменов. Раньше
+					// здесь строилось несуществующее brain_<domain>, поэтому IP,
+					// реально выбранный DNS клиента (особенно GGC), терялся.
+					addToSet(brainIPSetForDomain(c.SNI), ip)
 				}
 				// T-live-retrigger (2026-08-16): живой кейс — updates.discord.com
 				// уже имел назначенную ciadpi-стратегию, «подтверждённую» нашей
@@ -498,13 +502,15 @@ func runRecheck() {
 		if len(expired) > 0 {
 			log.Printf("🕐 устарело (30д без живого трафика), снято: %s", strings.Join(expired, ", "))
 		}
-		// T-route-manager-phase2b: то же самое, что route-explain находит
-		// вручную — домен одновременно DPI-сущность И зависшая VPS-запись
-		// в автообходе (см. живая находка про updates.discord.com, тем же
-		// вечером). Часть regular recheck, не разовая ручная чистка.
-		conflicts := reconcileDomainConflicts(true)
+		// T-route-manager-phase2b → T-parallel-fallback (2026-09-09): раньше
+		// ночной recheck СНМАЛ VPS-записи у доменов, покрытых DPI-группой
+		// ("избыточные"). Новая политика: VPS-fallback у LOCAL-домена —
+		// намеренная подложка (непокрытые CDN-IP едут через VPS), и снимать
+		// её может только confirm-local после ночной перепроверки. Reconcile
+		// остаётся детектором для observe/дайджеста, но не мутирует.
+		conflicts := reconcileDomainConflicts(false)
 		if len(conflicts) > 0 {
-			log.Printf("⚠ конфликт domain/IP-подсистем (уже DPI-сущность, но висел в автообходе), снято: %s", strings.Join(conflicts, ", "))
+			log.Printf("👁 dual-route (DPI + VPS-fallback, новая норма): %s", strings.Join(conflicts, ", "))
 		}
 		if s.RouteOn() {
 			if reloaded, err := applier.Load(); err == nil {
@@ -748,19 +754,32 @@ func inZapretHostlist(domain string) bool {
 // срабатывали для доменов на ciadpi/zapret2 (де-факто основной движок) —
 // живые сигналы провала для них уходили в обычный enqueueBrain путь как
 // для совсем новых доменов, а не в переоценку уже назначенной сущности.
-var brainServiceStateFiles = []string{
-	"/etc/gateway/brain-services.json",         // zapret (nfqws)
-	"/etc/gateway/brain-services-ciadpi.json",  // ciadpi (ByeDPI)
-	"/etc/gateway/brain-services-zapret2.json", // zapret2
+type brainServiceState struct {
+	path   string
+	prefix string
+}
+
+var brainServiceStates = []brainServiceState{
+	{path: "/etc/gateway/brain-services.json", prefix: "brain_"},           // zapret (nfqws)
+	{path: "/etc/gateway/brain-services-ciadpi.json", prefix: "brainc_"},   // ciadpi (ByeDPI)
+	{path: "/etc/gateway/brain-services-zapret2.json", prefix: "brainz2_"}, // zapret2
 }
 
 func isBrainEntity(domain string) bool {
-	for _, path := range brainServiceStateFiles {
-		data, err := os.ReadFile(path)
+	return brainIPSetForDomain(domain) != ""
+}
+
+// brainIPSetForDomain returns the actual shared ipset that owns domain.  The
+// destination IP observed on a client connection is authoritative for a
+// rotating CDN: resolver answers seen by the gateway can be different.
+func brainIPSetForDomain(domain string) string {
+	for _, state := range brainServiceStates {
+		data, err := os.ReadFile(state.path)
 		if err != nil {
 			continue
 		}
 		var groups []struct {
+			GroupID string   `json:"group_id"`
 			Domains []string `json:"domains"`
 		}
 		if err := json.Unmarshal(data, &groups); err != nil {
@@ -769,12 +788,12 @@ func isBrainEntity(domain string) bool {
 		for _, g := range groups {
 			for _, d := range g.Domains {
 				if strings.EqualFold(d, domain) {
-					return true
+					return state.prefix + g.GroupID
 				}
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 func short(s string) string {
