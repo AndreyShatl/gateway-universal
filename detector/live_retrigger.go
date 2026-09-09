@@ -17,9 +17,11 @@ package main
 // вызова).
 
 import (
+	"encoding/json"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,10 +42,11 @@ const liveRetriggerCooldown = 15 * time.Minute
 // про updates.discord.com) только продлевает боль без выигрыша в
 // надёжности. Теперь первый же сигнал (после cooldown — не дребезжим на
 // потоке пакетов одного и того же обрыва) сразу переводит домен на VPS.
-// Дальнейший подбор DPI-стратегии — не здесь и не тем же тестом сразу же
-// (это и был первоначальный источник бесконечного цикла), а обычной ночной
-// переоценкой (brain-nightly.sh перебирает ВСЕ управляемые домены, включая
-// только что форсированные на VPS).
+// Дальнейший подбор DPI-стратегии запускается сразу, но строго в фоне через
+// единственную очередь brain-worker.  Таким образом failover не ждёт ни
+// полного перебора, ни ночного прохода: пользователь сразу получает VPS, а
+// worker без гонок ищет LOCAL.  Ночная переоценка остаётся страховкой для
+// доменов, которые не дали нового живого сигнала.
 // T-quic-cooldown (2026-09-08): окно против бесконечных «мгновенно в VPS (QUIC)»
 // повторов — пока стоит глобальный DROP UDP/443, клиенты ретраят QUIC вечно,
 // и без окна один домен уходит в VPS сотни раз (817 у meetings.googleapis.com
@@ -110,6 +113,16 @@ func forceVPSInstant(domain, source string) {
 		return
 	}
 	log.Printf("🔴 живой сигнал провала (%s) для %s — мгновенно переведён на VPS", source, domain)
+	if liveFailStrike(domain) {
+		log.Printf("⛔ %s — %d живых провалов за 24ч: КАРАНТИН VPS (в подбор не ставим, истечёт через 24ч)", domain, liveFailStrikeLimit)
+		return
+	}
+	if liveFailQuarantined(domain) {
+		return // уже в карантине: VPS выше идемпотентен, очередь не дёргаем
+	}
+	if enqueueBrainForRecheck(domain, source) {
+		log.Printf("🔎 %s поставлен в фоновый поиск LOCAL DPI-стратегии", domain)
+	}
 }
 
 // enqueueBrainForRecheck — та же механика, что enqueueBrain (дедуп через
@@ -138,3 +151,72 @@ func enqueueBrainForRecheck(domain, source string) bool {
 	_, err = f.WriteString(domain + "\t" + source + "\n")
 	return err == nil
 }
+
+// ============================================================================
+// T-live-fail-quarantine (2026-09-09): защита от петли «живый провал → VPS →
+// фоновый подбор → DPI → живый провал → …». Наш изолированный curl-тест может
+// подтверждать стратегию, которая реально не пробивает живого клиента (кейс
+// updates.discord.com: другой TLS-отпечаток). После 3 живых провалов одного
+// домена за 24ч домен уходит в карантин: получаем VPS (идемпотентно), но В
+// ОЧЕРЕДЬ больше не ставится. Карантин истекает через 24ч после последнего
+// провала — ночь и новый TLS-ландшафт дают стратегии ещё один шанс.
+// ============================================================================
+
+const (
+	liveFailStrikeLimit   = 3
+	liveFailQuarantineTTL = 24 * time.Hour
+	liveFailStrikesFile   = "/etc/gateway/observe/live-fail-strikes.json"
+)
+
+type liveFailRecord struct {
+	Count      int       `json:"count"`
+	LastStrike time.Time `json:"last_strike"`
+}
+
+var liveFailStrikes = struct {
+	sync.Mutex
+	m map[string]liveFailRecord
+}{m: map[string]liveFailRecord{}}
+
+func liveFailLoad() {
+	raw, err := os.ReadFile(liveFailStrikesFile)
+	if err != nil {
+		return
+	}
+	var m map[string]liveFailRecord
+	if json.Unmarshal(raw, &m) == nil {
+		liveFailStrikes.m = m
+	}
+}
+
+func liveFailSaveLocked() {
+	os.MkdirAll(filepath.Dir(liveFailStrikesFile), 0o755)
+	if raw, err := json.Marshal(liveFailStrikes.m); err == nil {
+		os.WriteFile(liveFailStrikesFile, raw, 0o644)
+	}
+}
+
+// liveFailStrike — зафиксировать живый провал; true, если домен ушёл в карантин.
+func liveFailStrike(domain string) bool {
+	liveFailStrikes.Lock()
+	defer liveFailStrikes.Unlock()
+	r := liveFailStrikes.m[domain]
+	if time.Since(r.LastStrike) > liveFailQuarantineTTL {
+		r = liveFailRecord{}
+	}
+	r.Count++
+	r.LastStrike = time.Now()
+	liveFailStrikes.m[domain] = r
+	liveFailSaveLocked()
+	return r.Count >= liveFailStrikeLimit
+}
+
+// liveFailQuarantined — домен в карантине (провалов >= лимита за TTL-окно).
+func liveFailQuarantined(domain string) bool {
+	liveFailStrikes.Lock()
+	defer liveFailStrikes.Unlock()
+	r, ok := liveFailStrikes.m[domain]
+	return ok && r.Count >= liveFailStrikeLimit && time.Since(r.LastStrike) < liveFailQuarantineTTL
+}
+
+func init() { liveFailLoad() }
