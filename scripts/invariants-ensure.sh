@@ -64,3 +64,13 @@ fi
 
 [ "$fixed" -gt 0 ] && log "итог: восстановлено правил/сервисов=$fixed" || true
 exit 0
+
+# Инвариант 4 (2026-09-16, ребут-тест: v6-адреса вернулись, despite sysctl
+# all.disable_ipv6=1 — per-link настройка сбрасывается при загрузке сети):
+# глобальных v6-адресов на WAN быть не должно — весь обход v4-only.
+if ip -6 addr show enp2s0 2>/dev/null | grep -q "scope global"; then
+  log "инвариант: вернулись IPv6-адреса — выключаю per-link и чищу"
+  sysctl -w net.ipv6.conf.enp2s0.disable_ipv6=1 >/dev/null 2>&1
+  ip -6 addr flush scope global dev enp2s0 2>/dev/null
+  fixed=$((fixed+1))
+fi

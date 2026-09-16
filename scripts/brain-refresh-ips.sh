@@ -73,6 +73,21 @@ refresh_state_file() { # <state.json> <ipset-prefix>
       fi
       ipset add "$ipset" "$ip" -exist
     done <<< "$resolved"
+    # GGC (T-ggc-local-cache, 2026-09-09): провайдерские video-хосты Google
+    # ротируются внутри /24-кластера — для них добавляем подсеть, не только IP
+    # (тот же паттерн, что rebuild_group_ipset в brain-apply.sh; здесь — чтобы
+    # /24 возвращался и после ребута, когда restore бежал раньше DNS)
+    case "$domains_csv" in
+      *googlevideo*|*gvt1*)
+        for d in "${domains[@]}"; do
+          case "$d" in
+            googlevideo.com|*.googlevideo.com|gvt1.com|*.gvt1.com)
+              getent ahostsv4 "$d" 2>/dev/null | awk '{print $1}' | sort -u |                 awk -F. 'NF==4 {print $1"."$2"."$3".0/24"}' | sort -u |                 while read -r cidr; do ipset add "$ipset" "$cidr" -exist 2>/dev/null; done
+              ;;
+          esac
+        done
+        ;;
+    esac
     total_groups=$((total_groups+1))
     total_domains=$((total_domains+${#domains[@]}))
     total_new=$((total_new+new_count))
