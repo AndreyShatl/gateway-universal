@@ -65,12 +65,14 @@ fi
 [ "$fixed" -gt 0 ] && log "итог: восстановлено правил/сервисов=$fixed" || true
 exit 0
 
-# Инвариант 4 (2026-09-16, ребут-тест: v6-адреса вернулись, despite sysctl
-# all.disable_ipv6=1 — per-link настройка сбрасывается при загрузке сети):
-# глобальных v6-адресов на WAN быть не должно — весь обход v4-only.
-if ip -6 addr show enp2s0 2>/dev/null | grep -q "scope global"; then
-  log "инвариант: вернулись IPv6-адреса — выключаю per-link и чищу"
+# Инвариант 4 (2026-09-16, ребут-тест): IPv6 не должен создавать обходной
+# путь мимо шлюза. ULA-адреса от RA (fd3f::/48, без дефолтного маршрута —
+# RA приходит с router lifetime 0) безвредны и не трогаются: гоняться с RA
+# каждые 10 минут бессмысленно. Реагируем только на появление дефолтного
+# v6-маршрута — вот он означал бы, что клиенты могут уйти мимо v4-обхода.
+if ip -6 route show default 2>/dev/null | grep -q .; then
+  log "инвариант: появился дефолтный IPv6-маршрут — выключаю per-link v6 и маршрут"
   sysctl -w net.ipv6.conf.enp2s0.disable_ipv6=1 >/dev/null 2>&1
-  ip -6 addr flush scope global dev enp2s0 2>/dev/null
+  ip -6 route del default 2>/dev/null
   fixed=$((fixed+1))
 fi
