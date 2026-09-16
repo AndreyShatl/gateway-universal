@@ -974,6 +974,40 @@ except Exception:
 PY
 }
 
+# vps_already_applied <domain> — домен уже в autoroute И не состоит ни в одной
+# DPI-группе: реального перехода нет. T-vps-idempotent (2026-09-16): ночная
+# переоценка прогоняла сотни уже-VPS-доменов через полный путь «vps» — ar_add
+# идемпотентен, но flush_domain_conntrack рвал живые соединения каждые ночь
+# (живой кейс: «инста-видео зависает, прокрутка помогает» — новый сегмент =
+# новое соединение). Здесь пропускаем ЦЕЛИКОМ, без единой мутации.
+vps_already_applied() {
+  python3 - "$1" <<'PY' 2>/dev/null
+import json, sys
+d = sys.argv[1].lower()
+try:
+    ar = json.load(open("/etc/gateway/autoroute.json"))
+    entries = ar.get("entries", ar if isinstance(ar, list) else [])
+    if not any(e.get("addr","").lower() == d for e in entries):
+        raise SystemExit(1)
+except SystemExit:
+    raise
+except Exception:
+    raise SystemExit(1)
+for f in ("/etc/gateway/brain-services.json",
+          "/etc/gateway/brain-services-ciadpi.json",
+          "/etc/gateway/brain-services-zapret2.json"):
+    try:
+        for g in json.load(open(f)):
+            if d in [x.lower() for x in g.get("domains", [])]:
+                raise SystemExit(1)  # ещё в DPI-группе — нужен полный переход
+    except SystemExit:
+        raise
+    except Exception:
+        pass
+raise SystemExit(0)
+PY
+}
+
 case "${1:-}" in
   # T-parallel-fallback (2026-09-09): при первом успехе LOCAL намеренно НЕ
   # удаляем autoroute/VPS. Правила LOCAL стоят выше gw_autoroute, поэтому
@@ -983,7 +1017,12 @@ case "${1:-}" in
   zapret) shift; d=$1; shift; proto=$1; shift; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret)+VPS-fallback" "brain_apply_zapret" ;;
   ciadpi) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(ciadpi)+VPS-fallback" "brain_apply_ciadpi" ;;
   zapret2) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret2)+VPS-fallback" "brain_apply_zapret2" ;;
-  vps)    shift; do_remove "$1" >/dev/null 2>&1; do_remove_ciadpi "$1" >/dev/null 2>&1; do_remove_zapret2 "$1" >/dev/null 2>&1
+  vps)    shift
+          if vps_already_applied "$1"; then
+            echo "🔵 vps: $1 уже на VPS — пропуск (идемпотентно, без flush conntrack)"
+            exit 0
+          fi
+          do_remove "$1" >/dev/null 2>&1; do_remove_ciadpi "$1" >/dev/null 2>&1; do_remove_zapret2 "$1" >/dev/null 2>&1
           if has_vps; then ar_add "$1"; echo "🔵 vps: $1 в автообходе"
           else echo "⚪ $1: ни одна стратегия не пробила, VPS не настроен — остаётся заблокирован"; fi
           flush_domain_conntrack "$1"; log_route_change "$1" "VPS" "brain_apply_vps" ;;
