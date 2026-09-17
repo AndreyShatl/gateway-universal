@@ -32,7 +32,19 @@ iptables -t mangle -A DISCORD_TPROXY -d 10.0.0.0/8 -j RETURN
 iptables -t mangle -A DISCORD_TPROXY -d 172.16.0.0/12 -j RETURN
 iptables -t mangle -A DISCORD_TPROXY -d "${VPS_IP}" -j RETURN
 iptables -t mangle -A DISCORD_TPROXY -p udp --dport 443 -j RETURN
-iptables -t mangle -A DISCORD_TPROXY -p udp -j TPROXY --on-port "${TPROXY_PORT}" --tproxy-mark 1
+
+# T-games-safe (2026-09-17, живой инцидент Dota 2): финальное правило раньше
+# безусловно TPROXY-ило ВЕСЬ UDP 10000-65535 — серверы игр (Dota 27015-27050,
+# CS и т.д.) уезжали в VPS с пингом 200-600мс. Ограничиваем по НАЗНАЧЕНИЮ:
+# только медиа-диапазоны Discord (Cloudflare Calls 162.159.128.0/17 + свои
+# AS62041 109.200.192.0/19), поддерживаемые ipset-ом discord_voice.
+VOICE_IPSET="discord_voice"
+ipset create "${VOICE_IPSET}" hash:net -exist
+ipset add "${VOICE_IPSET}" 162.159.128.0/17 -exist   # Cloudflare (Discord RTC/медиа)
+ipset add "${VOICE_IPSET}" 109.200.192.0/19 -exist   # AS62041 (своие голосовые Discord)
+iptables -t mangle -A DISCORD_TPROXY -p udp -m set --match-set "${VOICE_IPSET}" dst -j TPROXY --on-port "${TPROXY_PORT}" --tproxy-mark 1
+# всё прочее из 10000-65535 (игры, WebRTC и т.д.) — RETURN, прямой путь
+iptables -t mangle -A DISCORD_TPROXY -j RETURN
 
 # хук в PREROUTING ПЕРВЫМ (перед zapret-NFQUEUE), идемпотентно
 iptables -t mangle -C PREROUTING -s "${LAN}" -p udp --dport "${PORT_RANGE}" -j DISCORD_TPROXY 2>/dev/null || \
