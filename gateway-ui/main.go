@@ -218,6 +218,7 @@ func main() {
 	mux.HandleFunc("/api/host-metrics", s.requireAuth(s.handleHostMetrics))
 	mux.HandleFunc("/api/services/detail", s.requireAuth(s.handleServicesDetail))
 	mux.HandleFunc("/api/services/{id}/pin-vps", s.requireAuth(s.handlePinVPS))
+	mux.HandleFunc("/api/services/{id}/auto-local", s.requireAuth(s.handleAutoLocal))
 	mux.HandleFunc("/api/services/stop", s.requireAuth(s.handleStop))
 	mux.HandleFunc("/ws/console", s.requireAuth(s.handleConsole))
 	mux.HandleFunc("/api/network", s.requireAuth(s.handleNetwork))

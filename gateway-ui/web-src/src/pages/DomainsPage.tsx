@@ -11,12 +11,12 @@ import {
   addDomain,
   fetchServices,
   saveServices,
-  startScan,
   fetchScanStatus,
   fetchMonitor,
   fetchPinVPSJob,
   type ZService,
   type PinVPSJob,
+  serviceAutoLocal,
 } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
@@ -230,16 +230,19 @@ export function DomainsPage() {
   // majority vote (см. AUTO_ZAPRET_THRESHOLD) и подставляет режим — дальше
   // всё равно требуется "Сохранить и применить", ничего не применяется
   // молча за спиной пользователя.
+  // T-auto-local (2026-09-17): кнопка «Авто» больше не делает blockcheck
+  // majority-vote — она ставит все домены сервиса в очередь мозга: фоновый
+  // параллельный поиск (4 воркера), переключение домена на DPI только при
+  // подтверждённом обходе, с VPS-подложкой и без разрыва соединений.
   async function onAuto(svc: ZService) {
     if (svc.domains.length === 0) {
       setMsg('✗ у сервиса нет доменов для проверки')
       return
     }
     setMsg(null)
-    autoCancelled.current = false
     try {
-      await startScan(svc.domains, 'quick', `auto:${svc.id}`)
-      setAutoServiceId(svc.id)
+      const res = await serviceAutoLocal(svc.id)
+      setMsg('✓ ' + res.message + ` (поставлено: ${res.enqueued})`)
     } catch (e) {
       setMsg('✗ ' + (e instanceof Error ? e.message : String(e)))
     }

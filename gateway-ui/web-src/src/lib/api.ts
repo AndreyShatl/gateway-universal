@@ -517,3 +517,7 @@ export interface DailyDigestResponse {
 export const fetchRouteState = () => api<RouteStateResponse>('/api/route-state')
 export const fetchShadowReport = () => api<ShadowReportResponse>('/api/shadow-report')
 export const fetchDailyDigest = () => api<DailyDigestResponse>('/api/daily-digest')
+
+// T-auto-local: все домены сервиса — в фоновый поиск LOCAL (мозг, 4 воркера)
+export const serviceAutoLocal = (id: string) =>
+  api<{ enqueued: number; message: string }>(`/api/services/${id}/auto-local`, { method: 'POST' })

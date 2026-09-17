@@ -76,3 +76,23 @@ if ip -6 route show default 2>/dev/null | grep -q .; then
   ip -6 route del default 2>/dev/null
   fixed=$((fixed+1))
 fi
+
+# Инвариант 5 (2026-09-17, требование владельца): пробы поиска стратегий
+# должны выходить с IP роутера (прямой путь), НЕ с IP VPS — иначе перебор
+# бессмыслен (всё "работает" через туннель). Тот же netns-фейк-клиент, что
+# solve.sh; сверяем с активным VPS из connections.json.
+VPS_ACT=$(python3 -c "
+import json
+try:
+    c=json.load(open('/etc/gateway/connections.json'))
+    print([x['fields']['VPS_ADDR'] for x in c if x.get('active')][0])
+except Exception: print('')" 2>/dev/null)
+EXIT_IP=$(bash /opt/gateway-brain/exit-ip-check.sh "$VPS_ACT" 2>/dev/null; true)
+EXIT_RC=$?
+if [ $EXIT_RC -eq 1 ]; then
+  log "инвариант: netns-пробы выходят с IP VPS ($EXIT_IP) — перебор стратегий сломан!"
+  fixed=$((fixed+1))
+elif [ $EXIT_RC -eq 2 ]; then
+  log "инвариант: netns-проба вообще не выходит в интернет — solve.sh не сможет проверять"
+  fixed=$((fixed+1))
+fi

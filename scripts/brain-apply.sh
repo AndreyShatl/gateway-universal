@@ -980,6 +980,31 @@ PY
 # идемпотентен, но flush_domain_conntrack рвал живые соединения каждые ночь
 # (живой кейс: «инста-видео зависает, прокрутка помогает» — новый сегмент =
 # новое соединение). Здесь пропускаем ЦЕЛИКОМ, без единой мутации.
+# has_vps_fallback <domain> — домен в autoroute (VPS-подложка жива).
+# T-flushless-switch (2026-09-17): при назначении DPI домену С подложкой
+# conntrack-flush больше не нужен и вреден: старые соединения спокойно
+# доживают на VPS-пути, новые идут через DPI — разрывов ноль (просьба
+# владельца: "чтобы при поиске/переключении соединения не терялись").
+has_vps_fallback() {
+  python3 - "$1" <<'PYFB' 2>/dev/null
+import json, sys
+d = sys.argv[1].lower()
+ar = json.load(open("/etc/gateway/autoroute.json"))
+entries = ar.get("entries", ar if isinstance(ar, list) else [])
+raise SystemExit(0 if any(e.get("addr","").lower() == d for e in entries) else 1)
+PYFB
+}
+
+# flush_domain_conntrack_unless_fallback <domain> — старое поведение (рвать
+# соединение) только если подложки нет; с подложкой — не трогаем.
+flush_domain_conntrack_unless_fallback() {
+  if has_vps_fallback "$1"; then
+    echo "🛡 $1: VPS-fallback активен — conntrack не трогаем (0 разрывов)"
+    return 0
+  fi
+  flush_domain_conntrack "$1"
+}
+
 vps_already_applied() {
   python3 - "$1" <<'PY' 2>/dev/null
 import json, sys
@@ -1014,9 +1039,9 @@ case "${1:-}" in
   # известный IP идёт напрямую через DPI, а новый CDN-IP остаётся доступен
   # через VPS. Удаление fallback делает только confirm-local после ночной
   # успешной перепроверки работающей LOCAL-группы.
-  zapret) shift; d=$1; shift; proto=$1; shift; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret)+VPS-fallback" "brain_apply_zapret" ;;
-  ciadpi) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(ciadpi)+VPS-fallback" "brain_apply_ciadpi" ;;
-  zapret2) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack "$d"; log_route_change "$d" "DPI(zapret2)+VPS-fallback" "brain_apply_zapret2" ;;
+  zapret) shift; d=$1; shift; proto=$1; shift; do_remove_ciadpi "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_zapret "$d" "$proto" "$@"; flush_domain_conntrack_unless_fallback "$d"; log_route_change "$d" "DPI(zapret)+VPS-fallback" "brain_apply_zapret" ;;
+  ciadpi) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_zapret2 "$d" >/dev/null 2>&1; do_ciadpi "$d" "$proto" "$@"; flush_domain_conntrack_unless_fallback "$d"; log_route_change "$d" "DPI(ciadpi)+VPS-fallback" "brain_apply_ciadpi" ;;
+  zapret2) shift; d=$1; shift; proto=$1; shift; do_remove "$d" >/dev/null 2>&1; do_remove_ciadpi "$d" >/dev/null 2>&1; do_zapret2 "$d" "$proto" "$@"; flush_domain_conntrack_unless_fallback "$d"; log_route_change "$d" "DPI(zapret2)+VPS-fallback" "brain_apply_zapret2" ;;
   vps)    shift
           if vps_already_applied "$1"; then
             echo "🔵 vps: $1 уже на VPS — пропуск (идемпотентно, без flush conntrack)"

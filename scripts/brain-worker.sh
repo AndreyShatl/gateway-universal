@@ -365,22 +365,38 @@ process_domain() {
 
 log "воркер запущен (v2, T-consolidate)"
 PROGRESS=/etc/gateway/brain-progress.json
-while true; do
-  line=$(pop)
-  # T-progress-ui: очередь опустела — сбросить счётчик "поставлено сегодня", чтобы
-  # следующий цикл enqueue (nightly/static-reeval) стартовал прогресс-бар с нуля,
-  # а не продолжал накапливать total от предыдущего цикла.
-  if [ -z "$line" ]; then
-    echo '{"total":0,"started_at":""}' > "$PROGRESS" 2>/dev/null
-    sleep "$IDLE"; continue
-  fi
-  domain="${line%%$'\t'*}"
-  if [ "$domain" = "$line" ]; then source=reeval; else source="${line#*$'\t'}"; fi
-  domain=$(echo "$domain" | sed -E 's#^https?://##; s#/.*$##' | tr -d ' ')
-  [ -n "$domain" ] || continue
-  if [ "$(python3 "$GWDB" whitelisted "$domain" 2>/dev/null)" = "1" ]; then
-    log "⚪ $domain — whitelist, пропуск"
-    continue
-  fi
-  process_domain "$domain" "$source"
+
+# T-parallel-workers (2026-09-17): до 4 воркеров разбирают очередь параллельно
+# (по просьбе владельца; тест-режим: "посмотрим как будет себя чувствовать 4").
+# Безопасность гонок: pop() под flock на $LOCK (было и раньше), процессинг
+# per-domain независим; лог может чередоваться строками — осознанно.
+WORKERS="${WORKERS:-4}"
+
+worker_loop() {
+  local line domain source
+  while true; do
+    line=$(pop)
+    # T-progress-ui: очередь опустела — сбросить счётчик "поставлено сегодня",
+    # чтобы следующий цикл enqueue стартовал прогресс с нуля. Гонка записи
+    # между воркерами безвредна — пишут одно и то же.
+    if [ -z "$line" ]; then
+      echo '{"total":0,"started_at":""}' > "$PROGRESS" 2>/dev/null
+      sleep "$IDLE"; continue
+    fi
+    domain="${line%%$'\t'*}"
+    if [ "$domain" = "$line" ]; then source=reeval; else source="${line#*$'\t'}"; fi
+    domain=$(echo "$domain" | sed -E 's#^https?://##; s#/.*$##' | tr -d ' ')
+    [ -n "$domain" ] || continue
+    if [ "$(python3 "$GWDB" whitelisted "$domain" 2>/dev/null)" = "1" ]; then
+      log "⚪ $domain — whitelist, пропуск"
+      continue
+    fi
+    process_domain "$domain" "$source"
+  done
+}
+
+log "параллельный режим: WORKERS=$WORKERS"
+for _w in $(seq 1 "$WORKERS"); do
+  worker_loop &
 done
+wait
