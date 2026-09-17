@@ -307,7 +307,13 @@ process_domain() {
   #    (только tcp), и только если ничего не подошло — отдаёт VPS.
   log "▶ $domain (source=$source) — существующие группы не подошли, полный перебор пресетов"
   local out verdict
-  out=$(ZAPRET=/opt/zapret GWDB="$GWDB" bash "$SOLVE" "$domain" "$source" 2>/dev/null)
+  # T-solve-semaphore (2026-09-17): полный перебор — тяжёлый (netns + тестовые
+  # демоны + сотни проб; на 2-ядерном стенде 4 одновременных задушат шлюз,
+  # load 4.4+ при живом тесте). Быстрые ветки выше остаются параллельными (×4),
+  # полный перебор — глобально по одному (flock). Это всё равно быстрее старого
+  # полностью-последовательного воркера: пока один solve пыхтит, остальные
+  # воркеры разбирают быстрые домены.
+  out=$(ZAPRET=/opt/zapret GWDB="$GWDB" flock /tmp/solve-global.lock bash "$SOLVE" "$domain" "$source" 2>/dev/null)
   verdict=$(echo "$out" | grep -E '^(ZAPRET2|ZAPRET|CIADPI|VPS|DIRECT)' | tail -1)
 
   case "$verdict" in
