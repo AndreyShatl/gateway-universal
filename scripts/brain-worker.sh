@@ -194,27 +194,31 @@ process_domain() {
   #    даже пробовать не нужно. Снимаем любую существующую группу (на случай
   #    гонки: пин поставили ПОСЛЕ того, как домен уже получил DPI-стратегию)
   #    и гарантируем VPS. Всегда return — шаги 1-3 ниже не должны выполняться.
-  if [ -n "$(pinned_vps_service "$domain")" ] && ! ggc_delivery_host "$domain"; then
-    local cur_any; cur_any=$(bash "$APPLY" group-of "$domain" 2>/dev/null)$(bash "$APPLY" cgroup-of "$domain" 2>/dev/null)$(bash "$APPLY" z2group-of "$domain" 2>/dev/null)
-    bash "$APPLY" vps "$domain" >/dev/null 2>&1
-    if [ -n "$cur_any" ]; then
-      log "📌 $domain — сервис закреплён на VPS, снят с DPI-обхода"
-    fi
-    python3 "$GWDB" vps-touch "$domain" success >/dev/null 2>&1
-    return 0
-  fi
-
+  # T-pinned-fullsolve (2026-09-17, идея владельца: auto = реальный поиск для
+  # каждого домена). Раньше пиннед-сервисы обрабатывались жёстко: «VPS и не
+  # искать вовсе» (консерватизм до появления VPS-подложки). Теперь подложка
+  # гарантирует ноль простоев при любом исходе — пиннед-доменам РАЗРЕШЁН
+  # полный перебор: нашли пробивающуюся стратегию → домен в DPI-группе С
+  # сохранением VPS-фолбэка (dormant, неуязвим для ротации CDN); не нашли →
+  # остаётся на VPS-полу. Карантин живых провалов ловит стратегии, которые
+  # «работают» только для нашего curl-теста.
   if [ -n "$(pinned_vps_service "$domain")" ]; then
-    # Не перебираем пресеты для pinned YouTube: это дорого и может снять
-    # проверенный baseline. Ищем только среди уже работающих LOCAL-групп.
-    bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
-    if try_existing_groups "$domain" "$proto" || try_existing_cgroups "$domain" "$proto" || try_existing_z2groups "$domain" "$proto"; then
-      log "✅ $domain — GGC переведён с VPS на существующий LOCAL-обход"
-      confirm_local_at_nightly "$domain" "$source"
-    else
-      log "📌 $domain — GGC остаётся на VPS: существующая LOCAL-стратегия не подтвердилась"
+    if ggc_delivery_host "$domain"; then
+      # GGC-хосты — как раньше: только проверка существующих групп, без
+      # дорогого полного перебора (их слишком много и ротируются бесконечно)
+      bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
+      if try_existing_groups "$domain" "$proto" || try_existing_cgroups "$domain" "$proto" || try_existing_z2groups "$domain" "$proto"; then
+        log "✅ $domain — GGC переведён с VPS на существующий LOCAL-обход"
+        confirm_local_at_nightly "$domain" "$source"
+      else
+        log "📌 $domain — GGC остаётся на VPS: существующая LOCAL-стратегия не подтвердилась"
+      fi
+      return 0
     fi
-    return 0
+    # Не-GGC пиннед-домен: подложка + падаем в общий конвейер ниже (полный
+    # поиск с сохранением fallback). vps-touch не делаем — путь не «конечный».
+    bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
+    log "🔎 $domain — пиннед-сервис: VPS-подложка ensured, запускаем полный поиск LOCAL (fallback остаётся)"
   fi
 
   # 1. Домен уже в zapret-группе, ИЛИ ciadpi-группе, ИЛИ zapret2-группе (взаимно-
