@@ -380,7 +380,7 @@ export function DomainsPage() {
         <div className="mb-3.5 flex items-center justify-between">
           <h2 className="m-0 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
             Сервисы ({services.length})
-            <InfoTip text="Курируемые группы доменов. Режимы: DPI (локальный обход), Auto (мозг управляет миксом с двойной подложкой), VPS (всё через туннель; DPI-подложка проверяется ночью без переключений), Direct (без обхода). Кнопка авто ставит все домены в фоновый поиск — переключение только при подтверждённом обходе, без разрывов." />
+            <InfoTip text="VPS — строго VPS: всё через туннель. DPI — включает DPI-обход (работает или нет — зависит от стратегий). Direct — прямой путь через провайдера. Auto — миксует маршруты из двух подложек (DPI и VPS), приоритет — 100% работоспособность. Кнопка авто — фоновый поиск LOCAL для всех доменов, переключение только при подтверждении." />
           </h2>
           {localServices && (
             <button

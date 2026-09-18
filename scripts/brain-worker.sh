@@ -229,23 +229,15 @@ process_domain() {
     # Полный перебор для пиннед — ТОЛЬКО по явному действию владельца
     # (source=auto от кнопки). Фоновые постановки — быстрая ветка ниже.
     if [ "$source" != "auto" ]; then
-      bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
-      if try_existing_groups "$domain" "$proto" || try_existing_cgroups "$domain" "$proto" || try_existing_z2groups "$domain" "$proto"; then
-        log "✅ $domain — пиннед (фон): существующий LOCAL-обход подтверждён, VPS-подложка сохранена"
-        confirm_local_at_nightly "$domain" "$source"
-      fi
+      # СТРОГИЙ vps (семантика владельца 2026-09-18): кнопка vps = только VPS.
+      # Фоновые постановки (детектор/ночь) тоже снимают DPI-членства, если
+      # они завелись — микс возможен только в режиме auto.
+      bash "$APPLY" vps "$domain" >/dev/null 2>&1
       return 0
     fi
-    if ggc_delivery_host "$domain"; then
-      # GGC-хосты — как раньше: только проверка существующих групп, без
-      # дорогого полного перебора (их слишком много и ротируются бесконечно)
-      bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
-      if try_existing_groups "$domain" "$proto" || try_existing_cgroups "$domain" "$proto" || try_existing_z2groups "$domain" "$proto"; then
-        log "✅ $domain — GGC переведён с VPS на существующий LOCAL-обход"
-        confirm_local_at_nightly "$domain" "$source"
-      else
-        log "📌 $domain — GGC остаётся на VPS: существующая LOCAL-стратегия не подтвердилась"
-      fi
+    if ggc_delivery_host "$domain" && [ "$source" != "auto" ]; then
+      # GGC-хосты в строгом vps: не трогаем (они не обрабатываются вообще —
+      # стриминговые хосты недостижимы через VPS, микс только в auto)
       return 0
     fi
     # Не-GGC пиннед-домен: подложка + падаем в общий конвейер ниже (полный

@@ -138,6 +138,11 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 			maybeLearnUDP(c.DstIP, c.Port, *apply)
 			return
 		}
+		// direct-сервисы (семантика владельца 2026-09-18): кнопка direct =
+		// прямой путь через провайдера, мозг и детектор не вмешиваются.
+		if c.SNI != "" && inDirectService(c.SNI) {
+			return
+		}
 		// whitelist (T49): не анализируем вообще (даже тенью), если SNI попадает
 		// под правило whitelist (.ru/.рф/.su, см. gwdb.py) — КРОМЕ доменов, явно
 		// прописанных на VPS в xray/domains/*.txt (курируемый список приоритетнее).
@@ -579,6 +584,34 @@ var gwdbScript = "/root/gateway-universal/scripts/gwdb.py"
 // isWhitelisted — проверка через gwdb.py (единая точка схемы с bash-стороной
 // мозга и gateway-ui, см. scripts/gwdb.py). Не найден python3/скрипт — считаем
 // НЕ whitelisted (fail-open к анализу, не fail-open к пропуску блокировок).
+// inDirectService — домен входит в сервис с mode=direct (пользовательский
+// выбор прямого пути; никаких сигналов, переводов и автообхода).
+func inDirectService(domain string) bool {
+	data, err := os.ReadFile("/etc/gateway/zapret-services.json")
+	if err != nil {
+		return false
+	}
+	var svcs []struct {
+		Mode    string   `json:"mode"`
+		Domains []string `json:"domains"`
+	}
+	if json.Unmarshal(data, &svcs) != nil {
+		return false
+	}
+	d := strings.ToLower(domain)
+	for _, s := range svcs {
+		if s.Mode != "direct" {
+			continue
+		}
+		for _, x := range s.Domains {
+			if strings.EqualFold(x, d) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isWhitelisted(domain string) bool {
 	out, err := exec.Command("python3", gwdbScript, "whitelisted", domain).Output()
 	if err != nil {
