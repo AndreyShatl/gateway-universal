@@ -203,6 +203,19 @@ process_domain() {
   # остаётся на VPS-полу. Карантин живых провалов ловит стратегии, которые
   # «работают» только для нашего curl-теста.
   if [ -n "$(pinned_vps_service "$domain")" ]; then
+    # T-pinned-fullsolve-gate (2026-09-18, живой инцидент: детектор поставил
+    # discord-домены в очередь фоновым поиском после живых провалов — и они
+    # уехали на DPI без ведома владельца, реальные клиенты отвалились).
+    # Полный перебор для пиннед — ТОЛЬКО по явному действию владельца
+    # (source=auto от кнопки). Фоновые постановки — быстрая ветка ниже.
+    if [ "$source" != "auto" ]; then
+      bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
+      if try_existing_groups "$domain" "$proto" || try_existing_cgroups "$domain" "$proto" || try_existing_z2groups "$domain" "$proto"; then
+        log "✅ $domain — пиннед (фон): существующий LOCAL-обход подтверждён, VPS-подложка сохранена"
+        confirm_local_at_nightly "$domain" "$source"
+      fi
+      return 0
+    fi
     if ggc_delivery_host "$domain"; then
       # GGC-хосты — как раньше: только проверка существующих групп, без
       # дорогого полного перебора (их слишком много и ротируются бесконечно)

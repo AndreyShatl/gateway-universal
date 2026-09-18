@@ -50,6 +50,14 @@ exit 0
 # дня, LAN без DNS, никто не заметил): DNS-цепочка жива. Проверяем dnscrypt
 # напрямую (127.0.0.1:5353) — если молчит, рестартим. Полная цепочка
 # (AdGuard→dnscrypt) поднимется сама: AdGuard кэширует и повторяет.
+# Полный путь (LAN-вид): AdGuard на 192.168.1.132:53. Инциденты 2026-09-17/18:
+# дважды умирал незаметно (конфликт бинда с внутренним DNS xray на 127.0.0.1:53
+# после рестартов) — проверка только dnscrypt этого не видела.
+if ! dig +short +time=3 +tries=1 @192.168.1.132 ya.ru >/dev/null 2>&1; then
+  log "DNS: полный путь (AdGuard :53) не отвечает — рестарт AdGuardHome"
+  systemctl restart AdGuardHome 2>/dev/null
+  sleep 3
+fi
 if ! dig +short +time=3 +tries=1 -p 5353 @127.0.0.1 ya.ru >/dev/null 2>&1; then
   log "DNS: dnscrypt не отвечает — рестарт dnscrypt-proxy"
   systemctl restart dnscrypt-proxy 2>/dev/null
