@@ -59,7 +59,13 @@ while IFS=$'\t' read -r d eng proto strat; do
     zapret2) res=$(bash "$SOLVE" --test-zapret2-args "$d" "$proto" $strat 2>/dev/null | tail -1);;
   esac
   verdict=false
-  case "$res" in OK|ok*|*"успех"*) verdict=true; ok=$((ok+1));; *) fail=$((fail+1));; esac
+  case "$res" in OK|ok*|*"успех"*) verdict=true; ok=$((ok+1));; *)
+    fail=$((fail+1))
+    # мёртвое членство — снять (домен остаётся на VPS-полу пина; снимает
+    # только из группы). Живой прогон 2026-09-18: 231/231 мертвы — наставлены
+    # во время DNS-поломки, когда пробы шли через дохлый резолвер.
+    bash /opt/gateway-brain/brain-apply.sh vps "$d" >/dev/null 2>&1 || true
+    ;; esac
   printf '{"domain":"%s","engine":"%s","ready":%s,"verified_at":"%s"}\n' \
     "$d" "$eng" "$verdict" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /tmp/readiness.jsonl
 done < /tmp/shadow-tasks.tsv
