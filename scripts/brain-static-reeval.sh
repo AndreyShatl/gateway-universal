@@ -107,6 +107,10 @@ for sid in youtube discord instagram; do
     log "$sid: закреплён на VPS — пропуск (не ставим в очередь)"
     continue
   fi
+  if [ "$mode" = "direct" ]; then
+    log "$sid: direct — пользовательский выбор, не трогаем"
+    continue
+  fi
   domains=$(jq -r --arg id "$sid" '.[] | select(.id==$id) | .domains[]?' "$SERVICES" 2>/dev/null)
   [ -n "$domains" ] || continue
   while IFS= read -r domain; do

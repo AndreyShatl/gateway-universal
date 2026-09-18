@@ -36,6 +36,26 @@ SERVICES=${SERVICES:-/etc/gateway/zapret-services.json}
 # ночной/пассивный проход тихо назначал ему ciadpi заново (реальный кейс
 # этой ночи: 41 домен discord пришлось снимать вручную, расползались бы
 # снова). Теперь process_domain() проверяет pin ПЕРВЫМ делом.
+direct_service() { # <domain> -> "1" если домен в сервисе с mode=direct (пользовательский выбор: без обхода)
+  python3 - "$1" <<'PYD' 2>/dev/null
+import json, sys
+d = sys.argv[1].lower()
+try:
+    data = json.load(open("/etc/gateway/zapret-services.json"))
+    if not isinstance(data, list): data = data.get("services", data)
+    for svc in data:
+        if svc.get("mode") == "direct":
+            doms = [x.lower() for x in svc.get("domains", [])]
+            if d in doms:
+                raise SystemExit(0)
+except SystemExit:
+    raise
+except Exception:
+    pass
+raise SystemExit(1)
+PYD
+}
+
 pinned_vps_service() { # <domain> -> "1" если домен в сервисе с mode=vps, иначе ""
   local domain=$1
   python3 -c "
@@ -412,6 +432,10 @@ worker_loop() {
     [ -n "$domain" ] || continue
     if [ "$(python3 "$GWDB" whitelisted "$domain" 2>/dev/null)" = "1" ]; then
       log "⚪ $domain — whitelist, пропуск"
+      continue
+    fi
+    if direct_service "$domain"; then
+      log "↗ $domain — сервис в режиме direct (пользователь), не трогаем"
       continue
     fi
     process_domain "$domain" "$source"

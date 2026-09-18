@@ -1,0 +1,8 @@
+[Unit]
+Description=Shadow-валидация DPI-готовности для VPS-пула (без переключений)
+# Идея владельца 2026-09-18: VPS-пул не дёргается, но DPI-подложка всегда
+# проверена последней ночью (TSPU-темп: месяцы). Read-only к маршрутам.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-shadow-validate.sh
