@@ -38,10 +38,15 @@ const serviceHints: Record<string, string> = {
   quic_fallback: 'Не список доменов — обрабатывает весь остальной QUIC-трафик (UDP/443), не попавший в другие сервисы. 0 доменов здесь — норма, не баг.',
 }
 
+// T-режимы-и-готовность (2026-09-18, семантика владельца): dpi = локальный
+// DPI-обход, vps = всё через туннель (DPI-подложка проверяется ночью,
+// без переключений), direct = без обхода, auto = мозг управляет миксом
+// dpi/vps/direct с двойной подложкой и гистерезисом.
 const modes = [
-  { value: 'zapret', label: 'zapret' },
-  { value: 'vps', label: 'vps' },
-  { value: 'direct', label: 'direct' },
+  { value: 'dpi', label: 'DPI' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'vps', label: 'VPS' },
+  { value: 'direct', label: 'Direct' },
 ]
 
 // Порог для "Авто": если хотя бы половина доменов сервиса проходит через
@@ -63,7 +68,7 @@ function ModeToggle({
   onAuto: () => void
   autoBusy: boolean
 }) {
-  const current = value || 'zapret'
+  const current = value === 'zapret' ? 'dpi' : (value || 'auto')
   return (
     <div className="flex gap-0.5 rounded-lg border border-border p-0.5">
       {modes.map((m) => (
@@ -375,7 +380,7 @@ export function DomainsPage() {
         <div className="mb-3.5 flex items-center justify-between">
           <h2 className="m-0 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-text-muted">
             Сервисы ({services.length})
-            <InfoTip text="Курируемые группы доменов с готовыми стратегиями обхода. Режим на каждую: zapret (свой DPI-обход), vps (форс через VPS-туннель) или direct (без обхода вообще). Кнопка auto прогоняет все домены сервиса через blockcheck и сама подбирает zapret/vps по большинству — решение всё равно нужно подтвердить кнопкой «Сохранить и применить»." />
+            <InfoTip text="Курируемые группы доменов. Режимы: DPI (локальный обход), Auto (мозг управляет миксом с двойной подложкой), VPS (всё через туннель; DPI-подложка проверяется ночью без переключений), Direct (без обхода). Кнопка авто ставит все домены в фоновый поиск — переключение только при подтверждённом обходе, без разрывов." />
           </h2>
           {localServices && (
             <button
