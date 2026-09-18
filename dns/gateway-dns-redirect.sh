@@ -7,6 +7,6 @@
 LAN="${1:-192.168.0.0/16}"
 add() { iptables -t nat -C "$@" 2>/dev/null || iptables -t nat -A "$@"; }
 for p in udp tcp; do
-    add PREROUTING -s "$LAN" -p "$p" --dport 53 -j REDIRECT --to-ports 53
-    add OUTPUT -p "$p" --dport 53 ! -d 127.0.0.1 -j REDIRECT --to-ports 53
+    add PREROUTING -s "$LAN" -p "$p" --dport 53 -j DNAT --to-destination 192.168.1.132:53
+    add OUTPUT -p "$p" --dport 53 ! -d 127.0.0.1 -j DNAT --to-destination 192.168.1.132:53
 done
