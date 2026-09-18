@@ -50,13 +50,16 @@ total=0; ok=0; fail=0
 while IFS=$'\t' read -r d eng proto strat; do
   [ -n "$d" ] || continue
   total=$((total+1))
+  # стратегия передаётся БЕЗ кавычек — как в brain-worker (word-splitting
+  # на отдельные аргументы пресета); кавычками я ломал разбор (0/230 в живом
+  # прогоне 2026-09-18)
   case "$eng" in
-    zapret)  res=$(bash "$SOLVE" --test-args "$d" "$proto" "$strat" 2>/dev/null | tail -1);;
-    ciadpi)  res=$(bash "$SOLVE" --test-ciadpi-args "$d" "$strat" 2>/dev/null | tail -1);;
-    zapret2) res=$(bash "$SOLVE" --test-zapret2-args "$d" "$proto" "$strat" 2>/dev/null | tail -1);;
+    zapret)  res=$(bash "$SOLVE" --test-args "$d" "$proto" $strat 2>/dev/null | tail -1);;
+    ciadpi)  res=$(bash "$SOLVE" --test-ciadpi-args "$d" $strat 2>/dev/null | tail -1);;
+    zapret2) res=$(bash "$SOLVE" --test-zapret2-args "$d" "$proto" $strat 2>/dev/null | tail -1);;
   esac
-  verdict=no
-  case "$res" in OK|ok*|*"успех"*) verdict=yes; ok=$((ok+1));; *) fail=$((fail+1));; esac
+  verdict=false
+  case "$res" in OK|ok*|*"успех"*) verdict=true; ok=$((ok+1));; *) fail=$((fail+1));; esac
   printf '{"domain":"%s","engine":"%s","ready":%s,"verified_at":"%s"}\n' \
     "$d" "$eng" "$verdict" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /tmp/readiness.jsonl
 done < /tmp/shadow-tasks.tsv
