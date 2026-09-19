@@ -66,8 +66,10 @@ while IFS=$'\t' read -r d eng proto strat; do
     # во время DNS-поломки, когда пробы шли через дохлый резолвер.
     bash /opt/gateway-brain/brain-apply.sh vps "$d" >/dev/null 2>&1 || true
     ;; esac
-  printf '{"domain":"%s","engine":"%s","ready":%s,"verified_at":"%s"}\n' \
-    "$d" "$eng" "$verdict" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /tmp/readiness.jsonl
+  printf '{"domain":"%s","engine":"%s","ready":%s,"strategy":%s,"verified_at":"%s"}\n' \
+    "$d" "$eng" "$verdict" \
+    "$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$strat")" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /tmp/readiness.jsonl
 done < /tmp/shadow-tasks.tsv
 
 python3 - <<'PYEOF'
@@ -79,3 +81,70 @@ PYEOF
 rm -f /tmp/readiness.jsonl /tmp/shadow-tasks.tsv
 log "готовность DPI для VPS-пула: проверено=$total готово=$ok неготово=$fail (ничего не переключено)"
 echo "shadow-validate: проверено=$total готово=$ok неготово=$fail; снапшот: $OUT"
+
+# ===== Phase B: T-shadow-solve (2026-09-19, идея владельца: «переход за секунду»)
+# Для доменов сервисов (не direct) БЕЗ стратегии: полный перебор В ТЕНИ —
+# результаты в dpi-readiness.json. Ночь готовит меню, кнопка днём применяет
+# готовое мгновенно. Бюджет: не более SHADOW_SOLVE_BUDGET доменов за ночь
+# (перебор тяжёлый, 2 ядра; продолжение — следующей ночью, приоритет —
+# никогда не искомые, затем самые старые проверки).
+SHADOW_SOLVE_BUDGET="${SHADOW_SOLVE_BUDGET:-100}"
+SOLVE_LOCK=/tmp/solve-global.lock
+
+python3 - <<'PYB' > /tmp/shadow-solve-tasks.txt
+import json
+data = json.load(open("/etc/gateway/zapret-services.json"))
+if not isinstance(data, list): data = data.get("services", data)
+pool = set()
+for svc in data:
+    if svc.get("mode") != "direct":
+        for d in svc.get("domains", []):
+            pool.add(d.lower())
+in_group = set()
+for f in ["/etc/gateway/brain-services.json","/etc/gateway/brain-services-ciadpi.json","/etc/gateway/brain-services-zapret2.json"]:
+    for g in json.load(open(f)):
+        for d in g.get("domains", []):
+            in_group.add(d.lower())
+ready = {}
+try:
+    ready = {e["domain"]: e for e in json.load(open("/etc/gateway/observe/dpi-readiness.json")).get("entries", [])}
+except Exception:
+    pass
+import datetime
+now = datetime.datetime.utcnow()
+todo = []
+for d in pool:
+    if d in in_group:
+        continue                      # уже в DPI — Phase A проверяет
+    e = ready.get(d)
+    if e and e.get("strategy") is not None and e.get("verified_at","") > (now - datetime.timedelta(days=2)).isoformat():
+        continue                      # свежий вердикт есть (в т.ч. «не пробивается»)
+    todo.append((e is None, e.get("verified_at","") if e else "", d))
+todo.sort(reverse=True)               # новые сверху, потом самые старые
+for _,_,d in todo:
+    print(d)
+PYB
+
+solved=0; found=0
+while read -r d; do
+  [ -s /tmp/stop-shadow-solve ] && break          # внешний тормоз
+  [ "$solved" -ge "$SHADOW_SOLVE_BUDGET" ] && break
+  [ -n "$d" ] || continue
+  solved=$((solved+1))
+  out=$(ZAPRET=/opt/zapret GWDB="$GWDB" flock "$SOLVE_LOCK" bash "$SOLVE" "$d" shadow 2>/dev/null)
+  verdict=$(echo "$out" | grep -E '^(ZAPRET2|ZAPRET|CIADPI|VPS|DIRECT)' | tail -1)
+  eng=""; proto="tcp"; strat=""
+  case "$verdict" in
+    ZAPRET*)  eng="zapret";  proto=$(echo "$verdict" | cut -f2); strat=$(echo "$verdict" | cut -f4-);;
+    CIADPI*)  eng="ciadpi";  strat=$(echo "$verdict" | cut -f4-);;
+    ZAPRET2*) eng="zapret2"; proto=$(echo "$verdict" | cut -f2); strat=$(echo "$verdict" | cut -f4-);;
+    *)        eng=""; strat="";;   # VPS/DIRECT/пусто = не пробивается (тоже вердикт)
+  esac
+  [ -n "$eng" ] && found=$((found+1))
+  printf '{"domain":"%s","engine":"%s","ready":%s,"strategy":%s,"verified_at":"%s"}\n' \
+    "$d" "$eng" "$([ -n "$eng" ] && echo true || echo false)" \
+    "$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$strat")" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> /tmp/readiness.jsonl
+done < /tmp/shadow-solve-tasks.txt
+rm -f /tmp/shadow-solve-tasks.txt
+[ "$solved" -gt 0 ] && log "теневой поиск: решено=$solved найдено_стратегий=$found (бюджет $SHADOW_SOLVE_BUDGET/ночь; хвост — следующей ночью)"

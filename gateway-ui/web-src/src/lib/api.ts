@@ -521,3 +521,7 @@ export const fetchDailyDigest = () => api<DailyDigestResponse>('/api/daily-diges
 // T-auto-local: все домены сервиса — в фоновый поиск LOCAL (мозг, 4 воркера)
 export const serviceAutoLocal = (id: string) =>
   api<{ enqueued: number; message: string }>(`/api/services/${id}/auto-local`, { method: 'POST' })
+
+export interface DPIReadinessEntry { domain: string; engine?: string; ready?: boolean; strategy?: string; verified_at?: string }
+export interface DPIReadiness { entries?: DPIReadinessEntry[]; hint?: string }
+export const fetchDPIReadiness = () => api<DPIReadiness>('/api/dpi-readiness')

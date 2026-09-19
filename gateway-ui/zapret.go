@@ -130,6 +130,13 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 			was, becomes := oldMode[v.ID], v.Mode
 			if was != becomes {
 				s.timeline.Record("service.mode", v.ID+": "+was+" -> "+becomes)
+				// T-fast-apply (2026-09-19): переход НА dpi/auto — мгновенно
+				// применяем готовые стратегии из ночного кэша (без проб).
+				if becomes == "dpi" || becomes == "auto" {
+					go func(id string) {
+						runCmd("bash", "/opt/gateway-brain/brain-apply-ready.sh", id)
+					}(v.ID)
+				}
 			}
 			if was == becomes {
 				continue

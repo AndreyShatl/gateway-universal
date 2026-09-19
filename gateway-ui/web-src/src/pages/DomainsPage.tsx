@@ -17,6 +17,7 @@ import {
   type ZService,
   type PinVPSJob,
   serviceAutoLocal,
+  fetchDPIReadiness,
 } from '../lib/api'
 
 function SectionHead({ title, count, hint }: { title: string; count?: number; hint?: string }) {
@@ -115,12 +116,14 @@ function ServiceRow({
   onAuto,
   autoBusy,
   bypassedDomains,
+  readyDomains,
 }: {
   svc: ZService
   onModeChange: (id: string, mode: string) => void
   onAuto: (svc: ZService) => void
   autoBusy: boolean
   bypassedDomains: Set<string>
+  readyDomains: Set<string>
 }) {
   // п.15 ТЗ: badge сервиса — это mode из zapret-services.json, а не то, что
   // реально происходит по доменам. Домен из vps-сервиса может уже успешно
@@ -148,7 +151,10 @@ function ServiceRow({
           </div>
           <div className="font-mono text-[11px] text-text-muted">{svc.domains.length} domains</div>
         </div>
-        <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[10.5px] text-text-muted" title="Готовые DPI-стратегии по ночному кэшу (мгновенное переключение доступно только для них)">DPI готово: {svc.domains.filter((d) => readyDomains.has(d)).length}/{svc.domains.length}</span>
+          <ModeToggle value={svc.mode} onChange={(mode) => onModeChange(svc.id, mode)} onAuto={() => onAuto(svc)} autoBusy={autoBusy} />
+        </div>
       </div>
       {bypassedCount > 0 && (
         <div className="mt-2 flex items-center gap-1.5 text-[11px] text-text-muted">
@@ -164,7 +170,9 @@ export function DomainsPage() {
   const { data: domainsData } = usePoll(fetchDomains, 5000)
   const { data: servicesData, error: servicesError } = usePoll(fetchServices, 5000)
   const { data: monitorData } = usePoll(fetchMonitor, 10000)
+  const { data: readiness } = usePoll(fetchDPIReadiness, 30000)
   const bypassedDomains = new Set((monitorData?.brain_groups ?? []).flatMap((g) => g.domains))
+  const readyDomains = new Set((readiness?.entries ?? []).filter((e) => e.ready).map((e) => e.domain))
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -411,6 +419,7 @@ export function DomainsPage() {
               key={svc.id}
               svc={svc}
               onModeChange={onModeChange}
+              readyDomains={readyDomains}
               onAuto={onAuto}
               autoBusy={autoServiceId === svc.id}
               bypassedDomains={bypassedDomains}

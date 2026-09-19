@@ -191,6 +191,7 @@ func main() {
 	mux.HandleFunc("/api/route-state", s.requireAuth(s.handleRouteState))
 	mux.HandleFunc("/api/shadow-report", s.requireAuth(s.handleShadowReport))
 	mux.HandleFunc("/api/daily-digest", s.requireAuth(s.handleDailyDigest))
+	mux.HandleFunc("/api/dpi-readiness", s.requireAuth(s.handleDPIReadiness))
 	mux.HandleFunc("/api/vps-domains", s.requireAuth(s.handleVPSDomains))
 	mux.HandleFunc("/api/recheck", s.requireAuth(s.handleRecheck))
 	mux.HandleFunc("/api/nightly-progress", s.requireAuth(s.handleNightlyProgress))

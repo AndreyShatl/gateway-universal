@@ -13,6 +13,7 @@ package main
 // воркером безопасна: лишний дубль просто отработает вторым проходом).
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -72,7 +73,10 @@ func (s *server) handleAutoLocal(w http.ResponseWriter, r *http.Request) {
 			enq++
 		}
 	}
-	s.timeline.Record("service.auto-local", id+": "+itoa(enq)+" доменов в фоновый поиск LOCAL (без смены режима)")
+	// Готовые стратегии из ночного кэша — применить сразу в фоне (без проб);
+	// в очередь идут только те, у кого готовности нет.
+	go runCmd("bash", "/opt/gateway-brain/brain-apply-ready.sh", id)
+	s.timeline.Record("service.auto-local", id+": "+itoa(enq)+" доменов в фоновый поиск LOCAL + мгновенное применение готовых из кэша")
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enqueued": enq,
 		"message":  "Домены поставлены в фоновый поиск локального обхода (4 воркера). Переключение — только при подтверждённом обходе, соединения не рвутся, VPS-режим сервиса не меняется.",
@@ -80,3 +84,17 @@ func (s *server) handleAutoLocal(w http.ResponseWriter, r *http.Request) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// handleDPIReadiness — GET /api/dpi-readiness: ночной кэш готовности DPI
+// (domain -> ready/engine/strategy/verified_at). Фронт считает N/M по сервису.
+func (s *server) handleDPIReadiness(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile("/etc/gateway/observe/dpi-readiness.json")
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{"entries": []any{}, "hint": "ночная проверка ещё не сформировала кэш готовности"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
