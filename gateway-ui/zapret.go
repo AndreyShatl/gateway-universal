@@ -128,6 +128,9 @@ func (s *server) handleServices(w http.ResponseWriter, r *http.Request) {
 		var pinJobs []string
 		for _, v := range svc {
 			was, becomes := oldMode[v.ID], v.Mode
+			if was != becomes {
+				s.timeline.Record("service.mode", v.ID+": "+was+" -> "+becomes)
+			}
 			if was == becomes {
 				continue
 			}

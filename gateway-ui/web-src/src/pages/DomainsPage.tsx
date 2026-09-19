@@ -42,10 +42,13 @@ const serviceHints: Record<string, string> = {
 // DPI-обход, vps = всё через туннель (DPI-подложка проверяется ночью,
 // без переключений), direct = без обхода, auto = мозг управляет миксом
 // dpi/vps/direct с двойной подложкой и гистерезисом.
+// VPS ПЕРВОЙ: раньше (старый toggle) vps была второй кнопкой — смена порядка
+// без предупреждения заставила владельца кликнуть по привычке Auto вместо VPS
+// (живой инцидент 2026-09-18 21:55). Привычное место — святое.
 const modes = [
+  { value: 'vps', label: 'VPS' },
   { value: 'dpi', label: 'DPI' },
   { value: 'auto', label: 'Auto' },
-  { value: 'vps', label: 'VPS' },
   { value: 'direct', label: 'Direct' },
 ]
 
