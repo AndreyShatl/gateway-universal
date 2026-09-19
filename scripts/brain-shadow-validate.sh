@@ -148,3 +148,25 @@ while read -r d; do
 done < /tmp/shadow-solve-tasks.txt
 rm -f /tmp/shadow-solve-tasks.txt
 [ "$solved" -gt 0 ] && log "теневой поиск: решено=$solved найдено_стратегий=$found (бюджет $SHADOW_SOLVE_BUDGET/ночь; хвост — следующей ночью)"
+
+# Финальная агрегация ПОСЛЕ Phase B: слить /tmp/readiness.jsonl (дописанный
+# теневым поиском) в readiness.json — ранний агрегатор выше удалял файл до
+# того, как Phase B успевал его наполнить (баг сборки 2026-09-19).
+if [ -s /tmp/readiness.jsonl ]; then
+  python3 - <<'PYFIN'
+import json, datetime
+path = "/etc/gateway/observe/dpi-readiness.json"
+new_rows = [json.loads(l) for l in open("/tmp/readiness.jsonl") if l.strip()]
+try:
+    cur = json.load(open(path))
+    entries = {e["domain"]: e for e in cur.get("entries", [])}
+except Exception:
+    entries = {}
+for e in new_rows:
+    entries[e["domain"]] = e   # свежее затирает старое
+json.dump({"generated": datetime.datetime.utcnow().isoformat()+"Z", "entries": list(entries.values())},
+          open(path, "w"), ensure_ascii=False, indent=1)
+print("aggregated", len(new_rows))
+PYFIN
+  rm -f /tmp/readiness.jsonl
+fi
