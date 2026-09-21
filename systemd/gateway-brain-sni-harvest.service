@@ -1,0 +1,8 @@
+[Unit]
+Description=Ночной жнец живых SNI-кандидатов (живое обучение доменам сервисов)
+# Этап единого ночного pipeline ПОСЛЕ domain-actualize: кандидаты от детектора
+# классифицируются по диапазонам, валидируются резолвом, вливаются в списки.
+
+[Service]
+Type=oneshot
+ExecStart=/opt/gateway-brain/brain-sni-harvest.sh

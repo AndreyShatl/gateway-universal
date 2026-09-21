@@ -1,0 +1,10 @@
+[Unit]
+Description=Ежедневно 04:30: sni-harvest (после actualize 04:02)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

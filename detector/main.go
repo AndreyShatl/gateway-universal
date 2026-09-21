@@ -138,6 +138,14 @@ func buildCandidateHandler(apply *bool, socks *string) func(watcher.Candidate) {
 			maybeLearnUDP(c.DstIP, c.Port, *apply)
 			return
 		}
+		// T-sni-harvest (2026-09-21, ТЗ владельца «живое обучение доменам»):
+		// неизвестный нашим спискам SNI в живом трафике — кандидат на добавление
+		// в список сервиса (смартфонные API/realtime/media-домены, которых нет
+		// в geosite). Пишем с observed IP — ночная классификация по диапазонам.
+		if c.SNI != "" {
+			harvestCandidate(c.SNI, c.DstIP)
+		}
+
 		// direct-сервисы (семантика владельца 2026-09-18): кнопка direct =
 		// прямой путь через провайдера, мозг и детектор не вмешиваются.
 		if c.SNI != "" && inDirectService(c.SNI) {
@@ -881,4 +889,73 @@ func resolveHost(h string) string {
 		}
 	}
 	return ""
+}
+
+// ===== T-sni-harvest: журнал живых SNI-кандидатов =====
+// Детектор видит реальные SNI всех клиентов (включая смартфонные приложения).
+// Если SNI не известен нашим спискам (сервисы+группы+автороут+статика xray) —
+// пишем "domain<TAB>ip" в observe/sni-candidates.log. Ночной brain-sni-harvest
+// классифицирует по диапазонам сервисов (Meta/Discord/Google) и валидирует.
+var harvestSeen = struct {
+	sync.Mutex
+	m map[string]time.Time
+}{m: map[string]time.Time{}}
+
+func knownToLists(domain string) bool {
+	d := strings.ToLower(domain)
+	// сервисы
+	data, err := os.ReadFile("/etc/gateway/zapret-services.json")
+	if err == nil {
+		var svcs []struct {
+			Domains []string `json:"domains"`
+		}
+		if json.Unmarshal(data, &svcs) == nil {
+			for _, s := range svcs {
+				for _, x := range s.Domains {
+					if strings.EqualFold(x, d) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	// brain-группы + autoroute + статический список xray (суффиксно)
+	for _, f := range []string{
+		"/etc/gateway/brain-services.json",
+		"/etc/gateway/brain-services-ciadpi.json",
+		"/etc/gateway/brain-services-zapret2.json",
+	} {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(strings.ToLower(string(raw)), "\""+d+"\"") {
+			return true
+		}
+	}
+	return false
+}
+
+func harvestCandidate(sni, ip string) {
+	d := strings.ToLower(strings.TrimSpace(sni))
+	if d == "" || knownToLists(d) {
+		return
+	}
+	harvestSeen.Lock()
+	if t, ok := harvestSeen.m[d]; ok && time.Since(t) < 6*time.Hour {
+		harvestSeen.Unlock()
+		return // не дребезжим: один домен — одна запись в 6 часов
+	}
+	harvestSeen.m[d] = time.Now()
+	if len(harvestSeen.m) > 5000 {
+		harvestSeen.m = map[string]time.Time{d: time.Now()}
+	}
+	harvestSeen.Unlock()
+	os.MkdirAll("/etc/gateway/observe", 0o755)
+	f, err := os.OpenFile("/etc/gateway/observe/sni-candidates.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s\t%s\n", d, ip)
 }
