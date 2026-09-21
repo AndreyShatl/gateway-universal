@@ -21,7 +21,7 @@ classify() { # <ip> -> service id или "" (по диапазонам)
 import ipaddress, sys
 ip = ipaddress.ip_address(sys.argv[1])
 ranges = {
-  "instagram": ["31.13.24.0/21","31.13.64.0/18","69.171.224.0/19","102.132.96.0/20","129.134.0.0/17","157.240.0.0/16","173.252.64.0/18","179.60.192.0/22","185.60.216.0/22","204.15.20.0/22"],
+  "instagram": ["31.13.24.0/21","31.13.64.0/18","69.171.224.0/19","102.132.96.0/20","129.134.0.0/17","157.240.0.0/16","173.252.64.0/18","179.60.192.0/22","185.60.216.0/22","204.15.20.0/22","87.229.142.0/23"], // 87.229.142/23 — живое наблюдение 2026-09-21: fna.fbcdn edge
   "discord":   ["162.159.128.0/17","109.200.192.0/19"],
   "youtube":   ["74.125.0.0/16","142.250.0.0/15","172.217.0.0/16","216.58.192.0/19","142.0.0.0/8","108.177.0.0/17","209.85.128.0/17","173.194.0.0/16","64.233.160.0/19","209.85.0.0/16"],
 }
@@ -98,3 +98,16 @@ else
   log "итог: добавлено=0 отклонено=$rejected (конфиг не трогаем)"
 fi
 echo "sni-harvest: добавлено=$added отклонено=$rejected ничейных=${#unowned[@]}"
+
+# QA-сводка конвейера (ТЗ: контроль качества одним взглядом)
+python3 - "$added" "$rejected" "${#unowned[@]}" <<'PYH'
+import json, sys, datetime
+path = "/etc/gateway/observe/pipeline-summary.json"
+try: d = json.load(open(path))
+except Exception: d = {}
+if d.get("date") != datetime.date.today().isoformat():
+    d = {"date": datetime.date.today().isoformat()}
+d["harvest"] = {"added": int(sys.argv[1]), "rejected": int(sys.argv[2]),
+                "unowned": int(sys.argv[3]), "at": datetime.datetime.now().isoformat(timespec="seconds")}
+json.dump(d, open(path, "w"), ensure_ascii=False, indent=1)
+PYH

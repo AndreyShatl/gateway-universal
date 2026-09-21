@@ -109,6 +109,7 @@ PYEOF
 }
 
 # --- youtube/discord/instagram: добавляем в zapret-services.json ---
+N_SVC_ADDED=0
 declare -A SVC_SOURCE=( [discord]=discord [instagram]=instagram [youtube]=youtube )
 services_changed=0
 for sid in "${!SVC_SOURCE[@]}"; do
@@ -118,6 +119,40 @@ for sid in "${!SVC_SOURCE[@]}"; do
     continue
   fi
   printf '%s\n' "$new_domains" > "$TMP/$sid.new"
+
+  # T-geosite-removals (2026-09-21, ТЗ п.7): сравнение с предыдущим снапшотом
+  # — домены, ИСЧЕЗНУВШИЕ из geosite. Политика: из списка сервиса убираем
+  # только тех, кто и резолвом мёртв (geosite иногда чистит живое); живых
+  # держим и логируем. Бэкап перед изменением.
+  PREV="/etc/gateway/observe/geosite-prev-$sid.txt"
+  if [ -s "$PREV" ]; then
+    gone=$(comm -23 <(sort -u "$PREV") <(sort -u "$TMP/$sid.new"))
+    if [ -n "$gone" ]; then
+      removed_dead=0; kept_alive=0
+      cp "$SERVICES" "$SERVICES.bak-actualize-$(date +%Y%m%d)" 2>/dev/null || true
+      echo "$gone" | while read -r gd; do
+        [ -n "$gd" ] || continue
+        if getent ahostsv4 "$gd" >/dev/null 2>&1; then
+          kept_alive=$((kept_alive+1))
+        else
+          python3 - "$SERVICES" "$sid" "$gd" <<'PYRM'
+import json, sys
+path, sid, dom = sys.argv[1:4]
+data = json.load(open(path))
+if not isinstance(data, list): data = data.get("services", data)
+for s in data:
+    if s.get("id") == sid:
+        s["domains"] = [d for d in s.get("domains", []) if d.lower() != dom.lower()]
+json.dump(data, open(path, "w"), ensure_ascii=False, indent=2)
+PYRM
+          removed_dead=$((removed_dead+1))
+          log "$sid: $gd исчез из geosite И мёртв резолвом — убран из списка"
+        fi
+      done
+      log "$sid: geosite-удаления: мёртвых снято=$removed_dead живых оставлено (резолв ок)"
+    fi
+  fi
+  sort -u "$TMP/$sid.new" > "$PREV"
   count=$(python3 - "$SERVICES" "$sid" "$TMP/$sid.new" <<'PYEOF'
 import json, sys
 services_path, sid, new_file = sys.argv[1:4]
@@ -144,6 +179,7 @@ PYEOF
 )
   if [ "${count:-0}" -gt 0 ] 2>/dev/null; then
     services_changed=1
+    N_SVC_ADDED=$((N_SVC_ADDED + count))
     log "$sid: +$count новых доменов из geosite:${SVC_SOURCE[$sid]}"
   else
     log "$sid: новых доменов нет"
@@ -206,3 +242,15 @@ else
 fi
 
 log "готово (services_changed=$services_changed)"
+# QA-сводка конвейера (ТЗ: контроль качества) — фактические цифры сегодняшнего прогона
+python3 - "$services_changed" "$N_SVC_ADDED" <<'PYSUM'
+import json, sys, datetime
+path = "/etc/gateway/observe/pipeline-summary.json"
+try: d = json.load(open(path))
+except Exception: d = {}
+if d.get("date") != datetime.date.today().isoformat():
+    d = {"date": datetime.date.today().isoformat()}
+d["actualize"] = {"changed": sys.argv[1] == "1", "svc_added": int(sys.argv[2] or 0),
+                  "at": datetime.datetime.now().isoformat(timespec="seconds")}
+json.dump(d, open(path, "w"), ensure_ascii=False, indent=1)
+PYSUM

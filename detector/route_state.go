@@ -90,10 +90,11 @@ type ObserveDecision struct {
 }
 
 type RouteSnapshot struct {
-	Generated    time.Time          `json:"generated"`
-	Totals       RouteTotals        `json:"totals"`
-	Destinations []DestinationState `json:"destinations"`
-	Decisions    []ObserveDecision  `json:"decisions,omitempty"` // заполняется в brain-observe
+	Generated     time.Time          `json:"generated"`
+	SharedDomains []string           `json:"shared_domains,omitempty"` // в списках >=2 сервисов (ТЗ)
+	Totals        RouteTotals        `json:"totals"`
+	Destinations  []DestinationState `json:"destinations"`
+	Decisions     []ObserveDecision  `json:"decisions,omitempty"` // заполняется в brain-observe
 }
 
 // --- сборка снапшота ---
@@ -338,6 +339,28 @@ func buildRouteSnapshot(checkCoverage bool) (*RouteSnapshot, []ObserveDecision) 
 		}
 	}
 	snap.Totals.VPSStatic += 0 // статические, уже перехваченные мозгом, учтены выше как local
+
+	// общие домены нескольких сервисов (ТЗ «Результат»: вести общий список)
+	{
+		svcData := gwdbServicesRaw()
+		owner := map[string]int{}
+		for _, doms := range svcData {
+			seen := map[string]bool{}
+			for _, dm := range doms {
+				dm = strings.ToLower(strings.TrimSpace(dm))
+				if dm != "" && !seen[dm] {
+					seen[dm] = true
+					owner[dm]++
+				}
+			}
+		}
+		for dm, n := range owner {
+			if n >= 2 {
+				snap.SharedDomains = append(snap.SharedDomains, dm)
+			}
+		}
+		sort.Strings(snap.SharedDomains)
+	}
 
 	snap.Destinations = make([]DestinationState, 0, len(union))
 	for _, s := range union {
@@ -775,6 +798,14 @@ type DigestShadow struct {
 	R2Still  int    `json:"r2_still"`
 }
 
+type DigestLists struct {
+	ActualizeChanged bool   `json:"actualize_changed"`
+	ActualizeSvcAdd  int    `json:"actualize_svc_added"`
+	HarvestAdded     int    `json:"harvest_added"`
+	HarvestUnowned   int    `json:"harvest_unowned"`
+	AsOf             string `json:"as_of"`
+}
+
 type DigestSystem struct {
 	DiskAvailPct      int      `json:"disk_avail_pct"`
 	MemAvailMB        int      `json:"mem_avail_mb"`
@@ -791,6 +822,7 @@ type DailyDigest struct {
 	Route     RouteTotals  `json:"route_totals"`
 	Shadow    DigestShadow `json:"shadow"`
 	System    DigestSystem `json:"system"`
+	Lists     DigestLists  `json:"lists,omitempty"`
 	Notes     []string     `json:"notes,omitempty"`
 }
 
@@ -883,6 +915,35 @@ func runDailyDigest() {
 	}
 	d.System.SilenceWatchdog = shellOut("systemctl", "is-active", "gateway-brain-silence-watchdog")
 
+	// --- QA-блок конвейера списков (ТЗ: контроль качества одним взглядом)
+	if raw, err := os.ReadFile(observeStateDir + "/pipeline-summary.json"); err == nil {
+		var ps struct {
+			Date      string `json:"date"`
+			Actualize *struct {
+				Changed bool   `json:"changed"`
+				SvcAdd  int    `json:"svc_added"`
+				At      string `json:"at"`
+			} `json:"actualize"`
+			Harvest *struct {
+				Added    int    `json:"added"`
+				Rejected int    `json:"rejected"`
+				Unowned  int    `json:"unowned"`
+				At       string `json:"at"`
+			} `json:"harvest"`
+		}
+		if json.Unmarshal(raw, &ps) == nil {
+			d.Lists.AsOf = ps.Date
+			if ps.Actualize != nil {
+				d.Lists.ActualizeChanged = ps.Actualize.Changed
+				d.Lists.ActualizeSvcAdd = ps.Actualize.SvcAdd
+			}
+			if ps.Harvest != nil {
+				d.Lists.HarvestAdded = ps.Harvest.Added
+				d.Lists.HarvestUnowned = ps.Harvest.Unowned
+			}
+		}
+	}
+
 	// --- инвариант QUIC DROP (инцидент 2026-09-07: правило-сирота потерялось) ---
 	quicDrop := false
 	if out := shellOut("sh", "-c", "iptables -S FORWARD 2>/dev/null | grep -c 'udp.*--dport 443 -j DROP'"); out != "" && atoiSafe(out) > 0 {
@@ -926,10 +987,31 @@ func runDailyDigest() {
 		d.Route.LocalZapret, d.Route.LocalCiadpi, d.Route.LocalZapret2, d.Route.VPSAutoDomain, d.Route.VPSAutoIP, d.Route.VPSStatic, d.Route.Conflicts)
 	fmt.Printf("SHADOW:    R1 открытых=%d (персистентных=%d, долечено=%d) | R2 переехали=%d остались=%d (отчёт %s)\n",
 		d.Shadow.R1Open, d.Shadow.R1Still, d.Shadow.R1Healed, d.Shadow.R2Moved, d.Shadow.R2Still, d.Shadow.AsOf)
+	fmt.Printf("СПИСКИ:   geosite изменён=%v (+%d доменов) | жнец: +%d мобильных, %d ничейных | сводка %s\n",
+		d.Lists.ActualizeChanged, d.Lists.ActualizeSvcAdd, d.Lists.HarvestAdded, d.Lists.HarvestUnowned, d.Lists.AsOf)
 	fmt.Printf("СИСТЕМА:   диск свободен %d%%, память доступна %dМБ, воркер=%v сторож=%s, failed=%v\n",
 		d.System.DiskAvailPct, d.System.MemAvailMB, d.System.BrainWorkerActive, d.System.SilenceWatchdog, d.System.FailedUnits)
 	for _, n := range d.Notes {
 		fmt.Printf("⚠ %s\n", n)
 	}
 	fmt.Printf("снапшот: %s | история: %s\n", digestFile, digestHistoryFile)
+}
+
+// gwdbServicesRaw — домены каждого сервиса (для поиска межсервисовых общих).
+func gwdbServicesRaw() [][]string {
+	data, err := os.ReadFile("/etc/gateway/zapret-services.json")
+	if err != nil {
+		return nil
+	}
+	var svcs []struct {
+		Domains []string `json:"domains"`
+	}
+	if json.Unmarshal(data, &svcs) != nil {
+		return nil
+	}
+	out := make([][]string, 0, len(svcs))
+	for _, s := range svcs {
+		out = append(out, s.Domains)
+	}
+	return out
 }
