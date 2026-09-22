@@ -43,15 +43,53 @@ for d in sorted(svc_domains):
     print(f"{d}\t{eng}\t{proto}\t{strat}")
 PY
 
-applied=0; skipped=0
+# T-batch-apply (2026-09-21): вместо brain-apply на каждый домен (каждый
+# вызов = полная пересборка группы, ~2 мин на слабом CPU) — вставляем домены
+# напрямую в state-JSON подходящих групп (та же proto+strategy), затем ОДНА
+# пересборка на движок (restore-*). Отдельным brain-apply — только домены,
+# для которых готовой группы нет (редко).
+applied=0; skipped=0; leftovers=""
 while IFS=$'\t' read -r d eng proto strat; do
   [ -n "$d" ] || continue
-  if bash "$APPLY" "$eng" "$d" "$proto" "$strat" >/dev/null 2>&1; then
+  n=$(python3 - "$eng" "$proto" "$strat" "$d" <<'PYB'
+import json, sys
+eng, proto, strat, dom = sys.argv[1:5]
+files = {"zapret":"/etc/gateway/brain-services.json",
+         "ciadpi":"/etc/gateway/brain-services-ciadpi.json",
+         "zapret2":"/etc/gateway/brain-services-zapret2.json"}
+path = files[eng]
+try: data = json.load(open(path))
+except Exception: print(0); raise SystemExit
+for g in data:
+    gstrat = g.get("strategy","")
+    if gstrat == strat and g.get("proto","tcp") == proto:
+        doms = [x.lower() for x in g.get("domains",[])]
+        if dom not in doms:
+            g.setdefault("domains",[]).append(dom)
+            json.dump(data, open(path,"w"), ensure_ascii=False, indent=2)
+        print(1); raise SystemExit
+print(0)
+PYB
+)
+  if [ "$n" = "1" ]; then
     applied=$((applied+1))
   else
-    skipped=$((skipped+1))
+    leftovers="$leftovers$d\t$eng\t$proto\t$strat\n"
   fi
 done < /tmp/ready-tasks.tsv
 rm -f /tmp/ready-tasks.tsv
+
+# одна пересборка на движок, где что-то добавили
+bash "$APPLY" restore >/dev/null 2>&1 &
+bash "$APPLY" restore-ciadpi >/dev/null 2>&1
+bash "$APPLY" restore-zapret2 >/dev/null 2>&1
+
+# хвост: домены без подходящей готовой группы — штатно поштучно
+if [ -n "$leftovers" ]; then
+  printf '%b' "$leftovers" | while IFS=$'\t' read -r d eng proto strat; do
+    [ -n "$d" ] || continue
+    bash "$APPLY" "$eng" "$d" "$proto" $strat >/dev/null 2>&1 && applied=$((applied+1)) || skipped=$((skipped+1))
+  done
+fi
 log "быстрое применение (${SID:-все сервисы}): применено=$applied ошибок=$skipped (без проб, из ночного кэша)"
 echo "apply-ready: применено=$applied ошибок=$skipped"

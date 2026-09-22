@@ -806,6 +806,12 @@ type DigestLists struct {
 	AsOf             string `json:"as_of"`
 }
 
+type DigestTraffic struct {
+	VPSSinceBoot   uint64  `json:"vps_bytes"`   // REDIRECT 12345/12347 + TPROXY (с момента последней пересборки правил)
+	TotalSinceBoot uint64  `json:"total_bytes"` // весь форвард LAN
+	SharePct       float64 `json:"share_pct"`
+}
+
 type DigestSystem struct {
 	DiskAvailPct      int      `json:"disk_avail_pct"`
 	MemAvailMB        int      `json:"mem_avail_mb"`
@@ -816,14 +822,15 @@ type DigestSystem struct {
 }
 
 type DailyDigest struct {
-	Generated time.Time    `json:"generated"`
-	Window    string       `json:"window"`
-	Brain     DigestBrain  `json:"brain"`
-	Route     RouteTotals  `json:"route_totals"`
-	Shadow    DigestShadow `json:"shadow"`
-	System    DigestSystem `json:"system"`
-	Lists     DigestLists  `json:"lists,omitempty"`
-	Notes     []string     `json:"notes,omitempty"`
+	Generated time.Time     `json:"generated"`
+	Window    string        `json:"window"`
+	Brain     DigestBrain   `json:"brain"`
+	Route     RouteTotals   `json:"route_totals"`
+	Shadow    DigestShadow  `json:"shadow"`
+	System    DigestSystem  `json:"system"`
+	Lists     DigestLists   `json:"lists,omitempty"`
+	Traffic   DigestTraffic `json:"traffic"`
+	Notes     []string      `json:"notes,omitempty"`
 }
 
 func firstLineOfFile(path string) string {
@@ -953,6 +960,47 @@ func runDailyDigest() {
 		d.Notes = append(d.Notes, "инвариант: глобальный DROP UDP/443 ОТСУТСТВОВЕТ — телефоны теряют видео (см. DECISIONS 2026-09-07); восстановить: zapret.sh start (теперь ensure-ит сам)")
 	}
 
+	// --- доля трафика через VPS (счётчики правил; обнуляются при пересборке
+	// правил — это доля "с последней пересборки", не с начала времён)
+	{
+		vpsBytes := uint64(0)
+		if out := shellOut("sh", "-c", `iptables -t nat -L PREROUTING -x -v 2>/dev/null | grep -E 'redir ports (12345|12347)|redirect 0.0.0.0:1234[567]' | awk '{s+=$2} END{print s}'`); out != "" {
+			vpsBytes = parseUintSafe(out)
+		}
+		if out := shellOut("sh", "-c", `iptables -t mangle -L PREROUTING -x -v 2>/dev/null | grep TPROXY | awk '{s+=$2} END{print s}'`); out != "" {
+			vpsBytes += parseUintSafe(out)
+		}
+		dpiBytes := uint64(0)
+		if out := shellOut("sh", "-c", `iptables -t nat -L PREROUTING -x -v 2>/dev/null | grep -E 'match-set brain' | awk '{s+=$2} END{print s}'`); out != "" {
+			dpiBytes = parseUintSafe(out)
+		}
+		totalBytes := vpsBytes + dpiBytes // знаменатель: VPS + DPI-группы + остальное
+		if out := shellOut("sh", "-c", `iptables -L FORWARD -x -v 2>/dev/null | awk 'NR>2{s+=$2} END{print s}'`); out != "" {
+			totalBytes += parseUintSafe(out)
+		}
+		// счётчики сбрасываются при пересборке правил в разное время — честная
+		// доля считается ДЕЛЬТОЙ с прошлого дайджеста (файл-снапшот)
+		type counters struct{ VPS, Total uint64 }
+		var prev counters
+		if raw, err := os.ReadFile(observeStateDir + "/traffic-prev.json"); err == nil {
+			json.Unmarshal(raw, &prev)
+		}
+		cur := counters{vpsBytes, totalBytes} // total = DPI-группы + остальной форвард (REDIRECT-пакеты FORWARD не проходят)
+		os.WriteFile(observeStateDir+"/traffic-prev.json", func() []byte {
+			b, _ := json.Marshal(cur)
+			return b
+		}(), 0o644)
+		dv, dt := cur.VPS, cur.Total
+		if cur.VPS >= prev.VPS && cur.Total >= prev.Total && cur.Total > prev.Total {
+			dv -= prev.VPS
+			dt -= prev.Total
+		}
+		d.Traffic.VPSSinceBoot, d.Traffic.TotalSinceBoot = dv, dt
+		if dt > 0 {
+			d.Traffic.SharePct = float64(dv) * 100.0 / float64(dt)
+		}
+	}
+
 	// --- авто-заметки: на что смотреть утром ---
 	if d.System.DiskAvailPct < 15 {
 		d.Notes = append(d.Notes, fmt.Sprintf("диск: свободно %d%% < 15%% — чистить (см. инцидент 26.08)", d.System.DiskAvailPct))
@@ -989,6 +1037,8 @@ func runDailyDigest() {
 		d.Shadow.R1Open, d.Shadow.R1Still, d.Shadow.R1Healed, d.Shadow.R2Moved, d.Shadow.R2Still, d.Shadow.AsOf)
 	fmt.Printf("СПИСКИ:   geosite изменён=%v (+%d доменов) | жнец: +%d мобильных, %d ничейных | сводка %s\n",
 		d.Lists.ActualizeChanged, d.Lists.ActualizeSvcAdd, d.Lists.HarvestAdded, d.Lists.HarvestUnowned, d.Lists.AsOf)
+	fmt.Printf("ТРАФИК:   через VPS %.1f%% (%s из %s с последней пересборки правил)\n",
+		d.Traffic.SharePct, humanBytes(d.Traffic.VPSSinceBoot), humanBytes(d.Traffic.TotalSinceBoot))
 	fmt.Printf("СИСТЕМА:   диск свободен %d%%, память доступна %dМБ, воркер=%v сторож=%s, failed=%v\n",
 		d.System.DiskAvailPct, d.System.MemAvailMB, d.System.BrainWorkerActive, d.System.SilenceWatchdog, d.System.FailedUnits)
 	for _, n := range d.Notes {
@@ -1014,4 +1064,27 @@ func gwdbServicesRaw() [][]string {
 		out = append(out, s.Domains)
 	}
 	return out
+}
+
+func parseUintSafe(s string) uint64 {
+	var n uint64
+	for _, c := range strings.TrimSpace(s) {
+		if c < '0' || c > '9' {
+			return n
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n
+}
+
+func humanBytes(b uint64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1fГБ", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1fМБ", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1fКБ", float64(b)/(1<<10))
+	}
+	return fmt.Sprintf("%dБ", b)
 }
