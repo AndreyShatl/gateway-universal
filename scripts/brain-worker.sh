@@ -28,6 +28,20 @@ IDLE=${IDLE:-5}
 FAKEDIR=${FAKEDIR:-/opt/zapret/files/fake}
 SERVICES=${SERVICES:-/etc/gateway/zapret-services.json}
 
+# T-ggc-ipidzero-pin (2026-09-22): единственная LOCAL-стратегия для GGC-видео
+# (googlevideo/gvt1), подтверждённая эталонным конфигом владельца на ПК
+# (zapret "general (ALT)", строка --filter-tcp=443 --hostlist=list-google.txt).
+# Решающий флаг — --ip-id=zero: обнуляет IP ID в инжектируемых фейк-пакетах,
+# чем ломает троттлинг провайдера на ДЛИТЕЛЬНОЙ передаче видео. Без него
+# рукопожатие проходит (превью грузятся), но sustained-поток душится (§8.3 —
+# изолированная проба solve.sh этого не видит: короткий curl не упирается в
+# троттлинг). Поэтому GGC-хосты НЕ отправляем в общий перебор (solve.sh выдаёт
+# пресеты без --ip-id=zero) — пинним сразу в эту стратегию. brain-apply сам
+# кладёт nat RETURN группы поверх gw_autoroute и добавляет в ipset широкие
+# CDN-диапазоны googlevideo + /24 наблюдаемых GGC-хостов (T-ggc-local-cache),
+# так что покрытие ротации IP автоматическое, по IP, без ручного выбора хостов.
+GGC_STRAT=${GGC_STRAT:---dpi-desync=fake,fakedsplit --dpi-desync-repeats=6 --dpi-desync-fooling=ts --dpi-desync-fakedsplit-pattern=0x00 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin --ip-id=zero}
+
 # T-vps-pin (2026-08-16): пользователь может закрепить сервис (discord/
 # youtube/instagram) целиком на VPS кнопкой в UI — mode="vps" в
 # zapret-services.json уже управляет статическим xray-роутингом
@@ -87,6 +101,43 @@ ggc_delivery_host() {
     googlevideo.com|*.googlevideo.com|gvt1.com|*.gvt1.com) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# T-nightly-respect-quarantine (2026-09-22): карантин живых провалов —
+# документированный механизм (см. комментарий T-pinned-fullsolve ниже и
+# detector/live_retrigger.go), который должен ловить DPI-стратегии,
+# «работающие» только для изолированного curl-теста и не пробивающие реального
+# клиента (грабля §8.3, кейс updates.discord.com). Семантика 1:1 с Go:
+# >=3 живых провала одного домена за 24ч = активный карантин. Днём его
+# применяет детектор (forceVPSInstant), но ночной reeval про карантин не знал —
+# отсюда и повторяющиеся отказы (youtube.*: 3 страйка, ночью «LOCAL
+# подтверждён, fallback снят», реальный клиент не работает).
+live_fail_quarantined() { # <domain> -> 0 если домен в активном карантине (>=3 живых провала за 24ч)
+  python3 - "$1" <<'PYQ' 2>/dev/null
+import json, re, sys
+from datetime import datetime, timedelta, timezone
+dom = sys.argv[1].strip().lower()
+try:
+    m = json.load(open("/etc/gateway/observe/live-fail-strikes.json"))
+except Exception:
+    raise SystemExit(1)
+r = m.get(dom)
+if not isinstance(r, dict):
+    raise SystemExit(1)
+try:
+    count = int(r.get("count", 0))
+    # Go пишет RFC3339Nano (9 цифр дроби); нормализуем до микросекунд, чтобы
+    # fromisoformat работал и на python < 3.11 — иначе исключение и молчаливый
+    # no-op всей защиты.
+    ts = re.sub(r"\.(\d{6})\d+", r".\1", str(r["last_strike"]))
+    last = datetime.fromisoformat(ts)
+except Exception:
+    raise SystemExit(1)
+if last.tzinfo is None:
+    last = last.replace(tzinfo=timezone.utc)
+quarantined = count >= 3 and (datetime.now(timezone.utc) - last) < timedelta(hours=24)
+raise SystemExit(0 if quarantined else 1)
+PYQ
 }
 
 # После первого LOCAL-успеха autoroute нарочно остаётся как VPS-fallback.
@@ -210,6 +261,24 @@ process_domain() {
   local domain=$1 source=$2
   local proto; if [ "$source" = "quic-no-response" ]; then proto=udp; else proto=tcp; fi
 
+  # 0.0. T-ggc-ipidzero-pin (2026-09-22): GGC-видео (googlevideo/gvt1) по TCP —
+  #      ВСЕГДА пинним в проверенную стратегию с --ip-id=zero, минуя общий
+  #      перебор. Причина: GGC недостижим через VPS (§8.2 — провайдерский кэш,
+  #      TLS режется на границе), значит LOCAL — единственный путь; а единственный
+  #      LOCAL-вариант, пробивающий ДЛИТЕЛЬНОЕ видео (не только превью), —
+  #      --ip-id=zero (см. определение GGC_STRAT). solve.sh в переборе выдаёт
+  #      пресеты без этого флага → «превью есть, видео нет». Пин идемпотентен:
+  #      brain-apply ensure_group переиспользует одну группу (proto+strategy),
+  #      так что все ротирующиеся rr*---sn-*.gvt1/googlevideo-хосты стекаются в
+  #      неё же, а её ipset покрывает ротацию по IP (CDN-диапазоны + /24).
+  #      VPS-фолбэк сохраняется (T-parallel-fallback) для новых непокрытых IP.
+  #      UDP (source=quic-no-response) не трогаем — там QUIC-фейк, своя группа.
+  if [ "$proto" = tcp ] && ggc_delivery_host "$domain"; then
+    bash "$APPLY" zapret "$domain" tcp $GGC_STRAT >/dev/null 2>&1
+    log "🎞 $domain — GGC-пин: применена LOCAL-стратегия --ip-id=zero (длительное видео без троттлинга)"
+    return 0
+  fi
+
   # 0. Сервис закреплён на VPS кнопкой в UI (T-vps-pin) — никакого DPI-обхода,
   #    даже пробовать не нужно. Снимаем любую существующую группу (на случай
   #    гонки: пин поставили ПОСЛЕ того, как домен уже получил DPI-стратегию)
@@ -246,11 +315,44 @@ process_domain() {
     log "🔎 $domain — пиннед-сервис: VPS-подложка ensured, запускаем полный поиск LOCAL (fallback остаётся)"
   fi
 
+  # 0.5. T-nightly-respect-quarantine (2026-09-22): домен в АКТИВНОМ карантине
+  #      живых провалов (>=3 реальных провала клиента за 24ч) не назначаем и не
+  #      подтверждаем на LOCAL — изолированная проба (шаги 1-3) структурно не
+  #      видит разницу TLS-отпечатков и «подтверждает» стратегию, не работающую у
+  #      живого клиента (§8.3). Гарантируем VPS (идемпотентно: уже-на-VPS
+  #      пропускается без flush conntrack) и выходим — карантин истечёт через 24ч,
+  #      и следующая ночь даст DPI ещё один шанс. Исключения: source=auto (явная
+  #      кнопка владельца переопределяет всё) и GGC-хосты googlevideo/gvt1
+  #      (недостижимы через VPS — для них LOCAL единственный путь).
+  if [ "$source" != "auto" ] && ! ggc_delivery_host "$domain" && live_fail_quarantined "$domain"; then
+    bash "$APPLY" vps "$domain" >/dev/null 2>&1
+    log "⛔ $domain — активный карантин живых провалов (>=3/24ч): LOCAL не применяем, остаётся на VPS"
+    return 0
+  fi
+
   # 1. Домен уже в zapret-группе, ИЛИ ciadpi-группе, ИЛИ zapret2-группе (взаимно-
   #    исключающе — brain-apply.sh сам отцепляет домен от «чужого» движка при
   #    переносе) — сначала проверить, что ЕЁ стратегия ещё работает.
   local cur cur_gid cur_proto cur_strat ccur ccur_gid ccur_strat zcur zcur_gid zcur_strat
   cur=$(bash "$APPLY" group-of "$domain" 2>/dev/null)
+  # T-ggc-tcp-coverage (2026-09-22): GGC-хост (googlevideo/gvt1), у которого есть
+  # группа ТОЛЬКО под UDP/QUIC, формально выглядит «решённым» — и шаг 1 ниже на
+  # этом успокаивался, никогда не подбирая TCP-стратегию. Но реальный клиент тянет
+  # видео по TCP (QUIC на шлюзе глобально дропается, кроме исключений), а TCP-путь
+  # GGC через VPS структурно мёртв (§8.2 — провайдерский кэш недостижим с VPS,
+  # TLS режется на границе). В итоге IP таких хостов оставались в gw_autoroute →
+  # REDIRECT :12347 → VPS → «превью есть, видео нет». Для GGC требуем группу ИМЕННО
+  # нужного протокола: UDP-группа не закрывает TCP-потребность → сбрасываем cur и
+  # падаем в поиск TCP-стратегии (brain-apply при успехе даст nat RETURN выше
+  # gw_autoroute + /24-покрытие T-ggc-local-cache, VPS останется dormant-fallback).
+  # source=quic-no-response (proto=udp) не трогаем — там UDP-группа и есть цель.
+  if [ -n "$cur" ] && [ "$proto" = tcp ] && ggc_delivery_host "$domain"; then
+    cur_proto=$(echo "$cur" | cut -f2)
+    if [ "$cur_proto" != tcp ]; then
+      log "🎞 $domain — GGC: есть только $cur_proto-группа, а видео идёт по TCP → ищу TCP-стратегию"
+      cur=""
+    fi
+  fi
   if [ -n "$cur" ]; then
     cur_gid=$(echo "$cur" | cut -f1); cur_proto=$(echo "$cur" | cut -f2); cur_strat=$(echo "$cur" | cut -f3)
     if [ -n "$cur_strat" ]; then

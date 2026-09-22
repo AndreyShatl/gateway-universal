@@ -42,6 +42,41 @@ IPSET_PREFIX_ZAPRET2=brainz2_
 
 log() { echo "$(date '+%F %T') [refresh-ips] $*" >> "$LOG"; }
 
+# T-ggc-observed-harvest (2026-09-22): системное закрытие грабли «GGC виден
+# только клиенту». Провайдерские кэши Google (rr*---sn-*.googlevideo.com /
+# *.gvt1.com) отдаются РЕАЛЬНОМУ клиенту в локальных диапазонах провайдера
+# (найдено живьём: 128.75.236.0/24, 89.113.122.0/24, 85.249.244.0/24,
+# 85.249.245.0/24, 195.239.44.0/24 — кластер sn-8ph2xajvh). Шлюзовой getent
+# их НЕ возвращает: GGC выбирается по подсети клиента (EDNS Client Subnet),
+# поэтому наш резолв даёт публичные 173.194.x — и refresh-ips/getent-ветка
+# T-ggc-local-cache эти IP в принципе не видит. Клиент уходит на незнакомый
+# IP мимо ipset → nat не RETURN → трафик падает в xray/VPS, а GGC через VPS
+# мёртв (§8.2) → «превью есть, видео нет».
+# Детектор УЖЕ пишет реальные client-side пары «domain<TAB>ip» в
+# sni-candidates.log. Берём оттуда IP именно GGC-хостов, кладём их /24 в
+# ПЕРСИСТЕНТНЫЙ накопительный файл: он переживает ребут (rebuild_group_ipset
+# в brain-apply.sh читает его) и ночную очистку candidates (brain-sni-harvest).
+# Чужие домены в тех же сетях (напр. torgtenderai.ru) не трогаем — фильтр по
+# суффиксу googlevideo.com/gvt1.com.
+GGC_OBS=/etc/gateway/ggc-observed-cidrs
+CAND=${CAND:-/etc/gateway/observe/sni-candidates.log}
+harvest_ggc_observed() {
+  [ -f "$CAND" ] || return 0
+  local tmp before after
+  tmp=$(mktemp)
+  cat "$GGC_OBS" 2>/dev/null > "$tmp"
+  before=$(sort -u "$tmp" | grep -c . 2>/dev/null || echo 0)
+  awk -F'\t' '{h=tolower($1)} h ~ /(^|\.)googlevideo\.com$/ || h ~ /(^|\.)gvt1\.com$/ {print $2}' "$CAND" \
+    | awk -F. 'NF==4 {a=$1+0; if(a==0||a==10||a==127||(a==172&&$2+0>=16&&$2+0<=31)||($1+0==192&&$2+0==168)||($1+0==169&&$2+0==254)) next; print $1"."$2"."$3".0/24"}' >> "$tmp"
+  sort -u "$tmp" -o "$GGC_OBS"
+  after=$(grep -c . "$GGC_OBS" 2>/dev/null || echo 0)
+  rm -f "$tmp"
+  [ "$after" -gt "$before" ] && log "GGC-harvest: +$((after-before)) новых /24 из живого клиентского трафика (всего $after)"
+  return 0
+}
+harvest_ggc_observed
+
+
 # T-cdn-refresh-deep-log (2026-08-18) — по просьбе пользователя: тестируем
 # интервал 2 минуты, для этого нужна возможность реально разобрать, что
 # происходит на каждом цикле (какие IP реально НОВЫЕ, не просто "прогнали
@@ -86,6 +121,11 @@ refresh_state_file() { # <state.json> <ipset-prefix>
               ;;
           esac
         done
+        # T-ggc-observed-harvest (2026-09-22): добавить /24, наблюдаемые у
+        # РЕАЛЬНОГО клиента (локальные кэши провайдера, невидимые getent'у).
+        [ -f "$GGC_OBS" ] && while read -r cidr; do
+          [ -n "$cidr" ] && ipset add "$ipset" "$cidr" -exist 2>/dev/null
+        done < "$GGC_OBS"
         ;;
     esac
     total_groups=$((total_groups+1))

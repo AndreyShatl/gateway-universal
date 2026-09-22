@@ -291,10 +291,11 @@ rebuild_group_ipset() { # <ipset> <domain...>
   # берём /24 каждого наблюдаемого video-host в ту же группу. Это достаточно
   # узко, чтобы не перехватывать всю сеть провайдера, и покрывает ротацию IP
   # внутри кластера. Никакие другие домены и сети этим кодом не расширяются.
-  local ggc_ip ggc_cidr
+  local ggc_ip ggc_cidr ggc_group=0
   for d in "$@"; do
     case "$d" in
       googlevideo.com|*.googlevideo.com|gvt1.com|*.gvt1.com)
+        ggc_group=1
         while read -r ggc_ip; do
           [ -n "$ggc_ip" ] || continue
           ggc_cidr=$(awk -F. 'NF==4 {print $1 "." $2 "." $3 ".0/24"}' <<< "$ggc_ip")
@@ -303,6 +304,20 @@ rebuild_group_ipset() { # <ipset> <domain...>
         ;;
     esac
   done
+
+  # T-ggc-observed-harvest (2026-09-22): getent выше даёт только ПУБЛИЧНЫЕ
+  # Google-IP — локальные кэши провайдера (sn-8ph2xajvh: 128.75.236.0/24,
+  # 85.249.244.0/24 и т.д.) он не возвращает, т.к. GGC выбирается по подсети
+  # КЛИЕНТА (EDNS). Эти /24 harvesting'ом из живого клиентского трафика
+  # (detector → sni-candidates.log) складывает в персистентный накопитель
+  # brain-refresh-ips.sh; читаем его здесь, чтобы покрытие GGC возвращалось
+  # после ребута (restore бежит до/без свежего резолва) и не зависело от того,
+  # какие IP сегодня отдаёт наш резолвер. Только для групп с GGC-хостами.
+  if [ "$ggc_group" = 1 ] && [ -f /etc/gateway/ggc-observed-cidrs ]; then
+    while read -r ggc_cidr; do
+      [ -n "$ggc_cidr" ] && ipset add "$ipset" "$ggc_cidr" -exist
+    done < /etc/gateway/ggc-observed-cidrs
+  fi
 }
 
 # ensure_group — найти группу с этой proto+strategy, иначе создать (очередь+правила+
