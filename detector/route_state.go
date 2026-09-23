@@ -90,10 +90,11 @@ type ObserveDecision struct {
 }
 
 type RouteSnapshot struct {
-	Generated    time.Time          `json:"generated"`
-	Totals       RouteTotals        `json:"totals"`
-	Destinations []DestinationState `json:"destinations"`
-	Decisions    []ObserveDecision  `json:"decisions,omitempty"` // заполняется в brain-observe
+	Generated     time.Time          `json:"generated"`
+	SharedDomains []string           `json:"shared_domains,omitempty"` // в списках >=2 сервисов (ТЗ)
+	Totals        RouteTotals        `json:"totals"`
+	Destinations  []DestinationState `json:"destinations"`
+	Decisions     []ObserveDecision  `json:"decisions,omitempty"` // заполняется в brain-observe
 }
 
 // --- сборка снапшота ---
@@ -338,6 +339,28 @@ func buildRouteSnapshot(checkCoverage bool) (*RouteSnapshot, []ObserveDecision) 
 		}
 	}
 	snap.Totals.VPSStatic += 0 // статические, уже перехваченные мозгом, учтены выше как local
+
+	// общие домены нескольких сервисов (ТЗ «Результат»: вести общий список)
+	{
+		svcData := gwdbServicesRaw()
+		owner := map[string]int{}
+		for _, doms := range svcData {
+			seen := map[string]bool{}
+			for _, dm := range doms {
+				dm = strings.ToLower(strings.TrimSpace(dm))
+				if dm != "" && !seen[dm] {
+					seen[dm] = true
+					owner[dm]++
+				}
+			}
+		}
+		for dm, n := range owner {
+			if n >= 2 {
+				snap.SharedDomains = append(snap.SharedDomains, dm)
+			}
+		}
+		sort.Strings(snap.SharedDomains)
+	}
 
 	snap.Destinations = make([]DestinationState, 0, len(union))
 	for _, s := range union {
@@ -775,6 +798,20 @@ type DigestShadow struct {
 	R2Still  int    `json:"r2_still"`
 }
 
+type DigestLists struct {
+	ActualizeChanged bool   `json:"actualize_changed"`
+	ActualizeSvcAdd  int    `json:"actualize_svc_added"`
+	HarvestAdded     int    `json:"harvest_added"`
+	HarvestUnowned   int    `json:"harvest_unowned"`
+	AsOf             string `json:"as_of"`
+}
+
+type DigestTraffic struct {
+	VPSSinceBoot   uint64  `json:"vps_bytes"`   // REDIRECT 12345/12347 + TPROXY (с момента последней пересборки правил)
+	TotalSinceBoot uint64  `json:"total_bytes"` // весь форвард LAN
+	SharePct       float64 `json:"share_pct"`
+}
+
 type DigestSystem struct {
 	DiskAvailPct      int      `json:"disk_avail_pct"`
 	MemAvailMB        int      `json:"mem_avail_mb"`
@@ -785,13 +822,15 @@ type DigestSystem struct {
 }
 
 type DailyDigest struct {
-	Generated time.Time    `json:"generated"`
-	Window    string       `json:"window"`
-	Brain     DigestBrain  `json:"brain"`
-	Route     RouteTotals  `json:"route_totals"`
-	Shadow    DigestShadow `json:"shadow"`
-	System    DigestSystem `json:"system"`
-	Notes     []string     `json:"notes,omitempty"`
+	Generated time.Time     `json:"generated"`
+	Window    string        `json:"window"`
+	Brain     DigestBrain   `json:"brain"`
+	Route     RouteTotals   `json:"route_totals"`
+	Shadow    DigestShadow  `json:"shadow"`
+	System    DigestSystem  `json:"system"`
+	Lists     DigestLists   `json:"lists,omitempty"`
+	Traffic   DigestTraffic `json:"traffic"`
+	Notes     []string      `json:"notes,omitempty"`
 }
 
 func firstLineOfFile(path string) string {
@@ -883,6 +922,35 @@ func runDailyDigest() {
 	}
 	d.System.SilenceWatchdog = shellOut("systemctl", "is-active", "gateway-brain-silence-watchdog")
 
+	// --- QA-блок конвейера списков (ТЗ: контроль качества одним взглядом)
+	if raw, err := os.ReadFile(observeStateDir + "/pipeline-summary.json"); err == nil {
+		var ps struct {
+			Date      string `json:"date"`
+			Actualize *struct {
+				Changed bool   `json:"changed"`
+				SvcAdd  int    `json:"svc_added"`
+				At      string `json:"at"`
+			} `json:"actualize"`
+			Harvest *struct {
+				Added    int    `json:"added"`
+				Rejected int    `json:"rejected"`
+				Unowned  int    `json:"unowned"`
+				At       string `json:"at"`
+			} `json:"harvest"`
+		}
+		if json.Unmarshal(raw, &ps) == nil {
+			d.Lists.AsOf = ps.Date
+			if ps.Actualize != nil {
+				d.Lists.ActualizeChanged = ps.Actualize.Changed
+				d.Lists.ActualizeSvcAdd = ps.Actualize.SvcAdd
+			}
+			if ps.Harvest != nil {
+				d.Lists.HarvestAdded = ps.Harvest.Added
+				d.Lists.HarvestUnowned = ps.Harvest.Unowned
+			}
+		}
+	}
+
 	// --- инвариант QUIC DROP (инцидент 2026-09-07: правило-сирота потерялось) ---
 	quicDrop := false
 	if out := shellOut("sh", "-c", "iptables -S FORWARD 2>/dev/null | grep -c 'udp.*--dport 443 -j DROP'"); out != "" && atoiSafe(out) > 0 {
@@ -890,6 +958,47 @@ func runDailyDigest() {
 	}
 	if !quicDrop {
 		d.Notes = append(d.Notes, "инвариант: глобальный DROP UDP/443 ОТСУТСТВОВЕТ — телефоны теряют видео (см. DECISIONS 2026-09-07); восстановить: zapret.sh start (теперь ensure-ит сам)")
+	}
+
+	// --- доля трафика через VPS (счётчики правил; обнуляются при пересборке
+	// правил — это доля "с последней пересборки", не с начала времён)
+	{
+		vpsBytes := uint64(0)
+		if out := shellOut("sh", "-c", `iptables -t nat -L PREROUTING -x -v 2>/dev/null | grep -E 'redir ports (12345|12347)|redirect 0.0.0.0:1234[567]' | awk '{s+=$2} END{print s}'`); out != "" {
+			vpsBytes = parseUintSafe(out)
+		}
+		if out := shellOut("sh", "-c", `iptables -t mangle -L PREROUTING -x -v 2>/dev/null | grep TPROXY | awk '{s+=$2} END{print s}'`); out != "" {
+			vpsBytes += parseUintSafe(out)
+		}
+		dpiBytes := uint64(0)
+		if out := shellOut("sh", "-c", `iptables -t nat -L PREROUTING -x -v 2>/dev/null | grep -E 'match-set brain' | awk '{s+=$2} END{print s}'`); out != "" {
+			dpiBytes = parseUintSafe(out)
+		}
+		totalBytes := vpsBytes + dpiBytes // знаменатель: VPS + DPI-группы + остальное
+		if out := shellOut("sh", "-c", `iptables -L FORWARD -x -v 2>/dev/null | awk 'NR>2{s+=$2} END{print s}'`); out != "" {
+			totalBytes += parseUintSafe(out)
+		}
+		// счётчики сбрасываются при пересборке правил в разное время — честная
+		// доля считается ДЕЛЬТОЙ с прошлого дайджеста (файл-снапшот)
+		type counters struct{ VPS, Total uint64 }
+		var prev counters
+		if raw, err := os.ReadFile(observeStateDir + "/traffic-prev.json"); err == nil {
+			json.Unmarshal(raw, &prev)
+		}
+		cur := counters{vpsBytes, totalBytes} // total = DPI-группы + остальной форвард (REDIRECT-пакеты FORWARD не проходят)
+		os.WriteFile(observeStateDir+"/traffic-prev.json", func() []byte {
+			b, _ := json.Marshal(cur)
+			return b
+		}(), 0o644)
+		dv, dt := cur.VPS, cur.Total
+		if cur.VPS >= prev.VPS && cur.Total >= prev.Total && cur.Total > prev.Total {
+			dv -= prev.VPS
+			dt -= prev.Total
+		}
+		d.Traffic.VPSSinceBoot, d.Traffic.TotalSinceBoot = dv, dt
+		if dt > 0 {
+			d.Traffic.SharePct = float64(dv) * 100.0 / float64(dt)
+		}
 	}
 
 	// --- авто-заметки: на что смотреть утром ---
@@ -926,10 +1035,56 @@ func runDailyDigest() {
 		d.Route.LocalZapret, d.Route.LocalCiadpi, d.Route.LocalZapret2, d.Route.VPSAutoDomain, d.Route.VPSAutoIP, d.Route.VPSStatic, d.Route.Conflicts)
 	fmt.Printf("SHADOW:    R1 открытых=%d (персистентных=%d, долечено=%d) | R2 переехали=%d остались=%d (отчёт %s)\n",
 		d.Shadow.R1Open, d.Shadow.R1Still, d.Shadow.R1Healed, d.Shadow.R2Moved, d.Shadow.R2Still, d.Shadow.AsOf)
+	fmt.Printf("СПИСКИ:   geosite изменён=%v (+%d доменов) | жнец: +%d мобильных, %d ничейных | сводка %s\n",
+		d.Lists.ActualizeChanged, d.Lists.ActualizeSvcAdd, d.Lists.HarvestAdded, d.Lists.HarvestUnowned, d.Lists.AsOf)
+	fmt.Printf("ТРАФИК:   через VPS %.1f%% (%s из %s с последней пересборки правил)\n",
+		d.Traffic.SharePct, humanBytes(d.Traffic.VPSSinceBoot), humanBytes(d.Traffic.TotalSinceBoot))
 	fmt.Printf("СИСТЕМА:   диск свободен %d%%, память доступна %dМБ, воркер=%v сторож=%s, failed=%v\n",
 		d.System.DiskAvailPct, d.System.MemAvailMB, d.System.BrainWorkerActive, d.System.SilenceWatchdog, d.System.FailedUnits)
 	for _, n := range d.Notes {
 		fmt.Printf("⚠ %s\n", n)
 	}
 	fmt.Printf("снапшот: %s | история: %s\n", digestFile, digestHistoryFile)
+}
+
+// gwdbServicesRaw — домены каждого сервиса (для поиска межсервисовых общих).
+func gwdbServicesRaw() [][]string {
+	data, err := os.ReadFile("/etc/gateway/zapret-services.json")
+	if err != nil {
+		return nil
+	}
+	var svcs []struct {
+		Domains []string `json:"domains"`
+	}
+	if json.Unmarshal(data, &svcs) != nil {
+		return nil
+	}
+	out := make([][]string, 0, len(svcs))
+	for _, s := range svcs {
+		out = append(out, s.Domains)
+	}
+	return out
+}
+
+func parseUintSafe(s string) uint64 {
+	var n uint64
+	for _, c := range strings.TrimSpace(s) {
+		if c < '0' || c > '9' {
+			return n
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n
+}
+
+func humanBytes(b uint64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1fГБ", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1fМБ", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1fКБ", float64(b)/(1<<10))
+	}
+	return fmt.Sprintf("%dБ", b)
 }

@@ -89,6 +89,43 @@ ggc_delivery_host() {
   esac
 }
 
+# T-nightly-respect-quarantine (2026-09-22): карантин живых провалов —
+# документированный механизм (см. комментарий T-pinned-fullsolve ниже и
+# detector/live_retrigger.go), который должен ловить DPI-стратегии,
+# «работающие» только для изолированного curl-теста и не пробивающие реального
+# клиента (грабля §8.3, кейс updates.discord.com). Семантика 1:1 с Go:
+# >=3 живых провала одного домена за 24ч = активный карантин. Днём его
+# применяет детектор (forceVPSInstant), но ночной reeval про карантин не знал —
+# отсюда и повторяющиеся отказы (youtube.*: 3 страйка, ночью «LOCAL
+# подтверждён, fallback снят», реальный клиент не работает).
+live_fail_quarantined() { # <domain> -> 0 если домен в активном карантине (>=3 живых провала за 24ч)
+  python3 - "$1" <<'PYQ' 2>/dev/null
+import json, re, sys
+from datetime import datetime, timedelta, timezone
+dom = sys.argv[1].strip().lower()
+try:
+    m = json.load(open("/etc/gateway/observe/live-fail-strikes.json"))
+except Exception:
+    raise SystemExit(1)
+r = m.get(dom)
+if not isinstance(r, dict):
+    raise SystemExit(1)
+try:
+    count = int(r.get("count", 0))
+    # Go пишет RFC3339Nano (9 цифр дроби); нормализуем до микросекунд, чтобы
+    # fromisoformat работал и на python < 3.11 — иначе исключение и молчаливый
+    # no-op всей защиты.
+    ts = re.sub(r"\.(\d{6})\d+", r".\1", str(r["last_strike"]))
+    last = datetime.fromisoformat(ts)
+except Exception:
+    raise SystemExit(1)
+if last.tzinfo is None:
+    last = last.replace(tzinfo=timezone.utc)
+quarantined = count >= 3 and (datetime.now(timezone.utc) - last) < timedelta(hours=24)
+raise SystemExit(0 if quarantined else 1)
+PYQ
+}
+
 # После первого LOCAL-успеха autoroute нарочно остаётся как VPS-fallback.
 # Только ночной reeval подтверждает, что локальная стратегия не была разовой
 # удачей, и снимает fallback. Это даёт CDN время пережить ротацию edge-IP.
@@ -244,6 +281,21 @@ process_domain() {
     # поиск с сохранением fallback). vps-touch не делаем — путь не «конечный».
     bash "$APPLY" vps-fallback "$domain" >/dev/null 2>&1
     log "🔎 $domain — пиннед-сервис: VPS-подложка ensured, запускаем полный поиск LOCAL (fallback остаётся)"
+  fi
+
+  # 0.5. T-nightly-respect-quarantine (2026-09-22): домен в АКТИВНОМ карантине
+  #      живых провалов (>=3 реальных провала клиента за 24ч) не назначаем и не
+  #      подтверждаем на LOCAL — изолированная проба (шаги 1-3) структурно не
+  #      видит разницу TLS-отпечатков и «подтверждает» стратегию, не работающую у
+  #      живого клиента (§8.3). Гарантируем VPS (идемпотентно: уже-на-VPS
+  #      пропускается без flush conntrack) и выходим — карантин истечёт через 24ч,
+  #      и следующая ночь даст DPI ещё один шанс. Исключения: source=auto (явная
+  #      кнопка владельца переопределяет всё) и GGC-хосты googlevideo/gvt1
+  #      (недостижимы через VPS — для них LOCAL единственный путь).
+  if [ "$source" != "auto" ] && ! ggc_delivery_host "$domain" && live_fail_quarantined "$domain"; then
+    bash "$APPLY" vps "$domain" >/dev/null 2>&1
+    log "⛔ $domain — активный карантин живых провалов (>=3/24ч): LOCAL не применяем, остаётся на VPS"
+    return 0
   fi
 
   # 1. Домен уже в zapret-группе, ИЛИ ciadpi-группе, ИЛИ zapret2-группе (взаимно-
